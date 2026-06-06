@@ -232,3 +232,215 @@ async function asignarClusters(nuevos: NoticiaInsert[]): Promise<void> {
     }
   }
 }
+
+// =============================================================================
+// Fase 4 — Detección de menciones
+// =============================================================================
+
+export interface KeywordActivaRow {
+  keyword_id: string;
+  cliente_id: string | null;
+  keyword: string;
+  alias_o_variantes: string | null;
+  tipo_keyword: string;
+  regla: string | null;
+  contexto_incluir: string | null;
+  contexto_excluir: string | null;
+  alerta: boolean;
+}
+
+/** Lee las keywords activas para la detección. */
+export async function getKeywordsActivas(): Promise<KeywordActivaRow[]> {
+  const { data, error } = await getSupabase()
+    .from('keywords')
+    .select(
+      'keyword_id, cliente_id, keyword, alias_o_variantes, tipo_keyword, regla, contexto_incluir, contexto_excluir, alerta',
+    )
+    .eq('activa', true);
+  if (error) throw new Error(`No se pudieron leer keywords activas: ${error.message}`);
+  return (data ?? []) as unknown as KeywordActivaRow[];
+}
+
+export interface NoticiaScanRow {
+  noticia_id: string;
+  medio_id: string | null;
+  titulo: string | null;
+  subtitulo: string | null;
+  resumen: string | null;
+  texto_extraido: string | null;
+  seccion: string | null;
+  medio_nombre: string | null;
+}
+
+/** Lee noticias aún no analizadas para menciones (las pendientes). */
+export async function getNoticiasPendientes(limit: number): Promise<NoticiaScanRow[]> {
+  const { data, error } = await getSupabase()
+    .from('noticias')
+    .select(
+      'noticia_id, medio_id, titulo, subtitulo, resumen, texto_extraido, seccion, medios(nombre_medio)',
+    )
+    .eq('menciones_procesado', false)
+    .order('created_at', { ascending: true })
+    .limit(limit);
+  if (error) throw new Error(`No se pudieron leer noticias pendientes: ${error.message}`);
+
+  return (data ?? []).map((row: any) => ({
+    noticia_id: row.noticia_id,
+    medio_id: row.medio_id,
+    titulo: row.titulo,
+    subtitulo: row.subtitulo,
+    resumen: row.resumen,
+    texto_extraido: row.texto_extraido,
+    seccion: row.seccion,
+    medio_nombre: row.medios?.nombre_medio ?? null,
+  }));
+}
+
+export interface MencionInsert {
+  noticia_id: string;
+  cliente_id: string | null;
+  keyword_id: string;
+  keyword: string;
+  texto_match: string | null;
+  tipo_match: string;
+  score_relevancia: number | null;
+  requiere_alerta: boolean;
+  estado_revision: string;
+}
+
+/** Inserta menciones evitando duplicados (UNIQUE noticia_id, keyword_id). */
+export async function insertMenciones(rows: MencionInsert[]): Promise<number> {
+  if (rows.length === 0) return 0;
+  const { error } = await getSupabase()
+    .from('menciones')
+    .upsert(rows as never[], { onConflict: 'noticia_id,keyword_id', ignoreDuplicates: true });
+  if (error) throw new Error(`Inserción de menciones falló: ${error.message}`);
+  return rows.length;
+}
+
+/** Marca noticias como ya analizadas para menciones. */
+export async function markNoticiasProcesadas(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const { error } = await getSupabase()
+    .from('noticias')
+    .update({ menciones_procesado: true })
+    .in('noticia_id', ids);
+  if (error) throw new Error(`No se pudo marcar noticias procesadas: ${error.message}`);
+}
+
+// =============================================================================
+// Fase 5 — Exportación a Sheets
+// =============================================================================
+
+export interface MencionExportRow {
+  mencion_id: string;
+  noticia_id: string;
+  fecha_publicacion: string | null;
+  fecha_captura: string | null;
+  cliente: string | null;
+  keyword: string | null;
+  medio: string | null;
+  estado: string | null;
+  region: string | null;
+  titulo: string | null;
+  url_original: string | null;
+  resumen: string | null;
+  texto_match: string | null;
+  sentimiento: string | null;
+  relevancia: number | null;
+  tema: string | null;
+  subtema: string | null;
+  requiere_alerta: boolean;
+  estado_revision: string | null;
+  exportado_xml: boolean;
+}
+
+/** Lee menciones aún no exportadas a 06_Resultados, con datos de la noticia. */
+export async function getMencionesPendientesExport(limit: number): Promise<MencionExportRow[]> {
+  const { data, error } = await getSupabase()
+    .from('menciones')
+    .select(
+      `mencion_id, noticia_id, keyword, texto_match, sentimiento, score_relevancia, tema, subtema,
+       requiere_alerta, estado_revision, exportado_xml,
+       clientes(nombre_cliente),
+       noticias!inner(titulo, url_original, resumen, fecha_publicacion, fecha_captura, estado,
+                      medios(nombre_medio, region))`,
+    )
+    .eq('exportado_sheets', false)
+    .order('created_at', { ascending: true })
+    .limit(limit);
+  if (error) throw new Error(`No se pudieron leer menciones a exportar: ${error.message}`);
+
+  return (data ?? []).map((m: any) => ({
+    mencion_id: m.mencion_id,
+    noticia_id: m.noticia_id,
+    fecha_publicacion: m.noticias?.fecha_publicacion ?? null,
+    fecha_captura: m.noticias?.fecha_captura ?? null,
+    cliente: m.clientes?.nombre_cliente ?? null,
+    keyword: m.keyword ?? null,
+    medio: m.noticias?.medios?.nombre_medio ?? null,
+    estado: m.noticias?.estado ?? null,
+    region: m.noticias?.medios?.region ?? null,
+    titulo: m.noticias?.titulo ?? null,
+    url_original: m.noticias?.url_original ?? null,
+    resumen: m.noticias?.resumen ?? null,
+    texto_match: m.texto_match ?? null,
+    sentimiento: m.sentimiento ?? null,
+    relevancia: m.score_relevancia ?? null,
+    tema: m.tema ?? null,
+    subtema: m.subtema ?? null,
+    requiere_alerta: m.requiere_alerta ?? false,
+    estado_revision: m.estado_revision ?? null,
+    exportado_xml: m.exportado_xml ?? false,
+  }));
+}
+
+/** Marca menciones como ya exportadas a la pestaña de resultados. */
+export async function markMencionesExportadas(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const { error } = await getSupabase()
+    .from('menciones')
+    .update({ exportado_sheets: true })
+    .in('mencion_id', ids);
+  if (error) throw new Error(`No se pudo marcar menciones exportadas: ${error.message}`);
+}
+
+export interface LogExportRow {
+  log_id: string;
+  fecha_hora: string;
+  fuente_id: string | null;
+  medio_id: string | null;
+  accion: string | null;
+  nivel: string | null;
+  mensaje: string | null;
+  urls_detectadas: number | null;
+  notas_nuevas: number | null;
+  duplicados: number | null;
+  errores: number | null;
+  duracion_ms: number | null;
+  ejecutado_por: string | null;
+}
+
+/** Lee logs aún no volcados a 05_Logs. */
+export async function getLogsPendientesExport(limit: number): Promise<LogExportRow[]> {
+  const { data, error } = await getSupabase()
+    .from('logs_ingesta')
+    .select(
+      'log_id, fecha_hora, fuente_id, medio_id, accion, nivel, mensaje, urls_detectadas, notas_nuevas, duplicados, errores, duracion_ms, ejecutado_por',
+    )
+    .eq('exportado_sheets', false)
+    .order('fecha_hora', { ascending: true })
+    .limit(limit);
+  if (error) throw new Error(`No se pudieron leer logs a exportar: ${error.message}`);
+  return (data ?? []) as unknown as LogExportRow[];
+}
+
+/** Marca logs como ya volcados a la pestaña de logs. */
+export async function markLogsExportados(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const { error } = await getSupabase()
+    .from('logs_ingesta')
+    .update({ exportado_sheets: true })
+    .in('log_id', ids);
+  if (error) throw new Error(`No se pudo marcar logs exportados: ${error.message}`);
+}

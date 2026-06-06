@@ -40,3 +40,9 @@ jobs:
 
       - name: Ingesta de noticias (RSS / sitemap)
         run: npm run crawl
+
+      - name: Detectar menciones
+        run: npm run detect-mentions
+
+      - name: Exportar resultados y logs a Sheets
+        run: npm run export-results
