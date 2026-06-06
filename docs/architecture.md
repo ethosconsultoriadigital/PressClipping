@@ -60,7 +60,7 @@ TypeScript + Node 20 · Supabase (`@supabase/supabase-js`) ·
 | 5 Export | `export-results-to-sheets.ts`, logs a Sheets | Menciones visibles en el panel |
 | 6 XML | `generate-xml.ts` + Worker `/read-xml` | XML válido y filtrable |
 | 7 IA | Clasificador sobre menciones relevantes | Solo con `usar_ia=TRUE`, con límites |
-| 8 Interfaz | Solo docs (dashboard, alertas) | Documentado |
+| 8 Interfaz | Solo docs (dashboard, alertas) | Documentado en `fase-8-interfaz.md` |
 
 ## 6. Deduplicación (resumen)
 

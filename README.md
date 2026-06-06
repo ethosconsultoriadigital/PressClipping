@@ -28,8 +28,8 @@ Desarrollo por fases (ver [`docs/architecture.md`](docs/architecture.md)):
 - [x] **Fase 4** — Detección de menciones
 - [x] **Fase 5** — Exportación a Sheets
 - [x] **Fase 6** — XML propio
-- [x] **Fase 7** — IA controlada ← *estás aquí*
-- [ ] **Fase 8** — Interfaz futura (solo documentación)
+- [x] **Fase 7** — IA controlada
+- [x] **Fase 8** — Interfaz futura (documentada en [`docs/fase-8-interfaz.md`](docs/fase-8-interfaz.md)) ← *estás aquí*
 
 ---
 
@@ -237,3 +237,4 @@ npm run classify-ia -- --limit=10    # clasifica como máximo 10
 - [`docs/architecture.md`](docs/architecture.md) — arquitectura y plan por fases
 - [`docs/data-contract.md`](docs/data-contract.md) — contrato Sheets ↔ Supabase ↔ XML
 - [`docs/operations.md`](docs/operations.md) — operación y scraping responsable
+- [`docs/fase-8-interfaz.md`](docs/fase-8-interfaz.md) — diseño de la interfaz futura (dashboard, buscador, alertas)
