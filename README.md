@@ -13,7 +13,7 @@ sin depender de un proveedor externo de PressClipping/XML.
 | Almacenamiento | Universo histórico real de noticias y menciones | Supabase / PostgreSQL |
 | Motor | Ingesta (RSS→sitemap→secciones), normalización, dedupe, match, export | Node.js + TypeScript |
 | Cron | Ejecución periódica de la ingesta | GitHub Actions |
-| Salida | XML propio tipo PressClipping mejorado | (Cloudflare Worker, fase posterior) |
+| Salida | XML propio tipo PressClipping mejorado | script `generate-xml` + Cloudflare Worker `/read-xml` |
 
 ---
 
@@ -190,6 +190,22 @@ npm run classify-ia -- --dry-run     # previsualiza sin gastar
 npm run classify-ia -- --limit=10    # clasifica como máximo 10
 ```
 
+### Endpoint HTTP `/read-xml` (Cloudflare Worker)
+
+Sirve el mismo XML por HTTP, filtrable y protegido por `XML_SECRET_TOKEN`.
+Reutiliza la lógica pura del motor (salida idéntica a `generate-xml`). Ver
+[`worker/README.md`](worker/README.md).
+
+```bash
+npm run worker:typecheck   # verifica tipos del worker
+npm run worker:dev         # desarrollo local (requiere worker/.dev.vars)
+npm run worker:deploy      # despliega a Cloudflare (requiere secrets configurados)
+```
+
+```
+GET /read-xml?token=...&cliente=Jumex&desde=2026-06-01&hasta=2026-06-05
+```
+
 ### Ejecución automática (GitHub Actions)
 
 - `.github/workflows/ci.yml` — typecheck + tests en cada push.
@@ -238,3 +254,4 @@ npm run classify-ia -- --limit=10    # clasifica como máximo 10
 - [`docs/data-contract.md`](docs/data-contract.md) — contrato Sheets ↔ Supabase ↔ XML
 - [`docs/operations.md`](docs/operations.md) — operación y scraping responsable
 - [`docs/fase-8-interfaz.md`](docs/fase-8-interfaz.md) — diseño de la interfaz futura (dashboard, buscador, alertas)
+- [`worker/README.md`](worker/README.md) — endpoint HTTP `/read-xml` (Cloudflare Worker)

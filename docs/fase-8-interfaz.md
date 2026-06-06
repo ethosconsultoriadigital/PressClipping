@@ -262,7 +262,7 @@ Ninguna se implementa ahora; se listan como migraciones/puntos de extensión:
 - [ ] Columnas de trazabilidad de revisión (`revisado_por`, `revisado_at`).
 - [ ] Columnas/tabla de alertas (`alerta_enviada_at`, `alertas_log`).
 - [ ] Políticas RLS + modelo de roles.
-- [ ] Endpoint `/read-xml` (Worker) como primer servicio de lectura.
+- [x] Endpoint `/read-xml` (Worker) como primer servicio de lectura — **implementado** (`worker/`).
 - [ ] Job de reportes (`report:generate`) y su cron.
 
 **Criterio de no-regresión:** todo lo anterior es aditivo. El motor de las

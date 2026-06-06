@@ -8,7 +8,7 @@
  */
 import { create } from 'xmlbuilder2';
 import { DateTime } from 'luxon';
-import type { MencionExportRow } from '../supabase/repositories.js';
+import type { MencionExportRow } from '../types/mencion.js';
 
 export interface FiltrosXml {
   cliente?: string;

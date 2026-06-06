@@ -35,7 +35,7 @@ SUPABASE / POSTGRESQL (histórico)
 | Componente | Runtime | Justificación |
 |---|---|---|
 | Ingesta / sync / export | **GitHub Actions** (cron) | Jobs batch periódicos; secretos y logs integrados; sin servidor que mantener. |
-| Endpoint `/read-xml` | **Cloudflare Worker** (Fase 6+) | HTTP de baja latencia y barato para servir XML filtrable. |
+| Endpoint `/read-xml` | **Cloudflare Worker** (implementado en `worker/`) | HTTP de baja latencia y barato para servir XML filtrable. |
 | Base histórica | **Supabase** | PostgreSQL con FTS, `pg_trgm`, REST y RLS. |
 
 El motor vive en `src/`; los `scripts/` son envoltorios delgados. Esto permite

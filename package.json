@@ -22,7 +22,10 @@
     "validate:media": "tsx scripts/validate-media.ts",
     "classify-ia": "tsx scripts/classify-ia.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "worker:typecheck": "tsc --noEmit -p worker/tsconfig.json",
+    "worker:dev": "wrangler dev --config worker/wrangler.toml",
+    "worker:deploy": "wrangler deploy --config worker/wrangler.toml"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.69.0",
@@ -39,10 +42,12 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240909.0",
     "@types/luxon": "^3.4.2",
     "@types/node": "^20.16.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.8",
+    "wrangler": "^3.78.0"
   }
 }

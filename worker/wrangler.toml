@@ -1,0 +1,16 @@
+# Cloudflare Worker — endpoint /read-xml de Ethos PR Intelligence.
+#
+# Despliegue:
+#   1. npm install            (en la raíz; instala wrangler)
+#   2. Configura los secrets (NO se ponen aquí, ver README del worker):
+#        npx wrangler secret put SUPABASE_URL
+#        npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+#        npx wrangler secret put XML_SECRET_TOKEN
+#   3. npm run worker:deploy
+name = "ethos-read-xml"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# Los valores sensibles se inyectan como Secrets de Cloudflare (wrangler secret put),
+# no como [vars]. Para desarrollo local usa un archivo .dev.vars (en .gitignore).

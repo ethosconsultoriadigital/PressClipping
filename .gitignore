@@ -19,6 +19,10 @@ output/
 *.xml
 !docs/**/*.xml
 
+# Cloudflare Worker (local)
+worker/.dev.vars
+.wrangler/
+
 # Sistema
 .DS_Store
 Thumbs.db
