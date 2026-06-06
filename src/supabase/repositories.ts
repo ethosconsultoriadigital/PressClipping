@@ -497,3 +497,90 @@ export async function markLogsExportados(ids: string[]): Promise<void> {
     .in('log_id', ids);
   if (error) throw new Error(`No se pudo marcar logs exportados: ${error.message}`);
 }
+
+// =============================================================================
+// Fase 7 — Clasificación con IA
+// =============================================================================
+
+export interface MencionIaRow {
+  mencion_id: string;
+  keyword: string | null;
+  alerta_keyword: boolean;
+  titulo: string | null;
+  resumen: string | null;
+  medio: string | null;
+  cliente: string | null;
+  industria: string | null;
+  marcas: string | null;
+  competidores: string | null;
+  temas_sensibles: string | null;
+  prioridad_ia: string | null;
+}
+
+/**
+ * Lee menciones aún no clasificadas por IA, con el contexto de noticia y
+ * cliente. Si `soloPrioridadAlta`, filtra a clientes con prioridad_ia alta.
+ */
+export async function getMencionesParaIa(
+  limit: number,
+  soloPrioridadAlta = false,
+): Promise<MencionIaRow[]> {
+  const { data, error } = await getSupabase()
+    .from('menciones')
+    .select(
+      `mencion_id, keyword,
+       keywords(alerta),
+       clientes(nombre_cliente, industria, marcas, competidores, temas_sensibles, prioridad_ia),
+       noticias!inner(titulo, resumen, medios(nombre_medio))`,
+    )
+    .eq('ia_procesado', false)
+    .order('created_at', { ascending: true })
+    .limit(limit);
+  if (error) throw new Error(`No se pudieron leer menciones para IA: ${error.message}`);
+
+  const rows: MencionIaRow[] = (data ?? []).map((m: any) => ({
+    mencion_id: m.mencion_id,
+    keyword: m.keyword ?? null,
+    alerta_keyword: m.keywords?.alerta ?? false,
+    titulo: m.noticias?.titulo ?? null,
+    resumen: m.noticias?.resumen ?? null,
+    medio: m.noticias?.medios?.nombre_medio ?? null,
+    cliente: m.clientes?.nombre_cliente ?? null,
+    industria: m.clientes?.industria ?? null,
+    marcas: m.clientes?.marcas ?? null,
+    competidores: m.clientes?.competidores ?? null,
+    temas_sensibles: m.clientes?.temas_sensibles ?? null,
+    prioridad_ia: m.clientes?.prioridad_ia ?? null,
+  }));
+
+  if (!soloPrioridadAlta) return rows;
+  return rows.filter((r) => ['alta', 'high'].includes((r.prioridad_ia ?? '').toLowerCase()));
+}
+
+export interface MencionIaUpdate {
+  sentimiento: string;
+  relevancia_ia: string;
+  tema: string;
+  subtema: string;
+  resumen_ia: string;
+  riesgo_reputacional: string;
+  recomendacion_pr: string;
+  requiere_alerta: boolean;
+  ia_modelo: string;
+}
+
+/** Guarda la clasificación de IA en una mención y la marca como procesada. */
+export async function updateMencionIa(
+  mencionId: string,
+  fields: MencionIaUpdate,
+): Promise<void> {
+  const { error } = await getSupabase()
+    .from('menciones')
+    .update({
+      ...fields,
+      ia_procesado: true,
+      ia_procesado_at: new Date().toISOString(),
+    })
+    .eq('mencion_id', mencionId);
+  if (error) throw new Error(`No se pudo actualizar la mención ${mencionId}: ${error.message}`);
+}

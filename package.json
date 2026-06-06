@@ -20,10 +20,12 @@
     "validate:sheets": "tsx scripts/validate-sheets.ts",
     "validate:supabase": "tsx scripts/validate-supabase.ts",
     "validate:media": "tsx scripts/validate-media.ts",
+    "classify-ia": "tsx scripts/classify-ia.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.69.0",
     "@supabase/supabase-js": "^2.45.0",
     "dotenv": "^16.4.5",
     "fast-xml-parser": "^4.5.6",

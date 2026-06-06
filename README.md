@@ -27,8 +27,8 @@ Desarrollo por fases (ver [`docs/architecture.md`](docs/architecture.md)):
 - [x] **Fase 3** — Ingesta RSS / Sitemap
 - [x] **Fase 4** — Detección de menciones
 - [x] **Fase 5** — Exportación a Sheets
-- [x] **Fase 6** — XML propio ← *estás aquí*
-- [ ] **Fase 7** — IA controlada
+- [x] **Fase 6** — XML propio
+- [x] **Fase 7** — IA controlada ← *estás aquí*
 - [ ] **Fase 8** — Interfaz futura (solo documentación)
 
 ---
@@ -125,7 +125,8 @@ npm run crawl             # Fase 3: ingesta RSS/sitemap de los medios activos
 npm run detect-mentions   # Fase 4: detecta menciones de keywords en noticias nuevas
 npm run export-results    # Fase 5: vuelca menciones a 06_Resultados y logs a 05_Logs
 npm run generate-xml      # Fase 6: genera XML propio tipo PressClipping (con filtros)
-npm test                  # tests unitarios (parsers, normalización, hashing, matcher, xml, mappers)
+npm run classify-ia       # Fase 7: clasifica menciones con IA (solo si usar_ia=TRUE)
+npm test                  # tests unitarios (parsers, normalización, hashing, matcher, xml, ia, mappers)
 npm run typecheck         # verificación de tipos
 ```
 
@@ -150,8 +151,8 @@ evita menciones duplicadas; las noticias se marcan como procesadas.
 
 **Exportación (Fase 5):** vuelca a `06_Resultados` las menciones nuevas (vista
 operativa, **no** el histórico) y a `05_Logs` los logs de ingesta pendientes,
-marcando lo exportado para no duplicar filas. La IA (sentimiento, tema, etc.)
-se rellena en la Fase 7; por ahora esas columnas salen vacías.
+marcando lo exportado para no duplicar filas. Los campos de IA (sentimiento,
+tema, etc.) los rellena la Fase 7 antes del export.
 
 **XML propio (Fase 6):** genera un documento `<pressclipping_ethos>` con una
 `<nota>` por mención (ver ejemplo en [`docs/ejemplo-salida.xml`](docs/ejemplo-salida.xml)).
@@ -166,6 +167,28 @@ npm run generate-xml -- --estado-revision=pendiente --out=output/clip.xml --marc
 
 `--marcar` marca las menciones incluidas como `exportado_xml`. Esta lógica de
 filtros y formato es la base del futuro endpoint `/read-xml` (Cloudflare Worker).
+
+**Clasificación con IA (Fase 7):** clasifica menciones con Claude (SDK oficial de
+Anthropic, salida estructurada con Zod) produciendo sentimiento, relevancia,
+tema/subtema, resumen ejecutivo, riesgo reputacional y recomendación PR.
+**Deliberadamente controlada en costo**:
+
+- **Gate duro**: solo corre si `usar_ia=TRUE` en `04_Configuracion` (default `false`).
+- Solo procesa menciones **pendientes** (`ia_procesado=false`); no reprocesa.
+- Límite por corrida (`max_ia_por_corrida`, default 50; override con `--limit`).
+- Modelo configurable (`ia_modelo`, default `claude-haiku-4-5`; puede subirse a
+  `claude-sonnet-4-6` o `claude-opus-4-8`).
+- Opción `ia_solo_prioridad_alta` para limitar a clientes prioritarios.
+- `--dry-run` cuenta cuántas se procesarían **sin** llamar a la IA ni gastar.
+- Registra los tokens usados por corrida en `logs_ingesta` / `05_Logs`.
+
+Requiere `ANTHROPIC_API_KEY`. Corre **antes** del export para que `06_Resultados`
+muestre los campos de IA.
+
+```bash
+npm run classify-ia -- --dry-run     # previsualiza sin gastar
+npm run classify-ia -- --limit=10    # clasifica como máximo 10
+```
 
 ### Ejecución automática (GitHub Actions)
 
