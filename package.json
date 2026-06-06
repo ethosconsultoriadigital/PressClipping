@@ -16,6 +16,10 @@
     "detect-mentions": "tsx scripts/detect-mentions.ts",
     "export-results": "tsx scripts/export-results-to-sheets.ts",
     "generate-xml": "tsx scripts/generate-xml.ts",
+    "healthcheck": "tsx scripts/healthcheck.ts",
+    "validate:sheets": "tsx scripts/validate-sheets.ts",
+    "validate:supabase": "tsx scripts/validate-supabase.ts",
+    "validate:media": "tsx scripts/validate-media.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

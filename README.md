@@ -95,6 +95,28 @@ Si ves `✅` en ambos, la Fase 1 está lista.
 
 ---
 
+## Validación y diagnóstico (solo lectura)
+
+Comandos no destructivos para confirmar el estado del sistema antes de operar.
+**Ninguno guarda noticias ni modifica `01_Medios`.**
+
+```bash
+npm run healthcheck                      # entorno + Supabase (tablas) + Sheets (pestañas)
+npm run validate:supabase                # existencia y conteo de cada tabla esperada
+npm run validate:sheets                  # conexión, pestañas y mapeo de cabeceras
+npm run validate:media                   # diagnostica cada medio activo (probe RSS/sitemap)
+npm run validate:media -- --limit=10     # solo los primeros 10
+npm run validate:media -- --priority=Alta # solo prioridad "Alta"
+```
+
+`validate:media` lee `01_Medios`, **omite inactivos y duplicados** (por `medio_id`
+y `url_base`), prueba las fuentes de cada medio **sin guardar noticias**,
+recomienda el método de extracción y clasifica los medios "especiales". Escribe
+el diagnóstico en **`08_Validacion_Medios`** y los especiales en
+**`09_Medios_Especiales`** (las crea si no existen; solo anexa filas).
+
+---
+
 ## Uso del pipeline
 
 ```bash
