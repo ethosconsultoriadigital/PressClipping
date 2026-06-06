@@ -1,0 +1,30 @@
+# Dependencias
+node_modules/
+dist/
+
+# Variables de entorno y secretos (NUNCA commitear)
+.env
+.env.local
+.env.*.local
+*.key
+*-service-account*.json
+
+# Logs
+logs/*.log
+*.log
+npm-debug.log*
+
+# Salidas generadas
+output/
+*.xml
+!docs/**/*.xml
+
+# Sistema
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Cobertura / temporales de test
+coverage/
+.vitest/
