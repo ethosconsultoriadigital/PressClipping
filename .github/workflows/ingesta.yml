@@ -1,0 +1,42 @@
+name: Ingesta
+
+# Pipeline de ingesta programada: sincroniza el panel y recolecta noticias.
+# Requiere los Secrets del repositorio (ver README / .env.example).
+# El cron está en UTC; ajústalo a tu cadencia operativa.
+
+on:
+  schedule:
+    - cron: '0 * * * *' # cada hora en punto (UTC)
+  workflow_dispatch: {} # permite ejecutarlo manualmente desde la pestaña Actions
+
+concurrency:
+  group: ingesta
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      RUN_BY: github-actions
+      LOG_FORMAT: json
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Sincronizar panel (Sheets → Supabase)
+        run: npm run sync-sheets
+
+      - name: Ingesta de noticias (RSS / sitemap)
+        run: npm run crawl

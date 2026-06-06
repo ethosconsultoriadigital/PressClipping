@@ -22,11 +22,13 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
     "dotenv": "^16.4.5",
+    "fast-xml-parser": "^4.5.6",
     "google-auth-library": "^9.14.0",
     "google-spreadsheet": "^4.1.4",
     "luxon": "^3.5.0",
     "pino": "^9.4.0",
     "pino-pretty": "^11.2.2",
+    "rss-parser": "^3.13.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

@@ -22,9 +22,9 @@ sin depender de un proveedor externo de PressClipping/XML.
 Desarrollo por fases (ver [`docs/architecture.md`](docs/architecture.md)):
 
 - [x] **Fase 0** — Diseño y validación
-- [x] **Fase 1** — Setup base (estructura, migraciones, clientes, pruebas de conexión) ← *estás aquí*
-- [ ] **Fase 2** — Sincronización Sheets → Supabase
-- [ ] **Fase 3** — Ingesta RSS / Sitemap
+- [x] **Fase 1** — Setup base (estructura, migraciones, clientes, pruebas de conexión)
+- [x] **Fase 2** — Sincronización Sheets → Supabase
+- [x] **Fase 3** — Ingesta RSS / Sitemap ← *estás aquí*
 - [ ] **Fase 4** — Detección de menciones
 - [ ] **Fase 5** — Exportación a Sheets
 - [ ] **Fase 6** — XML propio
@@ -92,6 +92,35 @@ npm run test:connection -- sheets
 ```
 
 Si ves `✅` en ambos, la Fase 1 está lista.
+
+---
+
+## Uso del pipeline
+
+```bash
+npm run sync-sheets    # Fase 2: Sheets → Supabase (medios, keywords, clientes, config)
+npm run crawl          # Fase 3: ingesta RSS/sitemap de los medios activos
+npm test               # tests unitarios (parsers, normalización, hashing, mappers)
+npm run typecheck      # verificación de tipos
+```
+
+**Sincronización (Fase 2):** lee `01_Medios`, `02_Keywords`, `03_Clientes` y
+`04_Configuracion`, valida cada fila con `zod` (mapeo por nombre de cabecera,
+no por posición), descarta filas inválidas con aviso y hace upsert en Supabase.
+
+**Ingesta (Fase 3):** recorre los medios activos aplicando la cascada
+**RSS → sitemap**, normaliza (URL canónica, fechas a UTC, limpieza de HTML),
+deduplica por `hash_url` y agrupa republicaciones por `cluster_id` **sin perder
+impactos**. Respeta `max_notas_por_medio_por_corrida` y omite medios con
+`requiere_javascript`/`requiere_proxy` mientras `modo_mvp=true`. Solo guarda
+metadata + resumen (no el texto íntegro).
+
+### Ejecución automática (GitHub Actions)
+
+- `.github/workflows/ci.yml` — typecheck + tests en cada push.
+- `.github/workflows/ingesta.yml` — corre `sync-sheets` + `crawl` por cron
+  (cada hora, UTC) y bajo demanda. Requiere los Secrets del repositorio
+  equivalentes a las variables de `.env.example`.
 
 ---
 
