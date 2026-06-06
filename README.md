@@ -26,8 +26,8 @@ Desarrollo por fases (ver [`docs/architecture.md`](docs/architecture.md)):
 - [x] **Fase 2** — Sincronización Sheets → Supabase
 - [x] **Fase 3** — Ingesta RSS / Sitemap
 - [x] **Fase 4** — Detección de menciones
-- [x] **Fase 5** — Exportación a Sheets ← *estás aquí*
-- [ ] **Fase 6** — XML propio
+- [x] **Fase 5** — Exportación a Sheets
+- [x] **Fase 6** — XML propio ← *estás aquí*
 - [ ] **Fase 7** — IA controlada
 - [ ] **Fase 8** — Interfaz futura (solo documentación)
 
@@ -102,7 +102,8 @@ npm run sync-sheets       # Fase 2: Sheets → Supabase (medios, keywords, clien
 npm run crawl             # Fase 3: ingesta RSS/sitemap de los medios activos
 npm run detect-mentions   # Fase 4: detecta menciones de keywords en noticias nuevas
 npm run export-results    # Fase 5: vuelca menciones a 06_Resultados y logs a 05_Logs
-npm test                  # tests unitarios (parsers, normalización, hashing, matcher, mappers)
+npm run generate-xml      # Fase 6: genera XML propio tipo PressClipping (con filtros)
+npm test                  # tests unitarios (parsers, normalización, hashing, matcher, xml, mappers)
 npm run typecheck         # verificación de tipos
 ```
 
@@ -129,6 +130,20 @@ evita menciones duplicadas; las noticias se marcan como procesadas.
 operativa, **no** el histórico) y a `05_Logs` los logs de ingesta pendientes,
 marcando lo exportado para no duplicar filas. La IA (sentimiento, tema, etc.)
 se rellena en la Fase 7; por ahora esas columnas salen vacías.
+
+**XML propio (Fase 6):** genera un documento `<pressclipping_ethos>` con una
+`<nota>` por mención (ver ejemplo en [`docs/ejemplo-salida.xml`](docs/ejemplo-salida.xml)).
+Los campos de texto libre van en CDATA y el resto se escapa; `<texto>` contiene
+el **resumen/extracto**, no la nota íntegra (política legal). Soporta filtros:
+
+```bash
+npm run generate-xml -- --cliente=Jumex --keyword=tequila
+npm run generate-xml -- --desde=2026-06-01 --hasta=2026-06-05 --region=Occidente
+npm run generate-xml -- --estado-revision=pendiente --out=output/clip.xml --marcar
+```
+
+`--marcar` marca las menciones incluidas como `exportado_xml`. Esta lógica de
+filtros y formato es la base del futuro endpoint `/read-xml` (Cloudflare Worker).
 
 ### Ejecución automática (GitHub Actions)
 

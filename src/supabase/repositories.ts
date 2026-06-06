@@ -421,6 +421,59 @@ export interface LogExportRow {
   ejecutado_por: string | null;
 }
 
+/**
+ * Lee menciones para generar XML. No filtra por exportación (el XML es una
+ * vista que puede regenerarse). Los filtros finos se aplican en memoria
+ * (ver src/exporters/xml.ts) para mantener la consulta simple y verificable.
+ */
+export async function getMencionesParaXml(limit: number): Promise<MencionExportRow[]> {
+  const { data, error } = await getSupabase()
+    .from('menciones')
+    .select(
+      `mencion_id, noticia_id, keyword, texto_match, sentimiento, score_relevancia, tema, subtema,
+       requiere_alerta, estado_revision, exportado_xml,
+       clientes(nombre_cliente),
+       noticias!inner(titulo, url_original, resumen, fecha_publicacion, fecha_captura, estado,
+                      medios(nombre_medio, region))`,
+    )
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(`No se pudieron leer menciones para XML: ${error.message}`);
+
+  return (data ?? []).map((m: any) => ({
+    mencion_id: m.mencion_id,
+    noticia_id: m.noticia_id,
+    fecha_publicacion: m.noticias?.fecha_publicacion ?? null,
+    fecha_captura: m.noticias?.fecha_captura ?? null,
+    cliente: m.clientes?.nombre_cliente ?? null,
+    keyword: m.keyword ?? null,
+    medio: m.noticias?.medios?.nombre_medio ?? null,
+    estado: m.noticias?.estado ?? null,
+    region: m.noticias?.medios?.region ?? null,
+    titulo: m.noticias?.titulo ?? null,
+    url_original: m.noticias?.url_original ?? null,
+    resumen: m.noticias?.resumen ?? null,
+    texto_match: m.texto_match ?? null,
+    sentimiento: m.sentimiento ?? null,
+    relevancia: m.score_relevancia ?? null,
+    tema: m.tema ?? null,
+    subtema: m.subtema ?? null,
+    requiere_alerta: m.requiere_alerta ?? false,
+    estado_revision: m.estado_revision ?? null,
+    exportado_xml: m.exportado_xml ?? false,
+  }));
+}
+
+/** Marca menciones como exportadas a XML. */
+export async function markMencionesExportadasXml(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const { error } = await getSupabase()
+    .from('menciones')
+    .update({ exportado_xml: true })
+    .in('mencion_id', ids);
+  if (error) throw new Error(`No se pudo marcar menciones exportadas a XML: ${error.message}`);
+}
+
 /** Lee logs aún no volcados a 05_Logs. */
 export async function getLogsPendientesExport(limit: number): Promise<LogExportRow[]> {
   const { data, error } = await getSupabase()
