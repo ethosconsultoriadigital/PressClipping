@@ -79,6 +79,9 @@ export interface MedioRow {
   pais: string | null;
   estado: string | null;
   municipio: string | null;
+  region: string | null;
+  prioridad: string | null;
+  ultimo_estado: string | null;
   ultimo_scrapeo: string | null;
 }
 
@@ -87,7 +90,7 @@ export async function getMediosActivos(): Promise<MedioRow[]> {
   const { data, error } = await getSupabase()
     .from('medios')
     .select(
-      'medio_id, nombre_medio, url_base, metodo_extraccion, rss_url, sitemap_url, secciones_urls, requiere_javascript, requiere_proxy, frecuencia_minutos, pais, estado, municipio, ultimo_scrapeo',
+      'medio_id, nombre_medio, url_base, metodo_extraccion, rss_url, sitemap_url, secciones_urls, requiere_javascript, requiere_proxy, frecuencia_minutos, pais, estado, municipio, region, prioridad, ultimo_estado, ultimo_scrapeo',
     )
     .eq('activo', true);
   if (error) throw new Error(`No se pudieron leer medios activos: ${error.message}`);
