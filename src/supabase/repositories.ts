@@ -12,8 +12,18 @@ import {
   SELECT_MENCION_EXPORT,
   mapMencionExport,
 } from '../types/mencion.js';
+import {
+  type NoticiaRawRow,
+  SELECT_NOTICIA_RAW,
+  mapNoticiaRaw,
+} from '../types/noticia.js';
+import type {
+  NoticiaEnriquecibleRow,
+  NoticiaEnriquecidaUpdate,
+} from '../enrichers/enrichNews.js';
 
 export type { MencionExportRow } from '../types/mencion.js';
+export type { NoticiaRawRow } from '../types/noticia.js';
 
 const CHUNK = 500;
 
@@ -427,6 +437,112 @@ export async function markLogsExportados(ids: string[]): Promise<void> {
     .update({ exportado_sheets: true })
     .in('log_id', ids);
   if (error) throw new Error(`No se pudo marcar logs exportados: ${error.message}`);
+}
+
+// =============================================================================
+// Exportación RAW de noticias → 01_Noticias_Raw (base amplia de captura)
+// =============================================================================
+
+export interface RawExportOpts {
+  limit?: number;
+  /** Fecha ISO; filtra noticias capturadas (created_at) desde ese momento. */
+  since?: string;
+  /** Si true (default), solo trae las aún no exportadas a raw. */
+  onlyNew?: boolean;
+}
+
+/**
+ * Lee noticias para exportar a 01_Noticias_Raw. Por defecto solo las que
+ * aún no se han exportado (exportado_sheet_raw = false). Incluye TODAS las
+ * noticias del rango, tengan o no mención.
+ */
+export async function getNoticiasParaExportRaw(
+  opts: RawExportOpts = {},
+): Promise<NoticiaRawRow[]> {
+  let query = getSupabase()
+    .from('noticias')
+    .select(SELECT_NOTICIA_RAW)
+    .order('created_at', { ascending: true });
+
+  if (opts.onlyNew !== false) {
+    query = query.eq('exportado_sheet_raw', false);
+  }
+  if (opts.since) {
+    query = query.gte('created_at', opts.since);
+  }
+  if (opts.limit && opts.limit > 0) {
+    query = query.limit(opts.limit);
+  }
+
+  const { data, error } = await query;
+  if (error) throw new Error(`No se pudieron leer noticias para export raw: ${error.message}`);
+  return (data ?? []).map(mapNoticiaRaw);
+}
+
+/** Marca noticias como ya exportadas a 01_Noticias_Raw (anti-duplicado). */
+export async function markNoticiasExportadasRaw(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const { error } = await getSupabase()
+    .from('noticias')
+    .update({
+      exportado_sheet_raw: true,
+      fecha_exportado_sheet_raw: new Date().toISOString(),
+    })
+    .in('noticia_id', ids);
+  if (error) throw new Error(`No se pudo marcar noticias exportadas raw: ${error.message}`);
+}
+
+// =============================================================================
+// Enriquecimiento de noticias (visita la URL y completa campos faltantes)
+// =============================================================================
+
+export interface EnriquecerOpts {
+  limit?: number;
+  /** Solo noticias con titulo IS NULL. */
+  onlyMissingTitle?: boolean;
+  /** Solo noticias con texto_extraido IS NULL. */
+  onlyMissingText?: boolean;
+}
+
+/**
+ * Lee noticias candidatas a enriquecer (visitar su URL y completar campos).
+ * Por defecto trae todas; con los flags filtra por título o texto faltante.
+ */
+export async function getNoticiasParaEnriquecer(
+  opts: EnriquecerOpts = {},
+): Promise<NoticiaEnriquecibleRow[]> {
+  let query = getSupabase()
+    .from('noticias')
+    .select(
+      'noticia_id, url_original, titulo, resumen, texto_extraido, autor, seccion, imagen_principal',
+    )
+    .order('created_at', { ascending: true });
+
+  if (opts.onlyMissingTitle) query = query.is('titulo', null);
+  if (opts.onlyMissingText) query = query.is('texto_extraido', null);
+  if (opts.limit && opts.limit > 0) query = query.limit(opts.limit);
+
+  const { data, error } = await query;
+  if (error) throw new Error(`No se pudieron leer noticias para enriquecer: ${error.message}`);
+  return (data ?? []) as unknown as NoticiaEnriquecibleRow[];
+}
+
+/**
+ * Actualiza los campos enriquecidos de una noticia. NO toca exportado_sheet_raw
+ * ni menciones_procesado: solo completa metadata/contenido de la fila.
+ */
+export async function updateNoticiaEnriquecida(
+  noticiaId: string,
+  fields: NoticiaEnriquecidaUpdate,
+): Promise<void> {
+  if (Object.keys(fields).length === 0) return;
+  const { error } = await getSupabase()
+    .from('noticias')
+    .update(fields)
+    .eq('noticia_id', noticiaId);
+  if (error) {
+    throw new Error(`No se pudo enriquecer la noticia ${noticiaId}: ${error.message}`);
+  }
 }
 
 // =============================================================================

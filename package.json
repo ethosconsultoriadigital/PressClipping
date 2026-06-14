@@ -15,6 +15,8 @@
     "crawl": "tsx scripts/crawl.ts",
     "detect-mentions": "tsx scripts/detect-mentions.ts",
     "export-results": "tsx scripts/export-results-to-sheets.ts",
+    "export-raw-news": "tsx scripts/export-raw-news.ts",
+    "enrich-news": "tsx scripts/enrich-news.ts",
     "generate-xml": "tsx scripts/generate-xml.ts",
     "healthcheck": "tsx scripts/healthcheck.ts",
     "validate:sheets": "tsx scripts/validate-sheets.ts",
@@ -30,6 +32,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.69.0",
     "@supabase/supabase-js": "^2.45.0",
+    "cheerio": "^1.2.0",
     "dotenv": "^16.4.5",
     "fast-xml-parser": "^4.5.6",
     "google-auth-library": "^9.14.0",

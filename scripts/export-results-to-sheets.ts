@@ -1,14 +1,15 @@
 /**
- * Fase 5 — Exportación a Google Sheets.
+ * Fase 5 — Exportación a Google Sheets (base operativa de captura).
  *
- * Vuelca a 06_Resultados las menciones aún no exportadas (vista operativa, NO
- * el histórico completo) y a 05_Logs los logs de ingesta pendientes. Marca lo
- * exportado para no duplicar filas en corridas sucesivas.
+ * Vuelca a `02_Menciones` las menciones aún no exportadas (vista operativa, NO
+ * el histórico completo) y a `04_Logs` los logs de ingesta pendientes, en la
+ * Sheet de SALIDA (GOOGLE_OUTPUT_SHEET_ID, o GOOGLE_SHEET_ID como fallback).
+ * Marca lo exportado para no duplicar filas en corridas sucesivas.
  *
  * Uso:  npm run export-results
  */
-import { SHEET_TABS } from '../src/sheets/client.js';
-import { appendRows, type OutRow } from '../src/sheets/write.js';
+import { OUTPUT_TABS } from '../src/sheets/client.js';
+import { appendOutputRows } from '../src/sheets/write.js';
 import {
   getConfigMap,
   getMencionesPendientesExport,
@@ -16,6 +17,7 @@ import {
   getLogsPendientesExport,
   markLogsExportados,
 } from '../src/supabase/repositories.js';
+import { mencionToOutputRow, logToOutputRow } from '../src/exporters/sheetRows.js';
 import { writeIngestaLog } from '../src/logs/ingestaLogger.js';
 import { logger } from '../src/utils/logger.js';
 import { parseIntOrNull } from '../src/utils/parse.js';
@@ -27,32 +29,10 @@ async function exportarMenciones(limit: number): Promise<number> {
     return 0;
   }
 
-  const rows: OutRow[] = menciones.map((m) => ({
-    mencion_id: m.mencion_id,
-    noticia_id: m.noticia_id,
-    fecha_publicacion: m.fecha_publicacion,
-    fecha_captura: m.fecha_captura,
-    cliente: m.cliente,
-    keyword: m.keyword,
-    medio: m.medio,
-    estado: m.estado,
-    region: m.region,
-    titulo: m.titulo,
-    url_original: m.url_original,
-    resumen: m.resumen,
-    texto_match: m.texto_match,
-    sentimiento: m.sentimiento,
-    relevancia: m.relevancia,
-    tema: m.tema,
-    subtema: m.subtema,
-    requiere_alerta: m.requiere_alerta,
-    estado_revision: m.estado_revision,
-    exportado_xml: m.exportado_xml,
-  }));
-
-  const escritas = await appendRows(SHEET_TABS.RESULTADOS, rows);
+  const rows = menciones.map(mencionToOutputRow);
+  const escritas = await appendOutputRows(OUTPUT_TABS.MENCIONES, rows);
   await markMencionesExportadas(menciones.map((m) => m.mencion_id));
-  logger.info({ escritas }, 'Menciones exportadas a 06_Resultados');
+  logger.info({ escritas }, 'Menciones exportadas a 02_Menciones');
   return escritas;
 }
 
@@ -63,24 +43,10 @@ async function exportarLogs(limit: number): Promise<number> {
     return 0;
   }
 
-  const rows: OutRow[] = logs.map((l) => ({
-    fecha_hora: l.fecha_hora,
-    fuente_id: l.fuente_id,
-    medio_id: l.medio_id,
-    accion: l.accion,
-    nivel: l.nivel,
-    mensaje: l.mensaje,
-    urls_detectadas: l.urls_detectadas,
-    notas_nuevas: l.notas_nuevas,
-    duplicados: l.duplicados,
-    errores: l.errores,
-    duracion_ms: l.duracion_ms,
-    ejecutado_por: l.ejecutado_por,
-  }));
-
-  const escritas = await appendRows(SHEET_TABS.LOGS, rows);
+  const rows = logs.map(logToOutputRow);
+  const escritas = await appendOutputRows(OUTPUT_TABS.LOGS, rows);
   await markLogsExportados(logs.map((l) => l.log_id));
-  logger.info({ escritas }, 'Logs exportados a 05_Logs');
+  logger.info({ escritas }, 'Logs exportados a 04_Logs');
   return escritas;
 }
 

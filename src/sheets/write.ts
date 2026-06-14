@@ -5,18 +5,18 @@
  * cabeceras reales de la pestaña. Las claves sin cabecera correspondiente se
  * ignoran (no rompen). Es la base de la exportación operativa de la Fase 5.
  */
-import { getTab } from './client.js';
+import type { GoogleSpreadsheetWorksheet } from 'google-spreadsheet';
+import { getTab, getOutputTab } from './client.js';
 import { normalizeHeader } from '../utils/parse.js';
 
 export type OutRow = Record<string, string | number | boolean | null | undefined>;
 
-/**
- * Agrega filas al final de una pestaña, alineando por nombre de cabecera.
- * Devuelve cuántas filas se escribieron.
- */
-export async function appendRows(title: string, rows: OutRow[]): Promise<number> {
+/** Escribe filas en una pestaña ya resuelta, alineando por nombre de cabecera. */
+async function appendToSheet(
+  sheet: GoogleSpreadsheetWorksheet,
+  rows: OutRow[],
+): Promise<number> {
   if (rows.length === 0) return 0;
-  const sheet = await getTab(title);
   await sheet.loadHeaderRow();
 
   // Mapa cabecera-normalizada → cabecera-real de la pestaña.
@@ -37,6 +37,24 @@ export async function appendRows(title: string, rows: OutRow[]): Promise<number>
 
   await sheet.addRows(mapped);
   return mapped.length;
+}
+
+/**
+ * Agrega filas al final de una pestaña del PANEL DE CONTROL, alineando por
+ * nombre de cabecera. Devuelve cuántas filas se escribieron.
+ */
+export async function appendRows(title: string, rows: OutRow[]): Promise<number> {
+  if (rows.length === 0) return 0;
+  return appendToSheet(await getTab(title), rows);
+}
+
+/**
+ * Agrega filas al final de una pestaña de la SHEET DE SALIDA (base operativa
+ * de captura). Devuelve cuántas filas se escribieron.
+ */
+export async function appendOutputRows(title: string, rows: OutRow[]): Promise<number> {
+  if (rows.length === 0) return 0;
+  return appendToSheet(await getOutputTab(title), rows);
 }
 
 function formatValue(value: OutRow[string]): string {

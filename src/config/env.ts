@@ -22,7 +22,11 @@ const envSchema = z.object({
   // Google Sheets
   GOOGLE_SERVICE_ACCOUNT_EMAIL: z.string().email().optional(),
   GOOGLE_PRIVATE_KEY: z.string().min(1).optional(),
+  // Panel de control / configuración (lectura): 01_Medios, 02_Keywords, etc.
   GOOGLE_SHEET_ID: z.string().min(1).optional(),
+  // Base operativa de captura (escritura de resultados). Si no se define,
+  // se usa GOOGLE_SHEET_ID como fallback (compatibilidad hacia atrás).
+  GOOGLE_OUTPUT_SHEET_ID: z.string().min(1).optional(),
 
   // Ejecución
   RUN_BY: z.string().default('local'),
@@ -108,5 +112,44 @@ export function requireSheetsEnv(): {
     email: env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
     privateKey: env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
     sheetId: env.GOOGLE_SHEET_ID,
+  };
+}
+
+/**
+ * Resuelve qué Sheet usar para ESCRIBIR resultados: la base operativa de
+ * captura si está definida, o el panel de control como fallback.
+ * Función pura para poder testearla sin tocar process.env.
+ */
+export function resolveOutputSheetId(
+  outputSheetId: string | undefined,
+  controlSheetId: string | undefined,
+): string | undefined {
+  const out = outputSheetId?.trim();
+  if (out) return out;
+  const ctrl = controlSheetId?.trim();
+  return ctrl || undefined;
+}
+
+/**
+ * Igual que requireSheetsEnv, pero usa GOOGLE_OUTPUT_SHEET_ID (con fallback a
+ * GOOGLE_SHEET_ID) como destino de escritura de resultados.
+ */
+export function requireOutputSheetsEnv(): {
+  email: string;
+  privateKey: string;
+  sheetId: string;
+} {
+  const sheetId = resolveOutputSheetId(env.GOOGLE_OUTPUT_SHEET_ID, env.GOOGLE_SHEET_ID);
+  if (!env.GOOGLE_SERVICE_ACCOUNT_EMAIL || !env.GOOGLE_PRIVATE_KEY || !sheetId) {
+    throw new MissingEnvError('Google Sheets (salida)', [
+      'GOOGLE_SERVICE_ACCOUNT_EMAIL',
+      'GOOGLE_PRIVATE_KEY',
+      'GOOGLE_OUTPUT_SHEET_ID (o GOOGLE_SHEET_ID como fallback)',
+    ]);
+  }
+  return {
+    email: env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    privateKey: env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    sheetId,
   };
 }
