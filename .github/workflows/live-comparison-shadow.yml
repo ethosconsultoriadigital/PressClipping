@@ -65,6 +65,9 @@ jobs:
       GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
       LOG_FORMAT: json
       RUN_BY: github-actions-shadow-scheduler
+      # Desactiva Happy Eyeballs (autoSelectFamily) de Node 20+: evita el
+      # "Premature close" de undici contra googleapis (OAuth de Google Sheets).
+      NODE_OPTIONS: --no-network-family-autoselection
     steps:
       - uses: actions/checkout@v4
 
