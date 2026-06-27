@@ -65,9 +65,10 @@ jobs:
       GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
       LOG_FORMAT: json
       RUN_BY: github-actions-shadow-scheduler
-      # Desactiva Happy Eyeballs (autoSelectFamily) de Node 20+: evita el
-      # "Premature close" de undici contra googleapis (OAuth de Google Sheets).
-      NODE_OPTIONS: --no-network-family-autoselection
+      # Runners de GitHub sin IPv6 confiable: si googleapis resuelve a IPv6
+      # primero, el OAuth de Google Sheets falla con "Premature close". Forzamos
+      # IPv4 y desactivamos Happy Eyeballs para estabilizar la conexión.
+      NODE_OPTIONS: --dns-result-order=ipv4first --no-network-family-autoselection
     steps:
       - uses: actions/checkout@v4
 
