@@ -40,16 +40,49 @@ const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 let cachedControl: GoogleSpreadsheet | null = null;
 let cachedOutput: GoogleSpreadsheet | null = null;
 
-/** Abre y autentica un documento por su id (sin caché). */
+/**
+ * ¿El error es un fallo de transporte recuperable contra googleapis?
+ * En runners de CI (Node 22 + undici) el endpoint OAuth de Google a veces
+ * cierra la conexión: "Premature close" / ECONNRESET / socket hang up.
+ * Estos casos se reintentan; los errores de credenciales/permisos NO.
+ */
+function esErrorTransporteRecuperable(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return (
+    msg.includes('premature close') ||
+    msg.includes('econnreset') ||
+    msg.includes('socket hang up') ||
+    msg.includes('etimedout') ||
+    msg.includes('eai_again') ||
+    msg.includes('network socket disconnected') ||
+    msg.includes('invalid response body')
+  );
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** Abre y autentica un documento por su id (sin caché), con reintentos de transporte. */
 async function openDoc(
   email: string,
   privateKey: string,
   sheetId: string,
 ): Promise<GoogleSpreadsheet> {
-  const jwt = new JWT({ email, key: privateKey, scopes: SCOPES });
-  const doc = new GoogleSpreadsheet(sheetId, jwt);
-  await doc.loadInfo();
-  return doc;
+  const MAX_INTENTOS = 5;
+  let ultimoError: unknown;
+  for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
+    try {
+      // JWT nuevo en cada intento → fuerza una conexión/handshake fresco.
+      const jwt = new JWT({ email, key: privateKey, scopes: SCOPES });
+      const doc = new GoogleSpreadsheet(sheetId, jwt);
+      await doc.loadInfo();
+      return doc;
+    } catch (err) {
+      ultimoError = err;
+      if (intento >= MAX_INTENTOS || !esErrorTransporteRecuperable(err)) break;
+      await sleep(800 * intento); // backoff lineal: 0.8s, 1.6s, 2.4s, 3.2s
+    }
+  }
+  throw ultimoError;
 }
 
 /** Abre (y cachea) el documento del PANEL DE CONTROL (lectura de configuración). */
