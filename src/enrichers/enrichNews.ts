@@ -26,6 +26,14 @@ export interface NoticiaEnriquecibleRow {
   autor: string | null;
   seccion: string | null;
   imagen_principal: string | null;
+  texto_nota_limpia: string | null;
+  extracto_nota_1300: string | null;
+  calidad_extraccion: string | null;
+  texto_limpio_chars: number | null;
+  texto_cuerpo_nota: string | null;
+  extracto_cuerpo_1300: string | null;
+  cuerpo_nota_chars: number | null;
+  tipo_nota: string | null;
 }
 
 /** Campos que el enriquecimiento puede actualizar en `noticias`. */
@@ -36,6 +44,14 @@ export interface NoticiaEnriquecidaUpdate {
   autor?: string | null;
   seccion?: string | null;
   imagen_principal?: string | null;
+  texto_nota_limpia?: string | null;
+  extracto_nota_1300?: string | null;
+  calidad_extraccion?: string | null;
+  texto_limpio_chars?: number | null;
+  texto_cuerpo_nota?: string | null;
+  extracto_cuerpo_1300?: string | null;
+  cuerpo_nota_chars?: number | null;
+  tipo_nota?: string | null;
   estado_extraccion?: string;
   error_extraccion?: string | null;
   notas?: string;
@@ -45,6 +61,12 @@ export interface EnrichOpts {
   limit?: number;
   onlyMissingTitle?: boolean;
   onlyMissingText?: boolean;
+  /** Filtra noticias donde texto_nota_limpia IS NULL. */
+  onlyMissingCleanText?: boolean;
+  /** Filtra noticias que ya tienen texto_nota_limpia pero no texto_cuerpo_nota. */
+  onlyMissingBodyText?: boolean;
+  /** Filtra noticias con menciones_procesado = false (pendientes de detección). */
+  onlyPendingMentions?: boolean;
   dryRun: boolean;
   maxChars?: number;
 }
@@ -54,6 +76,9 @@ export interface EnrichDeps {
     limit?: number;
     onlyMissingTitle?: boolean;
     onlyMissingText?: boolean;
+    onlyMissingCleanText?: boolean;
+    onlyMissingBodyText?: boolean;
+    onlyPendingMentions?: boolean;
   }) => Promise<NoticiaEnriquecibleRow[]>;
   extract: (url: string) => Promise<FetchExtractResult>;
   updateNoticia: (id: string, fields: NoticiaEnriquecidaUpdate) => Promise<void>;
@@ -74,6 +99,10 @@ export interface EnrichResult {
   actualizadas: number;
   sinCambios: number;
   fallidas: number;
+  /** Cuántas de las noticias leídas tienen texto_nota_limpia no nulo tras el proceso. */
+  conTextoLimpio: number;
+  /** Cuántas de las noticias leídas tienen texto_cuerpo_nota no nulo tras el proceso. */
+  conCuerpoNota: number;
   dryRun: boolean;
   detalle: EnrichItemResult[];
 }
@@ -138,6 +167,30 @@ export function construirActualizacion(
     campos.push('imagen_principal');
   }
 
+  // Texto limpio: rellenar si falta
+  if (extracto.texto_nota_limpia != null && vacio(noticia.texto_nota_limpia)) {
+    fields.texto_nota_limpia = extracto.texto_nota_limpia;
+    fields.extracto_nota_1300 = extracto.extracto_nota_1300;
+    fields.calidad_extraccion = extracto.calidad_extraccion;
+    fields.texto_limpio_chars = extracto.texto_limpio_chars;
+    campos.push('texto_nota_limpia', 'extracto_nota_1300', 'calidad_extraccion', 'texto_limpio_chars');
+  }
+
+  // Cuerpo de nota y tipo editorial: rellenar si faltan.
+  // --only-missing-body-text puede llegar a noticias que YA tienen texto_nota_limpia
+  // pero no tienen texto_cuerpo_nota: en ese caso el extractor recalculó cuerpo
+  // a partir del texto_nota_limpia ya existente en el extracto.
+  if (extracto.texto_cuerpo_nota != null && vacio(noticia.texto_cuerpo_nota)) {
+    fields.texto_cuerpo_nota = extracto.texto_cuerpo_nota;
+    fields.extracto_cuerpo_1300 = extracto.extracto_cuerpo_1300;
+    fields.cuerpo_nota_chars = extracto.cuerpo_nota_chars;
+    campos.push('texto_cuerpo_nota', 'extracto_cuerpo_1300', 'cuerpo_nota_chars');
+  }
+  if (extracto.tipo_nota != null && vacio(noticia.tipo_nota)) {
+    fields.tipo_nota = extracto.tipo_nota;
+    campos.push('tipo_nota');
+  }
+
   // Trazabilidad del estado de extracción tras el enriquecimiento.
   if (!extracto.ok) {
     fields.estado_extraccion = 'error';
@@ -167,6 +220,9 @@ export async function enrichNews(
     limit: opts.limit,
     onlyMissingTitle: opts.onlyMissingTitle,
     onlyMissingText: opts.onlyMissingText,
+    onlyMissingCleanText: opts.onlyMissingCleanText,
+    onlyMissingBodyText: opts.onlyMissingBodyText,
+    onlyPendingMentions: opts.onlyPendingMentions,
   });
 
   const detalle: EnrichItemResult[] = [];
@@ -219,11 +275,31 @@ export async function enrichNews(
     else sinCambios += 1;
   }
 
+  // Conteos post-proceso: refleja el estado efectivo incluyendo lo que ya tenían +
+  // lo que se acaba de escribir (en dry-run, lo que se habría escrito).
+  const conTextoLimpio = noticias.filter((n, i) => {
+    const d = detalle[i];
+    return (
+      !vacio(n.texto_nota_limpia) ||
+      (d !== undefined && 'texto_nota_limpia' in (d.fields ?? {}))
+    );
+  }).length;
+
+  const conCuerpoNota = noticias.filter((n, i) => {
+    const d = detalle[i];
+    return (
+      !vacio(n.texto_cuerpo_nota) ||
+      (d !== undefined && 'texto_cuerpo_nota' in (d.fields ?? {}))
+    );
+  }).length;
+
   return {
     leidas: noticias.length,
     actualizadas,
     sinCambios,
     fallidas,
+    conTextoLimpio,
+    conCuerpoNota,
     dryRun: opts.dryRun,
     detalle,
   };

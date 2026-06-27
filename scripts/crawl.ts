@@ -21,6 +21,7 @@
  *   npm run crawl -- --only-status=parcial          # solo cierto diagnóstico (acepta "partial")
  *   npm run crawl -- --only-status=ok,parcial
  *   npm run crawl -- --exclude-status=error,sin_fuente,especial
+ *   npm run crawl -- --medio-ids=MED-0001,MED-0029  # solo estos medios (sobrescribe otros filtros)
  *
  * Los flags se pueden combinar, p.ej.:
  *   npm run crawl -- --dry-run --limit=10 --solo-validados
@@ -48,6 +49,7 @@ import { parseBool, parseIntOrNull } from '../src/utils/parse.js';
 interface CrawlArgs extends CrawlFiltros {
   limit?: number;
   dryRun: boolean;
+  medioIds?: string[];
 }
 
 function splitList(v: string): string[] {
@@ -88,6 +90,9 @@ function parseArgs(argv: string[]): CrawlArgs {
         break;
       case 'exclude-status':
         out.excludeStatus = splitList(value);
+        break;
+      case 'medio-ids':
+        out.medioIds = splitList(value);
         break;
       default:
         logger.warn({ flag: arg }, 'Flag desconocido ignorado');
@@ -160,7 +165,22 @@ async function main() {
   const modoMvp = parseBool(config['modo_mvp'], true);
   const maxNotas = parseIntOrNull(config['max_notas_por_medio_por_corrida']) ?? 25;
 
-  const medios = await getMediosActivos();
+  let medios = await getMediosActivos();
+
+  // Si se pasó --medio-ids, filtramos antes de cualquier otra lógica.
+  if (args.medioIds && args.medioIds.length > 0) {
+    const set = new Set(args.medioIds.map((id) => id.trim().toUpperCase()));
+    const antes = medios.length;
+    medios = medios.filter((m) => set.has(m.medio_id.toUpperCase()));
+    logger.info(
+      { medioIds: args.medioIds, encontrados: medios.length, de: antes },
+      'Filtro --medio-ids aplicado',
+    );
+    if (medios.length === 0) {
+      logger.warn('Ninguno de los medio_id indicados está activo. Abortando.');
+      return;
+    }
+  }
 
   // Diagnósticos best-effort: si la pestaña no existe o falla, seguimos con
   // los filtros duros (la selección lo maneja con diagnóstico null).
@@ -223,6 +243,7 @@ async function main() {
   let totalNuevas = 0;
   let totalDuplicados = 0;
   let totalErrores = 0;
+  let totalPromovidas = 0;
 
   for (const decision of seleccion) {
     const medio = porId.get(decision.medio.medio_id);
@@ -233,6 +254,7 @@ async function main() {
 
     let insertadas = 0;
     let duplicados = 0;
+    let promovidas = 0;
     let estadoFinal = result.estado as string;
     let errorFinal = result.error;
 
@@ -241,8 +263,10 @@ async function main() {
         const ingest = await ingestNoticias(result.items);
         insertadas = ingest.insertadas;
         duplicados = ingest.duplicados;
+        promovidas = ingest.promovidas_diagnostico;
         totalNuevas += insertadas;
         totalDuplicados += duplicados;
+        totalPromovidas += promovidas;
       } catch (err) {
         estadoFinal = 'error';
         errorFinal = err instanceof Error ? err.message : String(err);
@@ -267,13 +291,13 @@ async function main() {
     });
 
     logger.info(
-      { medio_id: medio.medio_id, estado: estadoFinal, insertadas, duplicados },
+      { medio_id: medio.medio_id, estado: estadoFinal, insertadas, duplicados, promovidas_diagnostico: promovidas },
       `Medio procesado: ${medio.nombre_medio}`,
     );
   }
 
   logger.info(
-    { procesados: seleccion.length, totalNuevas, totalDuplicados, totalErrores },
+    { procesados: seleccion.length, nuevas: totalNuevas, duplicados: totalDuplicados, promovidas_diagnostico: totalPromovidas, totalErrores },
     'Corrida de ingesta completada.',
   );
 }

@@ -37,6 +37,16 @@ export const NOTICIAS_RAW_HEADERS = [
   'menciones_procesado',
   'notas',
   'created_at',
+  // Columnas de texto limpio (0007) — al final para no romper estructura existente
+  'texto_nota_limpia',
+  'extracto_nota_1300',
+  'calidad_extraccion',
+  'texto_limpio_chars',
+  // Columnas de cuerpo y tipo editorial (0008)
+  'texto_cuerpo_nota',
+  'extracto_cuerpo_1300',
+  'cuerpo_nota_chars',
+  'tipo_nota',
 ] as const;
 
 /** Cabeceras oficiales de `02_Menciones`. */
@@ -142,8 +152,16 @@ export function noticiaToOutputRow(n: NoticiaRawRow): OutRow {
     duplicado: null, // la tabla noticias no marca duplicado a nivel fila
     estado_procesamiento: n.estado_procesamiento,
     menciones_procesado: n.menciones_procesado,
-    notas: null,
+    notas: n.notas,
     created_at: n.created_at,
+    texto_nota_limpia: n.texto_nota_limpia,
+    extracto_nota_1300: n.extracto_nota_1300,
+    calidad_extraccion: n.calidad_extraccion,
+    texto_limpio_chars: n.texto_limpio_chars,
+    texto_cuerpo_nota: n.texto_cuerpo_nota,
+    extracto_cuerpo_1300: n.extracto_cuerpo_1300,
+    cuerpo_nota_chars: n.cuerpo_nota_chars,
+    tipo_nota: n.tipo_nota,
   };
 }
 

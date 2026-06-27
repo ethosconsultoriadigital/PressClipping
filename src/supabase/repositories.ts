@@ -8,6 +8,13 @@ import { getSupabase } from './client.js';
 import type { Medio, Cliente, Keyword, ConfigRow } from '../types/schemas.js';
 import type { NoticiaInsert } from '../normalizers/noticia.js';
 import {
+  clasificarIngesta,
+  construirUpdatePromocion,
+  type ExistenteNoticia,
+  type PromocionUpdate,
+} from '../crawlers/promocion.js';
+import { childLogger } from '../utils/logger.js';
+import {
   type MencionExportRow,
   SELECT_MENCION_EXPORT,
   mapMencionExport,
@@ -128,6 +135,8 @@ export async function updateMedioEstado(
 export interface IngestResult {
   insertadas: number;
   duplicados: number;
+  /** Notas diagnósticas promovidas a orgánicas por redescubrimiento orgánico. */
+  promovidas_diagnostico: number;
 }
 
 /**
@@ -143,7 +152,9 @@ export interface IngestResult {
 export async function ingestNoticias(
   items: NoticiaInsert[],
 ): Promise<IngestResult> {
-  if (items.length === 0) return { insertadas: 0, duplicados: 0 };
+  if (items.length === 0) {
+    return { insertadas: 0, duplicados: 0, promovidas_diagnostico: 0 };
+  }
   const supabase = getSupabase();
 
   // 1. Dedup dentro del lote por hash_url (conserva el primero).
@@ -153,30 +164,103 @@ export async function ingestNoticias(
   }
   const unicos = [...porHash.values()];
 
-  // 2. ¿Cuáles ya existen en DB?
+  // 2. ¿Cuáles ya existen en DB? Traemos también origen_cobertura/medio_id para
+  //    poder promover notas diagnósticas redescubiertas orgánicamente.
   const hashes = unicos.map((u) => u.hash_url);
   const { data: existentes, error: selErr } = await supabase
     .from('noticias')
-    .select('hash_url')
+    .select('hash_url, origen_cobertura, medio_id, fecha_publicacion, titulo')
     .in('hash_url', hashes);
   if (selErr) throw new Error(`Chequeo de duplicados falló: ${selErr.message}`);
 
-  const yaExisten = new Set((existentes ?? []).map((e) => e.hash_url as string));
-  const nuevos = unicos.filter((u) => !yaExisten.has(u.hash_url));
-  const duplicados = unicos.length - nuevos.length;
+  const mapaExistentes = new Map<string, ExistenteNoticia>(
+    (existentes ?? []).map((e: any) => [
+      e.hash_url as string,
+      {
+        hash_url: e.hash_url as string,
+        origen_cobertura: (e.origen_cobertura as string | null) ?? null,
+        medio_id: (e.medio_id as string | null) ?? null,
+        fecha_publicacion: (e.fecha_publicacion as string | null) ?? null,
+        titulo: (e.titulo as string | null) ?? null,
+      },
+    ]),
+  );
 
-  if (nuevos.length === 0) return { insertadas: 0, duplicados };
+  // 3. Clasificar: nuevas vs promociones vs duplicados (lógica pura).
+  const { nuevas, promociones, duplicados } = clasificarIngesta(unicos, mapaExistentes);
 
-  // 3. Clustering best-effort por hash_contenido.
-  await asignarClusters(nuevos);
+  // 4. Promover notas diagnósticas redescubiertas por fuente orgánica.
+  const promovidas = await promoverDiagnosticos(promociones);
 
-  // 4. Insertar (ignora colisiones por si hubo carrera con otra corrida).
+  if (nuevas.length === 0) {
+    return { insertadas: 0, duplicados, promovidas_diagnostico: promovidas };
+  }
+
+  // 5. Clustering best-effort por hash_contenido.
+  await asignarClusters(nuevas);
+
+  // 6. Insertar (ignora colisiones por si hubo carrera con otra corrida).
   const { error: insErr } = await supabase
     .from('noticias')
-    .upsert(nuevos, { onConflict: 'hash_url', ignoreDuplicates: true });
+    .upsert(nuevas, { onConflict: 'hash_url', ignoreDuplicates: true });
   if (insErr) throw new Error(`Inserción de noticias falló: ${insErr.message}`);
 
-  return { insertadas: nuevos.length, duplicados };
+  return { insertadas: nuevas.length, duplicados, promovidas_diagnostico: promovidas };
+}
+
+/**
+ * Aplica las promociones diagnóstico → orgánico en DB.
+ *
+ * Por cada nota promovida actualiza origen_cobertura, fuente_extraccion,
+ * medio_id (al orgánico actual) y reactiva la detección de menciones
+ * (`menciones_procesado = false`). NO toca url/url_canonica/created_at ni
+ * `fuente_comparativo_url`. La nota de auditoría (`notas_cobertura`) es
+ * best-effort: si la columna no existe aún (migración 0013 sin aplicar) se
+ * omite sin romper la corrida. `updated_at` lo mantiene el trigger.
+ */
+async function promoverDiagnosticos(
+  promociones: PromocionUpdate[],
+): Promise<number> {
+  if (promociones.length === 0) return 0;
+  const supabase = getSupabase();
+  const log = childLogger({ accion: 'promocion_diagnostico' });
+  let promovidas = 0;
+
+  const NOTA =
+    'Promovida de diagnóstico PressClipping a orgánica por redescubrimiento en fuente RSS/SITEMAP.';
+
+  for (const p of promociones) {
+    const baseUpdate = {
+      ...construirUpdatePromocion(p),
+      updated_at: new Date().toISOString(),
+    };
+
+    // Intento con nota de auditoría; si la columna no existe, reintento sin ella.
+    let { error } = await supabase
+      .from('noticias')
+      .update({ ...baseUpdate, notas_cobertura: NOTA })
+      .eq('hash_url', p.hash_url)
+      .eq('origen_cobertura', 'pressclipping_diagnostico'); // guarda anti-carrera
+
+    if (error && /notas_cobertura/.test(error.message)) {
+      ({ error } = await supabase
+        .from('noticias')
+        .update(baseUpdate)
+        .eq('hash_url', p.hash_url)
+        .eq('origen_cobertura', 'pressclipping_diagnostico'));
+    }
+
+    if (error) {
+      log.warn({ hash_url: p.hash_url, err: error.message }, 'No se pudo promover nota diagnóstica');
+      continue;
+    }
+    promovidas += 1;
+  }
+
+  if (promovidas > 0) {
+    log.info({ promovidas }, 'Notas diagnósticas promovidas a orgánicas');
+  }
+  return promovidas;
 }
 
 /**
@@ -288,20 +372,57 @@ export interface NoticiaScanRow {
   subtitulo: string | null;
   resumen: string | null;
   texto_extraido: string | null;
+  /** Cuerpo limpio sin nav/promo/relacionados. Preferido sobre texto_extraido. */
+  texto_nota_limpia: string | null;
+  /** Cuerpo puro sin encabezado editorial (autor, fecha). Preferido para IA/menciones. */
+  texto_cuerpo_nota: string | null;
   seccion: string | null;
   medio_nombre: string | null;
 }
 
+export interface NoticiasPendientesOpts {
+  /** Limitar el lote. */
+  limit: number;
+  /**
+   * Solo noticias que ya tienen texto_cuerpo_nota.
+   * Útil cuando el backlog tiene muchas noticias sin enriquecer y queremos
+   * procesar primero las que ya tienen texto, sin marcar las demás.
+   */
+  onlyWithText?: boolean;
+  /**
+   * Excluir notas diagnósticas (origen_cobertura=pressclipping_diagnostico).
+   * Por defecto NO se filtran aquí; el caller decide. Las notas diagnósticas
+   * provienen de URLs de PressClipping y NO deben generar cobertura orgánica.
+   */
+  excludeDiagnostic?: boolean;
+}
+
 /** Lee noticias aún no analizadas para menciones (las pendientes). */
-export async function getNoticiasPendientes(limit: number): Promise<NoticiaScanRow[]> {
-  const { data, error } = await getSupabase()
+export async function getNoticiasPendientes(
+  limitOrOpts: number | NoticiasPendientesOpts,
+): Promise<NoticiaScanRow[]> {
+  const opts: NoticiasPendientesOpts =
+    typeof limitOrOpts === 'number' ? { limit: limitOrOpts } : limitOrOpts;
+
+  let query = getSupabase()
     .from('noticias')
     .select(
-      'noticia_id, medio_id, titulo, subtitulo, resumen, texto_extraido, seccion, medios(nombre_medio)',
+      'noticia_id, medio_id, titulo, subtitulo, resumen, texto_extraido,' +
+      ' texto_nota_limpia, texto_cuerpo_nota, seccion, medios(nombre_medio)',
     )
     .eq('menciones_procesado', false)
     .order('created_at', { ascending: true })
-    .limit(limit);
+    .limit(opts.limit);
+
+  if (opts.onlyWithText) {
+    query = query.not('texto_cuerpo_nota', 'is', null);
+  }
+
+  if (opts.excludeDiagnostic) {
+    query = query.neq('origen_cobertura', 'pressclipping_diagnostico');
+  }
+
+  const { data, error } = await query;
   if (error) throw new Error(`No se pudieron leer noticias pendientes: ${error.message}`);
 
   return (data ?? []).map((row: any) => ({
@@ -311,6 +432,8 @@ export async function getNoticiasPendientes(limit: number): Promise<NoticiaScanR
     subtitulo: row.subtitulo,
     resumen: row.resumen,
     texto_extraido: row.texto_extraido,
+    texto_nota_limpia: row.texto_nota_limpia ?? null,
+    texto_cuerpo_nota: row.texto_cuerpo_nota ?? null,
     seccion: row.seccion,
     medio_nombre: row.medios?.nombre_medio ?? null,
   }));
@@ -502,11 +625,17 @@ export interface EnriquecerOpts {
   onlyMissingTitle?: boolean;
   /** Solo noticias con texto_extraido IS NULL. */
   onlyMissingText?: boolean;
+  /** Solo noticias con texto_nota_limpia IS NULL. */
+  onlyMissingCleanText?: boolean;
+  /** Solo noticias con texto_nota_limpia lleno pero texto_cuerpo_nota IS NULL. */
+  onlyMissingBodyText?: boolean;
+  /** Solo noticias con menciones_procesado = false (pendientes de detección). */
+  onlyPendingMentions?: boolean;
 }
 
 /**
  * Lee noticias candidatas a enriquecer (visitar su URL y completar campos).
- * Por defecto trae todas; con los flags filtra por título o texto faltante.
+ * Por defecto trae todas; con los flags filtra por campo faltante.
  */
 export async function getNoticiasParaEnriquecer(
   opts: EnriquecerOpts = {},
@@ -514,12 +643,23 @@ export async function getNoticiasParaEnriquecer(
   let query = getSupabase()
     .from('noticias')
     .select(
-      'noticia_id, url_original, titulo, resumen, texto_extraido, autor, seccion, imagen_principal',
+      'noticia_id, url_original, titulo, resumen, texto_extraido, autor, seccion, imagen_principal,' +
+      ' texto_nota_limpia, extracto_nota_1300, calidad_extraccion, texto_limpio_chars,' +
+      ' texto_cuerpo_nota, extracto_cuerpo_1300, cuerpo_nota_chars, tipo_nota',
     )
     .order('created_at', { ascending: true });
 
   if (opts.onlyMissingTitle) query = query.is('titulo', null);
   if (opts.onlyMissingText) query = query.is('texto_extraido', null);
+  if (opts.onlyMissingCleanText) query = query.is('texto_nota_limpia', null);
+  if (opts.onlyMissingBodyText) {
+    query = query
+      .not('texto_nota_limpia', 'is', null)
+      .is('texto_cuerpo_nota', null);
+  }
+  if (opts.onlyPendingMentions) {
+    query = query.eq('menciones_procesado', false);
+  }
   if (opts.limit && opts.limit > 0) query = query.limit(opts.limit);
 
   const { data, error } = await query;

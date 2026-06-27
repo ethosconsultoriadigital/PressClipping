@@ -5,7 +5,13 @@
  * coincidencia (según la regla de la keyword y sus puertas de contexto) crea una
  * mención. Marca las noticias como procesadas para no reanalizarlas.
  *
- * Uso:  npm run detect-mentions
+ * Uso:
+ *   npm run detect-mentions                        # real, todas las pendientes
+ *   npm run detect-mentions -- --limit=70          # real, limitado
+ *   npm run detect-mentions -- --dry-run           # no inserta ni marca
+ *   npm run detect-mentions -- --limit=70 --dry-run
+ *   npm run detect-mentions -- --limit=50 --only-with-text          # solo noticias con texto_cuerpo_nota
+ *   npm run detect-mentions -- --limit=50 --only-with-text --dry-run
  */
 import {
   getConfigMap,
@@ -28,6 +34,35 @@ import {
 import { writeIngestaLog } from '../src/logs/ingestaLogger.js';
 import { logger } from '../src/utils/logger.js';
 import { parseIntOrNull } from '../src/utils/parse.js';
+
+// ---------------------------------------------------------------------------
+// Argument parsing
+// ---------------------------------------------------------------------------
+
+interface DetectArgs {
+  dryRun: boolean;
+  limit?: number;
+  /** Solo analizar noticias que ya tienen texto_cuerpo_nota (evita marcar noticias sin texto). */
+  onlyWithText?: boolean;
+  /** Incluir notas diagnósticas de PressClipping (por defecto se excluyen, no son cobertura orgánica). */
+  includeDiagnostic?: boolean;
+}
+
+function parseArgs(argv: string[]): DetectArgs {
+  const out: DetectArgs = { dryRun: false };
+  for (const arg of argv) {
+    if (!arg.startsWith('--')) continue;
+    const body = arg.slice(2);
+    const eq = body.indexOf('=');
+    const key = eq === -1 ? body : body.slice(0, eq);
+    const value = eq === -1 ? '' : body.slice(eq + 1);
+    if (key === 'dry-run') out.dryRun = true;
+    if (key === 'only-with-text') out.onlyWithText = true;
+    if (key === 'include-diagnostic') out.includeDiagnostic = true;
+    if (key === 'limit') out.limit = parseIntOrNull(value) ?? undefined;
+  }
+  return out;
+}
 
 const TIPOS_VALIDOS: TipoKeyword[] = [
   'exacta',
@@ -54,31 +89,53 @@ function toRule(row: KeywordActivaRow): KeywordRule {
   };
 }
 
-/** Arma los campos buscables de una noticia con sus pesos. */
+/**
+ * Arma los campos buscables de una noticia con sus pesos.
+ *
+ * Prioridad de texto para el campo principal:
+ *   texto_cuerpo_nota > texto_nota_limpia > texto_extraido
+ *
+ * - `texto_cuerpo_nota`: cuerpo puro, sin encabezado editorial. Máxima calidad.
+ * - `texto_nota_limpia`: sin ruido fuerte de menú/nav, pero incluye autor/fecha.
+ * - `texto_extraido`: fallback raw, puede tener ruido de relacionadas/footer.
+ */
 function camposDe(n: NoticiaScanRow): CampoBuscable[] {
+  const textoEfectivo = n.texto_cuerpo_nota ?? n.texto_nota_limpia ?? n.texto_extraido ?? '';
   return [
     { nombre: 'titulo', texto: n.titulo ?? '', peso: PESOS_CAMPO.titulo! },
     { nombre: 'subtitulo', texto: n.subtitulo ?? '', peso: PESOS_CAMPO.subtitulo! },
     { nombre: 'resumen', texto: n.resumen ?? '', peso: PESOS_CAMPO.resumen! },
     { nombre: 'seccion', texto: n.seccion ?? '', peso: PESOS_CAMPO.seccion! },
-    { nombre: 'texto_extraido', texto: n.texto_extraido ?? '', peso: PESOS_CAMPO.texto_extraido! },
+    { nombre: 'texto_extraido', texto: textoEfectivo, peso: PESOS_CAMPO.texto_extraido! },
     { nombre: 'medio', texto: n.medio_nombre ?? '', peso: PESOS_CAMPO.medio! },
   ];
 }
 
 async function main() {
+  const args = parseArgs(process.argv.slice(2));
   const started = Date.now();
+
   const config = await getConfigMap();
-  const limit = parseIntOrNull(config['max_noticias_por_deteccion']) ?? 500;
+  const configLimit = parseIntOrNull(config['max_noticias_por_deteccion']) ?? 500;
+  const limit = args.limit ?? configLimit;
+
+  logger.info(
+    { dryRun: args.dryRun, limit, onlyWithText: args.onlyWithText ?? false, includeDiagnostic: args.includeDiagnostic ?? false },
+    'Iniciando detección de menciones',
+  );
 
   const keywordRows = await getKeywordsActivas();
   const reglas = keywordRows.map(toRule);
   const alertaPorKeyword = new Map(keywordRows.map((k) => [k.keyword_id, k.alerta]));
 
-  const noticias = await getNoticiasPendientes(limit);
+  const noticias = await getNoticiasPendientes({
+    limit,
+    onlyWithText: args.onlyWithText,
+    excludeDiagnostic: !args.includeDiagnostic,
+  });
   logger.info(
     { keywords: reglas.length, noticias: noticias.length },
-    'Iniciando detección de menciones',
+    'Noticias pendientes cargadas',
   );
 
   if (reglas.length === 0) {
@@ -105,6 +162,64 @@ async function main() {
     }
   }
 
+  if (args.dryRun) {
+    // Dry-run: mostrar resultado sin escribir en Supabase
+    logger.info(
+      {
+        analizadas: noticias.length,
+        menciones_potenciales: menciones.length,
+        keywords_activas: reglas.length,
+        usandoCuerpo: noticias.filter((n) => n.texto_cuerpo_nota !== null).length,
+        usandoTextoLimpio: noticias.filter((n) => n.texto_cuerpo_nota === null && n.texto_nota_limpia !== null).length,
+        usandoFallback: noticias.filter((n) => n.texto_cuerpo_nota === null && n.texto_nota_limpia === null && n.texto_extraido !== null).length,
+        sinTexto: noticias.filter((n) => n.texto_cuerpo_nota === null && n.texto_nota_limpia === null && n.texto_extraido === null).length,
+      },
+      '[dry-run] Resumen — no se insertó nada ni se marcó ninguna noticia',
+    );
+
+    // Mostrar top menciones (máx 10)
+    const top = menciones.slice(0, 10);
+    for (const m of top) {
+      const noticia = noticias.find((n) => n.noticia_id === m.noticia_id);
+      // Determinar en qué campo se detectó el match
+      const campoMatch = (() => {
+        if (noticia) {
+          const campos = camposDe(noticia);
+          for (const c of campos) {
+            if (c.texto && m.texto_match && c.texto.includes(m.texto_match.slice(0, 20))) {
+              return c.nombre;
+            }
+          }
+        }
+        return 'desconocido';
+      })();
+
+      logger.info(
+        {
+          noticia_id: m.noticia_id,
+          titulo: noticia?.titulo ?? '(sin título)',
+          medio: noticia?.medio_nombre ?? '(desconocido)',
+          keyword: m.keyword,
+          tipo_match: m.tipo_match,
+          score: m.score_relevancia,
+          campo_match: campoMatch,
+          usaTextoLimpio: noticia?.texto_nota_limpia !== null,
+          extracto_match: m.texto_match?.slice(0, 200) ?? null,
+        },
+        '[dry-run] Mención potencial',
+      );
+    }
+
+    if (menciones.length > 10) {
+      logger.info(
+        { total: menciones.length, mostradas: 10 },
+        '[dry-run] Solo se muestran las primeras 10 menciones',
+      );
+    }
+    return;
+  }
+
+  // Modo real: insertar y marcar
   const insertadas = await insertMenciones(menciones);
   await markNoticiasProcesadas(noticias.map((n) => n.noticia_id));
 

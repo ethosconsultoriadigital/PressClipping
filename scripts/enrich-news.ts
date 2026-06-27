@@ -7,10 +7,13 @@
  * y NO dispara detección de menciones, IA ni alertas.
  *
  * Uso:
- *   npm run enrich-news -- --dry-run                       # plan, no escribe
- *   npm run enrich-news -- --limit=20 --only-missing-title # solo sin título
- *   npm run enrich-news -- --limit=20 --only-missing-text  # solo sin texto
- *   npm run enrich-news -- --url=https://medio.mx/nota/x    # diagnóstico 1 URL
+ *   npm run enrich-news -- --dry-run                              # plan, no escribe
+ *   npm run enrich-news -- --limit=20 --only-missing-title        # solo sin título
+ *   npm run enrich-news -- --limit=20 --only-missing-text         # solo sin texto
+ *   npm run enrich-news -- --limit=20 --only-missing-clean-text   # sin texto_nota_limpia
+ *   npm run enrich-news -- --limit=20 --only-missing-body-text    # sin texto_cuerpo_nota
+ *   npm run enrich-news -- --limit=50 --only-pending-mentions --only-missing-clean-text --dry-run
+ *   npm run enrich-news -- --url=https://medio.mx/nota/x          # diagnóstico 1 URL
  *   npm run enrich-news -- --url=https://medio.mx/nota/x --dry-run
  *
  * En modo --url NUNCA escribe en Supabase: solo descarga y muestra lo extraído.
@@ -53,6 +56,15 @@ function parseArgs(argv: string[]): EnrichArgs {
       case 'only-missing-text':
         out.onlyMissingText = true;
         break;
+      case 'only-missing-clean-text':
+        out.onlyMissingCleanText = true;
+        break;
+      case 'only-missing-body-text':
+        out.onlyMissingBodyText = true;
+        break;
+      case 'only-pending-mentions':
+        out.onlyPendingMentions = true;
+        break;
       case 'limit':
         out.limit = parseIntOrNull(value) ?? undefined;
         break;
@@ -93,13 +105,42 @@ async function diagnosticarUrl(url: string, args: EnrichArgs): Promise<void> {
       texto_chars: extracto.texto_extraido?.length ?? 0,
       texto_preview: extracto.texto_extraido?.slice(0, 300) ?? null,
     },
-    'Resultado de extracción',
+    'Resultado de extracción (raw)',
+  );
+  logger.info(
+    {
+      calidad_extraccion: extracto.calidad_extraccion,
+      texto_limpio_chars: extracto.texto_limpio_chars,
+      extracto_1300_chars: extracto.extracto_nota_1300?.length ?? 0,
+      texto_limpio_preview: extracto.texto_nota_limpia?.slice(0, 500) ?? null,
+    },
+    'Resultado de texto limpio',
+  );
+  logger.info(
+    {
+      tipo_nota: extracto.tipo_nota,
+      cuerpo_nota_chars: extracto.cuerpo_nota_chars,
+      extracto_cuerpo_chars: extracto.extracto_cuerpo_1300?.length ?? 0,
+      cuerpo_preview: extracto.texto_cuerpo_nota?.slice(0, 400) ?? null,
+    },
+    'Resultado de cuerpo de nota',
   );
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  logger.info({ ...args }, 'Iniciando enrich-news');
+  logger.info(
+    {
+      dryRun: args.dryRun,
+      limit: args.limit,
+      onlyMissingTitle: args.onlyMissingTitle,
+      onlyMissingText: args.onlyMissingText,
+      onlyMissingCleanText: args.onlyMissingCleanText,
+      onlyMissingBodyText: args.onlyMissingBodyText,
+      onlyPendingMentions: args.onlyPendingMentions,
+    },
+    'Iniciando enrich-news',
+  );
 
   if (args.url) {
     await diagnosticarUrl(args.url, args);
@@ -134,6 +175,8 @@ async function main() {
         actualizarian: result.actualizadas,
         sinCambios: result.sinCambios,
         fallidas: result.fallidas,
+        conTextoLimpio: result.conTextoLimpio,
+        conCuerpoNota: result.conCuerpoNota,
       },
       '[dry-run] Resumen del enriquecimiento (no se escribió en Supabase)',
     );
@@ -146,6 +189,8 @@ async function main() {
       actualizadas: result.actualizadas,
       sinCambios: result.sinCambios,
       fallidas: result.fallidas,
+      conTextoLimpio: result.conTextoLimpio,
+      conCuerpoNota: result.conCuerpoNota,
     },
     'Enriquecimiento de noticias completado.',
   );

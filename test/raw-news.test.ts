@@ -30,15 +30,24 @@ function noticia(over: Partial<NoticiaRawRow> = {}): NoticiaRawRow {
     hash: 'abc123',
     estado_procesamiento: 'ok',
     menciones_procesado: false,
+    notas: null,
     created_at: '2026-01-02T00:00:00Z',
+    texto_nota_limpia: null,
+    extracto_nota_1300: null,
+    calidad_extraccion: null,
+    texto_limpio_chars: null,
+    texto_cuerpo_nota: null,
+    extracto_cuerpo_1300: null,
+    cuerpo_nota_chars: null,
+    tipo_nota: null,
     ...over,
   };
 }
 
 describe('noticiaToOutputRow', () => {
-  it('genera exactamente las 24 columnas de 01_Noticias_Raw', () => {
+  it('genera exactamente las 32 columnas de 01_Noticias_Raw', () => {
     const row = noticiaToOutputRow(noticia());
-    expect(Object.keys(row)).toHaveLength(24);
+    expect(Object.keys(row)).toHaveLength(32);
     expect(new Set(Object.keys(row))).toEqual(new Set(NOTICIAS_RAW_HEADERS));
   });
 
@@ -49,6 +58,62 @@ describe('noticiaToOutputRow', () => {
     expect(row.imagen_url).toBeNull();
     expect(row.fuente_metodo).toBe('sitemap');
     expect(row.hash).toBe('abc123');
+  });
+
+  it('propaga notas cuando está presente', () => {
+    const row = noticiaToOutputRow(noticia({ notas: 'titulo:html_og; texto:html_paragraphs' }));
+    expect(row.notas).toBe('titulo:html_og; texto:html_paragraphs');
+  });
+
+  it('deja notas en null cuando la noticia no tiene notas', () => {
+    const row = noticiaToOutputRow(noticia({ notas: null }));
+    expect(row.notas).toBeNull();
+  });
+
+  it('propaga los 4 campos de texto limpio cuando existen', () => {
+    const row = noticiaToOutputRow(
+      noticia({
+        texto_nota_limpia: 'Cuerpo real de la nota.',
+        extracto_nota_1300: 'Cuerpo real de la nota.',
+        calidad_extraccion: 'alta',
+        texto_limpio_chars: 23,
+      }),
+    );
+    expect(row.texto_nota_limpia).toBe('Cuerpo real de la nota.');
+    expect(row.extracto_nota_1300).toBe('Cuerpo real de la nota.');
+    expect(row.calidad_extraccion).toBe('alta');
+    expect(row.texto_limpio_chars).toBe(23);
+  });
+
+  it('deja los 4 campos de texto limpio en null cuando no existen', () => {
+    const row = noticiaToOutputRow(noticia());
+    expect(row.texto_nota_limpia).toBeNull();
+    expect(row.extracto_nota_1300).toBeNull();
+    expect(row.calidad_extraccion).toBeNull();
+    expect(row.texto_limpio_chars).toBeNull();
+  });
+
+  it('propaga los 4 campos de cuerpo/tipo cuando existen', () => {
+    const row = noticiaToOutputRow(
+      noticia({
+        texto_cuerpo_nota: 'Cuerpo real de la nota.',
+        extracto_cuerpo_1300: 'Cuerpo real de la nota.',
+        cuerpo_nota_chars: 23,
+        tipo_nota: 'Política',
+      }),
+    );
+    expect(row.texto_cuerpo_nota).toBe('Cuerpo real de la nota.');
+    expect(row.extracto_cuerpo_1300).toBe('Cuerpo real de la nota.');
+    expect(row.cuerpo_nota_chars).toBe(23);
+    expect(row.tipo_nota).toBe('Política');
+  });
+
+  it('deja los 4 campos de cuerpo/tipo en null cuando no existen', () => {
+    const row = noticiaToOutputRow(noticia());
+    expect(row.texto_cuerpo_nota).toBeNull();
+    expect(row.extracto_cuerpo_1300).toBeNull();
+    expect(row.cuerpo_nota_chars).toBeNull();
+    expect(row.tipo_nota).toBeNull();
   });
 });
 

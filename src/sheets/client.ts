@@ -30,6 +30,9 @@ export const OUTPUT_TABS = {
   LOGS: '04_Logs',
   COMPARATIVO: '05_Comparativo_PressClipping',
   RESUMEN_DIARIO: '06_Resumen_Diario',
+  METRICAS_LIVE: '07_Metricas_Live',
+  COBERTURA_MEDIOS: '08_Cobertura_Medios',
+  MEDIOS_PRESSCLIPPING: '09_Medios_PressClipping',
 } as const;
 
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];

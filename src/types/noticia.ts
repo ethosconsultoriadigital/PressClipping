@@ -29,13 +29,24 @@ export interface NoticiaRawRow {
   hash: string | null;
   estado_procesamiento: string | null;
   menciones_procesado: boolean;
+  notas: string | null;
   created_at: string | null;
+  texto_nota_limpia: string | null;
+  extracto_nota_1300: string | null;
+  calidad_extraccion: string | null;
+  texto_limpio_chars: number | null;
+  texto_cuerpo_nota: string | null;
+  extracto_cuerpo_1300: string | null;
+  cuerpo_nota_chars: number | null;
+  tipo_nota: string | null;
 }
 
 /** SELECT (PostgREST) con el join a medios para construir NoticiaRawRow. */
 export const SELECT_NOTICIA_RAW = `noticia_id, fecha_publicacion, fecha_captura, pais, estado, titulo,
    url_original, url_canonica, resumen, texto_extraido, autor, seccion, imagen_principal,
-   fuente_extraccion, hash_url, estado_extraccion, menciones_procesado, created_at,
+   fuente_extraccion, hash_url, estado_extraccion, menciones_procesado, notas,
+   texto_nota_limpia, extracto_nota_1300, calidad_extraccion, texto_limpio_chars,
+   texto_cuerpo_nota, extracto_cuerpo_1300, cuerpo_nota_chars, tipo_nota, created_at,
    medios(nombre_medio, grupo_medio, region, categoria)`;
 
 /** Transforma una fila cruda de Supabase (con join a medios) a NoticiaRawRow. */
@@ -62,6 +73,15 @@ export function mapNoticiaRaw(n: any): NoticiaRawRow {
     hash: n.hash_url ?? null,
     estado_procesamiento: n.estado_extraccion ?? null,
     menciones_procesado: n.menciones_procesado ?? false,
+    notas: n.notas ?? null,
     created_at: n.created_at ?? null,
+    texto_nota_limpia: n.texto_nota_limpia ?? null,
+    extracto_nota_1300: n.extracto_nota_1300 ?? null,
+    calidad_extraccion: n.calidad_extraccion ?? null,
+    texto_limpio_chars: n.texto_limpio_chars ?? null,
+    texto_cuerpo_nota: n.texto_cuerpo_nota ?? null,
+    extracto_cuerpo_1300: n.extracto_cuerpo_1300 ?? null,
+    cuerpo_nota_chars: n.cuerpo_nota_chars ?? null,
+    tipo_nota: n.tipo_nota ?? null,
   };
 }
