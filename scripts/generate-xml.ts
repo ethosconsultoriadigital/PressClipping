@@ -21,11 +21,18 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import {
   getMencionesParaXml,
   markMencionesExportadasXml,
 } from '../src/supabase/repositories.js';
-import { generarXml, type FiltrosXml } from '../src/exporters/xml.js';
+import { generarXml, aplicarFiltros, type FiltrosXml } from '../src/exporters/xml.js';
+import { OUTPUT_TABS } from '../src/sheets/client.js';
+import { appendOutputRows } from '../src/sheets/write.js';
+import {
+  xmlExportToOutputRow,
+  resumenInclusion,
+} from '../src/exporters/sheetRows.js';
 import { logger } from '../src/utils/logger.js';
 
 /** Parsea argumentos --clave=valor y --flag (booleano). */
@@ -76,10 +83,48 @@ async function main() {
     logger.info({ marcadas: ids.length }, 'Menciones marcadas como exportado_xml');
   }
 
+  // Registro best-effort en 03_XML_Export. NUNCA debe tumbar la generación del
+  // XML: si no hay Sheets de salida o la pestaña no existe, solo se avisa.
+  await registrarEnSheet(rows, filtros, out, total, marcar);
+
   logger.info(
     { notas: total, archivo: out, consideradas: rows.length },
     'XML generado correctamente.',
   );
+}
+
+/** Anexa una fila de bitácora a 03_XML_Export sin romper la corrida si falla. */
+async function registrarEnSheet(
+  rows: Awaited<ReturnType<typeof getMencionesParaXml>>,
+  filtros: FiltrosXml,
+  out: string,
+  total: number,
+  marcar: boolean,
+): Promise<void> {
+  try {
+    const { clientes, keywords } = resumenInclusion(aplicarFiltros(rows, filtros));
+    const fila = xmlExportToOutputRow({
+      xmlId: randomUUID(),
+      fechaGeneracion: new Date().toISOString(),
+      archivoXml: out.split(/[/\\]/).pop() ?? out,
+      rutaOUrl: out,
+      totalMenciones: total,
+      clientesIncluidos: clientes,
+      keywordsIncluidas: keywords,
+      desdeFecha: filtros.desde ?? null,
+      hastaFecha: filtros.hasta ?? null,
+      marcadoExportadoXml: marcar,
+      estatus: 'ok',
+      notas: filtros.cliente || filtros.keyword || filtros.medio ? 'con filtros' : null,
+    });
+    const escritas = await appendOutputRows(OUTPUT_TABS.XML_EXPORT, [fila]);
+    logger.info({ escritas }, 'Registro de XML añadido a 03_XML_Export');
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'No se pudo registrar en 03_XML_Export (se continúa; XML ya generado)',
+    );
+  }
 }
 
 main().catch((err) => {

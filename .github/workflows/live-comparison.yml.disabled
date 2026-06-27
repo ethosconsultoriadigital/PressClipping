@@ -1,0 +1,67 @@
+# ============================================================================
+# LIVE COMPARISON — Comparativo Ethos vs PressClipping (cada 2 horas)
+# ----------------------------------------------------------------------------
+# ARCHIVO DESACTIVADO A PROPÓSITO.
+#
+# La extensión es `.yml.disabled` para que GitHub Actions NO lo registre ni lo
+# ejecute. Para activarlo:
+#   1. Confirmar el gate de 2 ciclos manuales estables (ver docs/live-comparison-scheduler.md).
+#   2. Crear los secrets del repositorio (ver tabla en el doc).
+#   3. Renombrar este archivo a `live-comparison.yml`.
+#   4. Hacer un `workflow_dispatch` de prueba desde la pestaña Actions.
+#   5. Recién entonces descomentar el bloque `schedule`.
+#
+# NUNCA corre: generate-xml, classify-ia, alertas, WhatsApp/correos,
+# export-raw-news. NO toca 01_Noticias_Raw. El crawl va FILTRADO por --medio-ids.
+# ============================================================================
+name: live-comparison
+
+on:
+  # schedule:
+  #   - cron: '0 */2 * * *'   # cada 2 horas (UTC) — DESACTIVADO hasta autorización
+  workflow_dispatch:
+    inputs:
+      crawl_medio_ids:
+        description: 'IDs de medios a crawlear (coma-separados). Vacío = solo comparación.'
+        required: false
+        default: 'MED-0017,MED-0152,MED-0001,MED-0151'
+
+concurrency:
+  group: live-comparison
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Comparativo Ethos vs PressClipping
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      GOOGLE_OUTPUT_SHEET_ID: ${{ secrets.GOOGLE_OUTPUT_SHEET_ID }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+      LOG_FORMAT: json
+      RUN_BY: github-actions-live-comparison
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Live comparison (import XML + crawl filtrado + compare + histórico)
+        run: |
+          HOY=$(date -u +%F)
+          MANANA=$(date -u -d "+1 day" +%F)
+          npm run live-comparison -- \
+            --xml-url=https://tabla.ethosconsultoriadigital.workers.dev/read-xml \
+            --fecha-desde=$HOY --fecha-hasta=$MANANA \
+            --crawl-medio-ids='${{ github.event.inputs.crawl_medio_ids }}' \
+            --crawl-limit=50 \
+            --output=sheet --replace-window --append-metrics-history

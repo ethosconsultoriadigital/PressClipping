@@ -1,0 +1,95 @@
+# ============================================================================
+# LIVE COMPARISON — MODO SOMBRA (shadow scheduler, cada 2 horas)
+# ----------------------------------------------------------------------------
+# WORKFLOW ACTIVO EN MODO SOMBRA (NO producción).
+#
+# Corre cada 2 horas vía cron. Acumula histórico orgánico y comparativo SIN
+# entregar nada al cliente. Por código (run-shadow-scheduler.ts) impide:
+#   export-results · generate-xml · classify-ia · alertas · WhatsApp/correos ·
+#   export-raw-news. NO toca 01_Noticias_Raw. El crawl va FILTRADO (lista curada).
+#
+# MONITOREO (próximas 2-3 corridas) → revisar 07_Metricas_Live:
+#   ÉXITO:   estado_ciclo=shadow_ok (o shadow_warning leve), precision_ajustada>=0.90,
+#            sin flood, sin errores severos de crawl, sin escritura en 01/02/04.
+#   APAGADO: estado_ciclo=shadow_error, precision_ajustada<0.90, flood de FP,
+#            errores masivos de crawl, o cualquier intento de export-results/alertas/xml.
+#
+# Para DESACTIVAR ante un criterio de apagado:
+#   renombrar `live-comparison-shadow.yml` → `live-comparison-shadow.yml.disabled`.
+#
+# Si precision_ajustada >= 0.90 y no hay errores tras 2-3 ciclos, pasar a la
+# siguiente fase. NO activar producción (alertas/xml/export-results) sin autorización.
+#
+# Secrets requeridos (Settings → Secrets and variables → Actions):
+#   SUPABASE_URL
+#   SUPABASE_SERVICE_ROLE_KEY
+#   GOOGLE_SERVICE_ACCOUNT_EMAIL
+#   GOOGLE_PRIVATE_KEY
+#   GOOGLE_OUTPUT_SHEET_ID   (destino de escritura; fallback: GOOGLE_SHEET_ID)
+# ============================================================================
+name: live-comparison-shadow
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'   # cada 2 horas (UTC) — MODO SOMBRA activo
+  workflow_dispatch:
+    inputs:
+      window_hours:
+        description: 'Tamaño de la ventana móvil en horas.'
+        required: false
+        default: '48'
+      crawl_limit:
+        description: 'Límite de notas por medio en el crawl dirigido.'
+        required: false
+        default: '50'
+      medio_ids:
+        description: 'IDs de medios (coma-separados). Vacío = lista curada estable.'
+        required: false
+        default: ''
+
+concurrency:
+  group: live-comparison-shadow
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Shadow scheduler (ventana móvil, sin producción)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+      GOOGLE_OUTPUT_SHEET_ID: ${{ secrets.GOOGLE_OUTPUT_SHEET_ID }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      LOG_FORMAT: json
+      RUN_BY: github-actions-shadow-scheduler
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Shadow scheduler (ventana móvil 48h, sin alertas, sin export-results)
+        run: |
+          WINDOW="${{ github.event.inputs.window_hours || '48' }}"
+          LIMIT="${{ github.event.inputs.crawl_limit || '50' }}"
+          MEDIOS_ARG=""
+          if [ -n "${{ github.event.inputs.medio_ids }}" ]; then
+            MEDIOS_ARG="--medio-ids=${{ github.event.inputs.medio_ids }}"
+          fi
+          npm run shadow-scheduler -- \
+            --window-hours=$WINDOW \
+            --crawl-limit=$LIMIT \
+            $MEDIOS_ARG \
+            --output=sheet \
+            --append-metrics-history \
+            --no-alerts \
+            --no-export-results \
+            --no-generate-xml

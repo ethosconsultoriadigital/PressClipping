@@ -65,32 +65,113 @@ export function parseSitemapString(xml: string): {
 }
 
 /**
- * Descarga y parsea un sitemap, resolviendo índices hasta `maxIndexFollow`
- * sub-sitemaps y deteniéndose al alcanzar `limit` items.
+ * Ordena items por fecha descendente (más recientes primero).
+ * Los items sin fecha quedan al final (no se pierden, pero no desplazan recientes).
+ * Esto evita que `slice(0, limit)` descarte las notas nuevas cuando el
+ * sitemap lista las URLs en orden ascendente o arbitrario.
+ */
+function ordenarPorFechaDesc(items: RawItem[]): RawItem[] {
+  return [...items].sort((a, b) => {
+    const fa = a.fecha ?? '';
+    const fb = b.fecha ?? '';
+    if (fa && fb) return fb.localeCompare(fa);
+    if (fa) return -1; // a tiene fecha, va primero
+    if (fb) return 1;  // b tiene fecha, va primero
+    return 0;
+  });
+}
+
+export interface ResolverSitemapOpts {
+  /** Máximo de items a devolver (tras ordenar por fecha desc). */
+  limit?: number;
+  /** Máximo de sub-sitemaps a descargar en total (presupuesto global). */
+  maxSubSitemaps?: number;
+  /** Profundidad máxima de recursión de índices (1 = solo el raíz). */
+  maxDepth?: number;
+}
+
+export interface ResolverSitemapResult {
+  items: RawItem[];
+  /** ¿El sitemap raíz era un <sitemapindex>? */
+  esIndice: boolean;
+  /** Número de sub-sitemaps efectivamente descargados. */
+  subsVisitados: number;
+  /** Sub-sitemaps que fallaron (bloqueados / rotos). */
+  subsFallidos: number;
+}
+
+/**
+ * Resuelve un sitemap (normal o index) usando un `fetcher` inyectable
+ * (testeable sin red). Soporta índices con recursión controlada:
+ *  - Hasta `maxSubSitemaps` descargas de sub-sitemaps (presupuesto global).
+ *  - Hasta `maxDepth` niveles de índice (un sub-sitemap puede ser otro índice).
+ *  - Deduplica URLs por `loc`.
+ *  - Un sub-sitemap roto/bloqueado no tumba la resolución.
+ */
+export async function resolverSitemap(
+  rootUrl: string,
+  fetcher: (url: string) => Promise<string>,
+  opts: ResolverSitemapOpts = {},
+): Promise<ResolverSitemapResult> {
+  const { limit = 200, maxSubSitemaps = 20, maxDepth = 2 } = opts;
+  const vistos = new Set<string>();           // sub-sitemaps ya descargados (evita ciclos)
+  const urlsVistas = new Set<string>();       // dedupe de URLs de notas
+  const acumulado: RawItem[] = [];
+  let esIndiceRaiz = false;
+  let subsVisitados = 0;
+  let subsFallidos = 0;
+
+  const raizXml = await fetcher(rootUrl);
+  const raiz = parseSitemapString(raizXml);
+
+  const pushItems = (items: RawItem[]): void => {
+    for (const it of items) {
+      if (it.url && urlsVistas.has(it.url)) continue;
+      if (it.url) urlsVistas.add(it.url);
+      acumulado.push(it);
+    }
+  };
+
+  if (raiz.items.length > 0 || raiz.subSitemaps.length === 0) {
+    pushItems(raiz.items);
+    return { items: ordenarPorFechaDesc(acumulado).slice(0, limit), esIndice: false, subsVisitados, subsFallidos };
+  }
+
+  esIndiceRaiz = true;
+  // BFS por niveles respetando maxDepth y el presupuesto de descargas.
+  let nivel: string[] = raiz.subSitemaps.slice();
+  let depth = 1; // el raíz ya consumió el nivel 0
+  while (nivel.length > 0 && depth < maxDepth && subsVisitados < maxSubSitemaps) {
+    const siguiente: string[] = [];
+    for (const sub of nivel) {
+      if (subsVisitados >= maxSubSitemaps) break;
+      if (vistos.has(sub)) continue;
+      vistos.add(sub);
+      subsVisitados += 1;
+      try {
+        const parsed = parseSitemapString(await fetcher(sub));
+        pushItems(parsed.items);
+        if (parsed.subSitemaps.length > 0) siguiente.push(...parsed.subSitemaps);
+      } catch {
+        subsFallidos += 1;
+      }
+    }
+    nivel = siguiente;
+    depth += 1;
+  }
+
+  return { items: ordenarPorFechaDesc(acumulado).slice(0, limit), esIndice: esIndiceRaiz, subsVisitados, subsFallidos };
+}
+
+/**
+ * Descarga y parsea un sitemap, resolviendo índices (sub-sitemaps) con
+ * recursión controlada (profundidad y presupuesto de descargas) y dedupe.
+ * Los items se ordenan por fecha descendente antes de aplicar `limit`.
  */
 export async function fetchSitemap(
   url: string,
-  opts: { limit?: number; maxIndexFollow?: number } = {},
+  opts: { limit?: number; maxSubSitemaps?: number; maxDepth?: number } = {},
 ): Promise<RawItem[]> {
-  const { limit = 200, maxIndexFollow = 3 } = opts;
-  const xml = await fetchText(url);
-  const { items, subSitemaps } = parseSitemapString(xml);
-
-  if (items.length > 0 || subSitemaps.length === 0) {
-    return items.slice(0, limit);
-  }
-
-  // Resolver sub-sitemaps (limitado) y acumular hasta `limit`.
-  const acumulado: RawItem[] = [];
-  for (const sub of subSitemaps.slice(0, maxIndexFollow)) {
-    if (acumulado.length >= limit) break;
-    try {
-      const subXml = await fetchText(sub);
-      const parsed = parseSitemapString(subXml);
-      acumulado.push(...parsed.items);
-    } catch {
-      // un sub-sitemap roto no debe tumbar la corrida
-    }
-  }
-  return acumulado.slice(0, limit);
+  const { items } = await resolverSitemap(url, fetchText, opts);
+  return items;
 }

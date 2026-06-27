@@ -8,9 +8,9 @@
 import { GoogleSpreadsheet } from 'google-spreadsheet';
 import type { GoogleSpreadsheetWorksheet } from 'google-spreadsheet';
 import { JWT } from 'google-auth-library';
-import { requireSheetsEnv } from '../config/env.js';
+import { requireSheetsEnv, requireOutputSheetsEnv } from '../config/env.js';
 
-/** Nombres canónicos de las pestañas del panel. */
+/** Nombres canónicos de las pestañas del panel de control / configuración. */
 export const SHEET_TABS = {
   README: '00_README',
   MEDIOS: '01_Medios',
@@ -22,32 +22,59 @@ export const SHEET_TABS = {
   DICCIONARIOS: '07_Diccionarios',
 } as const;
 
+/** Nombres canónicos de las pestañas de la base operativa de captura (salida). */
+export const OUTPUT_TABS = {
+  NOTICIAS_RAW: '01_Noticias_Raw',
+  MENCIONES: '02_Menciones',
+  XML_EXPORT: '03_XML_Export',
+  LOGS: '04_Logs',
+  COMPARATIVO: '05_Comparativo_PressClipping',
+  RESUMEN_DIARIO: '06_Resumen_Diario',
+  METRICAS_LIVE: '07_Metricas_Live',
+  COBERTURA_MEDIOS: '08_Cobertura_Medios',
+  MEDIOS_PRESSCLIPPING: '09_Medios_PressClipping',
+} as const;
+
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 
-let cached: GoogleSpreadsheet | null = null;
+let cachedControl: GoogleSpreadsheet | null = null;
+let cachedOutput: GoogleSpreadsheet | null = null;
 
-/** Abre (y cachea) el documento de Google Sheets, ya autenticado. */
-export async function getSpreadsheet(): Promise<GoogleSpreadsheet> {
-  if (cached) return cached;
-
-  const { email, privateKey, sheetId } = requireSheetsEnv();
-  const jwt = new JWT({
-    email,
-    key: privateKey,
-    scopes: SCOPES,
-  });
-
+/** Abre y autentica un documento por su id (sin caché). */
+async function openDoc(
+  email: string,
+  privateKey: string,
+  sheetId: string,
+): Promise<GoogleSpreadsheet> {
+  const jwt = new JWT({ email, key: privateKey, scopes: SCOPES });
   const doc = new GoogleSpreadsheet(sheetId, jwt);
   await doc.loadInfo();
-  cached = doc;
   return doc;
 }
 
-/** Obtiene una pestaña por título; lanza un error claro si no existe. */
-export async function getTab(
+/** Abre (y cachea) el documento del PANEL DE CONTROL (lectura de configuración). */
+export async function getSpreadsheet(): Promise<GoogleSpreadsheet> {
+  if (cachedControl) return cachedControl;
+  const { email, privateKey, sheetId } = requireSheetsEnv();
+  cachedControl = await openDoc(email, privateKey, sheetId);
+  return cachedControl;
+}
+
+/**
+ * Abre (y cachea) el documento de SALIDA (escritura de resultados).
+ * Usa GOOGLE_OUTPUT_SHEET_ID o, si no existe, GOOGLE_SHEET_ID (fallback).
+ */
+export async function getOutputSpreadsheet(): Promise<GoogleSpreadsheet> {
+  if (cachedOutput) return cachedOutput;
+  const { email, privateKey, sheetId } = requireOutputSheetsEnv();
+  cachedOutput = await openDoc(email, privateKey, sheetId);
+  return cachedOutput;
+}
+
+function resolveTab(
+  doc: GoogleSpreadsheet,
   title: string,
-): Promise<GoogleSpreadsheetWorksheet> {
-  const doc = await getSpreadsheet();
+): GoogleSpreadsheetWorksheet {
   const sheet = doc.sheetsByTitle[title];
   if (!sheet) {
     const disponibles = Object.keys(doc.sheetsByTitle).join(', ');
@@ -56,6 +83,20 @@ export async function getTab(
     );
   }
   return sheet;
+}
+
+/** Obtiene una pestaña del panel de control por título. */
+export async function getTab(
+  title: string,
+): Promise<GoogleSpreadsheetWorksheet> {
+  return resolveTab(await getSpreadsheet(), title);
+}
+
+/** Obtiene una pestaña de la Sheet de salida por título. */
+export async function getOutputTab(
+  title: string,
+): Promise<GoogleSpreadsheetWorksheet> {
+  return resolveTab(await getOutputSpreadsheet(), title);
 }
 
 /**

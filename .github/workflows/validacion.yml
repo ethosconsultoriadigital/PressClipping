@@ -1,0 +1,71 @@
+name: Validación del sistema
+
+# Workflow de diagnóstico — SOLO LECTURA, sin efectos en datos.
+# Corre healthcheck + validación de tablas + validación de Sheets + probe de feeds.
+# Úsalo para confirmar que los Secrets, la Sheet y la DB están bien configurados
+# antes de activar la ingesta automática.
+
+on:
+  workflow_dispatch:
+    inputs:
+      media_limit:
+        description: 'Número máximo de medios a diagnosticar en validate:media (0 = todos)'
+        required: false
+        default: '10'
+      media_priority:
+        description: 'Filtrar validate:media por prioridad (Alta / Media / Baja / dejar vacío = todos)'
+        required: false
+        default: ''
+
+jobs:
+  validar:
+    name: Diagnóstico completo (solo lectura)
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      RUN_BY: github-actions-validacion
+      LOG_FORMAT: pretty
+      LOG_LEVEL: info
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests unitarios
+        run: npm test
+
+      - name: Healthcheck (Supabase + Sheets)
+        run: npm run healthcheck
+
+      - name: Validar esquema Supabase
+        run: npm run validate:supabase
+
+      - name: Validar cabeceras de Google Sheets
+        run: npm run validate:sheets
+
+      - name: Diagnosticar medios (probe RSS/sitemap, sin guardar)
+        run: |
+          ARGS=""
+          if [ "${{ inputs.media_limit }}" != "0" ] && [ -n "${{ inputs.media_limit }}" ]; then
+            ARGS="$ARGS --limit=${{ inputs.media_limit }}"
+          fi
+          if [ -n "${{ inputs.media_priority }}" ]; then
+            ARGS="$ARGS --priority=${{ inputs.media_priority }}"
+          fi
+          npm run validate:media -- $ARGS
