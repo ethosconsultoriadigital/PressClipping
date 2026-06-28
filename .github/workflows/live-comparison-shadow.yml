@@ -65,16 +65,15 @@ jobs:
       GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
       LOG_FORMAT: json
       RUN_BY: github-actions-shadow-scheduler
-      # Runners de GitHub sin IPv6 confiable: si googleapis resuelve a IPv6
-      # primero, el OAuth de Google Sheets falla con "Premature close". Forzamos
-      # IPv4 y desactivamos Happy Eyeballs para estabilizar la conexión.
-      NODE_OPTIONS: --dns-result-order=ipv4first --no-network-family-autoselection
+      # Node 20: inyecta WebSocket global (ws) para @supabase/supabase-js.
+      # Forzamos IPv4 por los runners sin IPv6 confiable.
+      NODE_OPTIONS: --dns-result-order=ipv4first --import=./scripts/preload-ws.mjs
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'   # Node 22 trae WebSocket nativo (requerido por @supabase/supabase-js)
+          node-version: '20'   # Node 20: el OAuth de Google Sheets funciona; Supabase usa el polyfill ws
           cache: 'npm'
 
       - name: Instalar dependencias
