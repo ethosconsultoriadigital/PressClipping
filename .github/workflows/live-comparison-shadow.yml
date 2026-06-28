@@ -65,9 +65,6 @@ jobs:
       GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
       LOG_FORMAT: json
       RUN_BY: github-actions-shadow-scheduler
-      # Node 20: inyecta WebSocket global (ws) para @supabase/supabase-js.
-      # Forzamos IPv4 por los runners sin IPv6 confiable.
-      NODE_OPTIONS: --dns-result-order=ipv4first --import=./scripts/preload-ws.mjs
     steps:
       - uses: actions/checkout@v4
 
@@ -80,6 +77,11 @@ jobs:
         run: npm ci
 
       - name: Shadow scheduler (ventana móvil 48h, sin alertas, sin export-results)
+        # NODE_OPTIONS solo en este step (no en checkout/setup-node, que corren en
+        # Node 24 y romperían con --import antes de que exista el archivo).
+        # Node 20: inyecta WebSocket global (ws) para Supabase; IPv4 por runners sin IPv6.
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
         run: |
           WINDOW="${{ github.event.inputs.window_hours || '48' }}"
           LIMIT="${{ github.event.inputs.crawl_limit || '50' }}"
