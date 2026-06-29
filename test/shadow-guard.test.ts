@@ -4,6 +4,7 @@ import {
   estadoCicloSombra,
   modoMetrica,
   notasShadow,
+  esPrecisionNA,
   ACCIONES_PROHIBIDAS_SOMBRA,
 } from '../src/utils/shadowGuard.js';
 
@@ -66,6 +67,39 @@ describe('estadoCicloSombra', () => {
   it('shadow_warning ante errores de crawl', () => {
     expect(estadoCicloSombra({ compareOk: true, crawlErrores: 2 })).toBe('shadow_warning');
   });
+
+  it('shadow_error si NO se pudo escribir 05 (sheetsWriteFailed)', () => {
+    expect(estadoCicloSombra({ compareOk: true, sheetsWriteFailed: true })).toBe('shadow_error');
+  });
+
+  it('shadow_warning si el read-back de 05 no coincide (mismatch)', () => {
+    expect(estadoCicloSombra({ compareOk: true, sheetsWriteMismatch: true })).toBe('shadow_warning');
+  });
+
+  it('NUNCA shadow_ok si 05 falló o no coincide (consistencia 05↔07)', () => {
+    expect(estadoCicloSombra({ compareOk: true, sheetsWriteFailed: true })).not.toBe('shadow_ok');
+    expect(estadoCicloSombra({ compareOk: true, sheetsWriteMismatch: true })).not.toBe('shadow_ok');
+  });
+
+  it('write failed pesa más que un mismatch (error > warning)', () => {
+    expect(
+      estadoCicloSombra({ compareOk: true, sheetsWriteFailed: true, sheetsWriteMismatch: true }),
+    ).toBe('shadow_error');
+  });
+});
+
+describe('esPrecisionNA', () => {
+  it('detecta N/A en distintas capitalizaciones', () => {
+    expect(esPrecisionNA('N/A')).toBe(true);
+    expect(esPrecisionNA('n/a')).toBe(true);
+    expect(esPrecisionNA(' N/A ')).toBe(true);
+  });
+  it('no marca valores numéricos válidos', () => {
+    expect(esPrecisionNA('0.90')).toBe(false);
+    expect(esPrecisionNA(0.4)).toBe(false);
+    expect(esPrecisionNA('')).toBe(false);
+    expect(esPrecisionNA(undefined)).toBe(false);
+  });
 });
 
 describe('modoMetrica (history row con modo=shadow)', () => {
@@ -95,5 +129,33 @@ describe('notasShadow (shadow history row incluye window_hours)', () => {
     expect(n).not.toContain('ventana_movil');
     expect(n).not.toContain('medios_curados');
     expect(n).toContain('promovidas_diagnostico=3');
+  });
+
+  it('justifica precision_ajustada=N/A con denominador cero', () => {
+    const n = notasShadow({ windowHours: 48, mediosCurados: 25, promovidasDiagnostico: 0, precisionAjustada: 'N/A' });
+    expect(n).toContain('precision_ajustada=N/A_denominador_cero');
+    // Ejemplo final esperado del Paso 7.
+    expect(n).toBe(
+      'modo=shadow; sin alertas; sin export-results; ventana_movil=48h; medios_curados=25; precision_ajustada=N/A_denominador_cero; promovidas_diagnostico=0',
+    );
+  });
+
+  it('NO agrega justificación N/A cuando hay precisión numérica', () => {
+    const n = notasShadow({ windowHours: 48, mediosCurados: 25, promovidasDiagnostico: 0, precisionAjustada: '0.92' });
+    expect(n).not.toContain('N/A_denominador_cero');
+  });
+
+  it('incluye banderas de integridad de Sheets cuando aplican', () => {
+    const n = notasShadow({
+      windowHours: 48,
+      mediosCurados: 25,
+      promovidasDiagnostico: 0,
+      sheets429: true,
+      sheetsWriteFailed: true,
+      sheetsWriteMismatch: true,
+    });
+    expect(n).toContain('sheets_429');
+    expect(n).toContain('sheets_write_failed');
+    expect(n).toContain('sheets_write_mismatch');
   });
 });

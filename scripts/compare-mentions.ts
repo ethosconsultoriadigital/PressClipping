@@ -43,8 +43,8 @@ import {
   causaToClusterStatus,
 } from '../src/comparators/diagnosticoVerdicts.js';
 import { foldText } from '../src/matchers/text.js';
-import { appendOutputRows } from '../src/sheets/write.js';
-import { OUTPUT_TABS, getOutputTab } from '../src/sheets/client.js';
+import { appendOutputRows, clearOutputDataRange } from '../src/sheets/write.js';
+import { OUTPUT_TABS, getOutputTab, withSheetsRetry } from '../src/sheets/client.js';
 import { normalizarVentanaTimestamp, aFechaMx } from '../src/utils/dateWindow.js';
 import { logger } from '../src/utils/logger.js';
 
@@ -479,36 +479,94 @@ function resultadoToSheetRow(
   };
 }
 
-/**
- * Limpia las filas de datos (A2:S) de la pestaña de comparativo, conservando
- * los headers en A1. Se usa con --replace-window para evitar acumulación.
- */
-async function limpiarVentanaComparativo(): Promise<void> {
-  const tab = await getOutputTab(OUTPUT_TABS.COMPARATIVO);
-  await tab.loadHeaderRow();
-  const filasDatos = tab.rowCount - 1; // todo menos el header
-  if (filasDatos <= 0) return;
-  // Cargar y borrar filas existentes (conserva header en fila 1)
-  const rows = await tab.getRows();
-  if (rows.length === 0) return;
-  // Borrar de abajo hacia arriba para no invalidar índices
-  for (let i = rows.length - 1; i >= 0; i--) {
-    await rows[i]!.delete();
-  }
-  logger.info({ borradas: rows.length }, 'Filas previas de comparativo limpiadas (A2:S)');
+/** Rango de DATOS de 05 (todo menos la cabecera A1:S1). */
+const RANGO_DATOS_05 = 'A2:S';
+
+interface Conteo05 {
+  total: number;
+  match: number;
+  soloPC: number;
+  soloEthos: number;
 }
 
+/**
+ * Lee de vuelta 05_Comparativo_PressClipping (A2:S) y cuenta filas reales y por
+ * `estado_comparativo`. Es la fuente de verdad de `filas_05_escritas` (read-back
+ * confirmado, NO el rows.length generado antes de escribir).
+ */
+async function leerComparativo05(): Promise<Conteo05> {
+  const tab = await getOutputTab(OUTPUT_TABS.COMPARATIVO);
+  await withSheetsRetry(() => tab.loadHeaderRow(), 'loadHeaderRow 05 read-back');
+  const headers = tab.headerValues;
+  const rows = await withSheetsRetry(() => tab.getRows(), 'getRows 05 read-back');
+  const reales = rows.filter((r) =>
+    headers.some((h) => String(r.get(h) ?? '').trim() !== ''),
+  );
+  const c: Conteo05 = { total: reales.length, match: 0, soloPC: 0, soloEthos: 0 };
+  for (const r of reales) {
+    const e = String(r.get('estado_comparativo') ?? '').trim();
+    if (e === 'MATCH') c.match++;
+    else if (e === 'SOLO_PRESSCLIPPING') c.soloPC++;
+    else if (e === 'SOLO_ETHOS') c.soloEthos++;
+  }
+  return c;
+}
+
+/**
+ * Snapshot vivo de 05 con replace-window SEGURO:
+ *   1) Limpia A2:S en UNA llamada atómica (clear de rango), conservando A1.
+ *   2) Escribe el bloque completo de resultados (nunca append acumulativo).
+ *   3) Lee de vuelta y confirma conteos; si no coinciden, reintenta 1 vez más.
+ * Devuelve los conteos confirmados por read-back y si quedó `mismatch`.
+ */
 async function exportarASheet(
   resultados: ComparativoResultado[],
   metricas: Record<string, number | string>,
-  replaceWindow: boolean,
-): Promise<void> {
-  if (replaceWindow) {
-    await limpiarVentanaComparativo();
+  _replaceWindow: boolean,
+): Promise<Conteo05 & { mismatch: boolean }> {
+  const filas = resultados.map((r) => resultadoToSheetRow(r, metricas));
+  const esperado: Conteo05 = {
+    total: resultados.length,
+    match: resultados.filter((r) => r.estado_comparativo === 'MATCH').length,
+    soloPC: resultados.filter((r) => r.estado_comparativo === 'SOLO_PRESSCLIPPING').length,
+    soloEthos: resultados.filter((r) => r.estado_comparativo === 'SOLO_ETHOS').length,
+  };
+
+  let readback: Conteo05 = { total: 0, match: 0, soloPC: 0, soloEthos: 0 };
+  let mismatch = true;
+  const MAX_INTENTOS = 2; // escritura + 1 reintento ante mismatch
+  for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
+    // 05 SIEMPRE es snapshot: clear de rango atómico + escritura en bloque.
+    await clearOutputDataRange(OUTPUT_TABS.COMPARATIVO, RANGO_DATOS_05);
+    if (filas.length > 0) {
+      await appendOutputRows(OUTPUT_TABS.COMPARATIVO, filas);
+    }
+    readback = await leerComparativo05();
+    mismatch =
+      readback.total !== esperado.total ||
+      readback.match !== esperado.match ||
+      readback.soloPC !== esperado.soloPC ||
+      readback.soloEthos !== esperado.soloEthos;
+    if (!mismatch) break;
+    logger.warn(
+      { intento, esperado, readback },
+      'Read-back de 05 no coincide con lo generado; reintentando escritura.',
+    );
   }
-  const rows = resultados.map(r => resultadoToSheetRow(r, metricas));
-  const escritas = await appendOutputRows(OUTPUT_TABS.COMPARATIVO, rows);
-  logger.info({ escritas, replaceWindow }, `Comparativo exportado a ${OUTPUT_TABS.COMPARATIVO}`);
+
+  logger.info(
+    {
+      // filas_05_escritas = conteo CONFIRMADO por read-back (no rows.length previo)
+      escritas: readback.total,
+      readback_match: readback.match,
+      readback_solo_pressclipping: readback.soloPC,
+      readback_solo_ethos: readback.soloEthos,
+      esperadas: esperado.total,
+      sheets_write_mismatch: mismatch,
+    },
+    `Comparativo exportado a ${OUTPUT_TABS.COMPARATIVO}`,
+  );
+  return { ...readback, mismatch };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

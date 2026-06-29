@@ -6,7 +6,7 @@
  * ignoran (no rompen). Es la base de la exportación operativa de la Fase 5.
  */
 import type { GoogleSpreadsheetWorksheet } from 'google-spreadsheet';
-import { getTab, getOutputTab, getOutputSpreadsheet } from './client.js';
+import { getTab, getOutputTab, getOutputSpreadsheet, withSheetsRetry } from './client.js';
 import { normalizeHeader } from '../utils/parse.js';
 
 export type OutRow = Record<string, string | number | boolean | null | undefined>;
@@ -17,7 +17,7 @@ async function appendToSheet(
   rows: OutRow[],
 ): Promise<number> {
   if (rows.length === 0) return 0;
-  await sheet.loadHeaderRow();
+  await withSheetsRetry(() => sheet.loadHeaderRow(), `loadHeaderRow ${sheet.title}`);
 
   // Mapa cabecera-normalizada → cabecera-real de la pestaña.
   const normToRaw = new Map<string, string>();
@@ -35,8 +35,23 @@ async function appendToSheet(
     return out;
   });
 
-  await sheet.addRows(mapped);
+  await withSheetsRetry(() => sheet.addRows(mapped), `addRows ${sheet.title}`);
   return mapped.length;
+}
+
+/**
+ * Limpia SOLO el rango de datos `a1DataRange` (p.ej. "A2:S") de una pestaña de
+ * salida en UNA sola llamada atómica (`values:clear`), conservando la cabecera
+ * A1 y sin tocar columnas fuera del rango. Reemplaza el borrado fila-por-fila,
+ * que consumía cuota de escritura y podía dejar la hoja truncada si fallaba a
+ * mitad (429). Con reintentos/backoff.
+ */
+export async function clearOutputDataRange(
+  title: string,
+  a1DataRange: string,
+): Promise<void> {
+  const sheet = await getOutputTab(title); // lanza si la pestaña no existe
+  await withSheetsRetry(() => sheet.clear(a1DataRange), `clear ${title}!${a1DataRange}`);
 }
 
 /**
@@ -79,11 +94,16 @@ export async function appendHistoryRow(
   const doc = await getOutputSpreadsheet();
   let sheet = doc.sheetsByTitle[title];
   if (!sheet) {
-    sheet = await doc.addSheet({ title, headerValues: headers });
+    sheet = await withSheetsRetry(
+      () => doc.addSheet({ title, headerValues: headers }),
+      `addSheet ${title}`,
+    );
   } else {
-    await sheet.loadHeaderRow().catch(() => undefined);
+    await withSheetsRetry(() => sheet!.loadHeaderRow(), `loadHeaderRow ${title}`).catch(
+      () => undefined,
+    );
     if (!sheet.headerValues || sheet.headerValues.length === 0) {
-      await sheet.setHeaderRow(headers);
+      await withSheetsRetry(() => sheet!.setHeaderRow(headers), `setHeaderRow ${title}`);
     }
   }
   return appendToSheet(sheet, [row]);
@@ -97,11 +117,11 @@ export async function appendHistoryRow(
  */
 export async function replaceOutputRows(title: string, rows: OutRow[]): Promise<number> {
   const sheet = await getOutputTab(title); // lanza si la pestaña no existe
-  await sheet.loadHeaderRow();
+  await withSheetsRetry(() => sheet.loadHeaderRow(), `loadHeaderRow ${title}`);
   const headers = [...sheet.headerValues];
   // Limpieza en bloque (1-2 llamadas) en vez de borrar fila por fila, que para
   // cientos de filas excede la cuota de escritura de Google (429).
-  await sheet.clear();
-  await sheet.setHeaderRow(headers);
+  await withSheetsRetry(() => sheet.clear(), `clear ${title}`);
+  await withSheetsRetry(() => sheet.setHeaderRow(headers), `setHeaderRow ${title}`);
   return appendToSheet(sheet, rows);
 }

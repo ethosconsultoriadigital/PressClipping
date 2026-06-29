@@ -60,14 +60,31 @@ export function modoMetrica(shadow: boolean, haraCrawl: boolean): string {
  * dejando trazabilidad explícita de la ventana móvil y los medios curados.
  * Ej.: "modo=shadow; sin alertas; sin export-results; ventana_movil=48h; medios_curados=25; promovidas_diagnostico=0"
  */
+/** ¿El valor de precision_ajustada representa "no calculable" (denominador 0)? */
+export function esPrecisionNA(valor: unknown): boolean {
+  return String(valor ?? '').trim().toUpperCase() === 'N/A';
+}
+
 export function notasShadow(opts: {
   windowHours?: number;
   mediosCurados?: number;
   promovidasDiagnostico?: number;
+  /** Valor crudo de precision_ajustada; si es N/A se justifica el denominador cero. */
+  precisionAjustada?: string | number;
+  /** Marcadores de integridad de la escritura en Sheets. */
+  sheets429?: boolean;
+  sheetsWriteFailed?: boolean;
+  sheetsWriteMismatch?: boolean;
 }): string {
   const partes = ['modo=shadow', 'sin alertas', 'sin export-results'];
   if (opts.windowHours != null) partes.push(`ventana_movil=${opts.windowHours}h`);
   if (opts.mediosCurados != null) partes.push(`medios_curados=${opts.mediosCurados}`);
+  if (esPrecisionNA(opts.precisionAjustada)) {
+    partes.push('precision_ajustada=N/A_denominador_cero');
+  }
+  if (opts.sheets429) partes.push('sheets_429');
+  if (opts.sheetsWriteFailed) partes.push('sheets_write_failed');
+  if (opts.sheetsWriteMismatch) partes.push('sheets_write_mismatch');
   partes.push(`promovidas_diagnostico=${opts.promovidasDiagnostico ?? 0}`);
   return partes.join('; ');
 }
@@ -81,18 +98,28 @@ export interface SenalesCiclo {
   potenciales?: number;
   /** Umbral de menciones potenciales que se considera "flood". */
   umbralFlood?: number;
+  /** No se pudo escribir 05 en Sheets (429/timeout/error). */
+  sheetsWriteFailed?: boolean;
+  /** 05 se escribió pero el read-back no coincide con lo generado. */
+  sheetsWriteMismatch?: boolean;
 }
 
 /**
  * Determina el estado del ciclo sombra:
- *   - shadow_error: el comparativo falló o hubo flood de falsos positivos.
- *   - shadow_warning: dry-run no limpio (sinTexto>0) o errores de crawl.
+ *   - shadow_error: comparativo falló, flood de FP, o NO se pudo escribir 05.
+ *   - shadow_warning: read-back de 05 no coincide, dry-run no limpio o errores
+ *     de crawl.
  *   - shadow_ok: todo correcto.
+ *
+ * NUNCA devuelve shadow_ok si 05 no se escribió o no coincide con lo generado
+ * (regla de consistencia 05↔07).
  */
 export function estadoCicloSombra(s: SenalesCiclo): EstadoCicloSombra {
   const umbral = s.umbralFlood ?? 25;
   if (!s.compareOk) return 'shadow_error';
+  if (s.sheetsWriteFailed) return 'shadow_error';
   if ((s.potenciales ?? 0) > umbral) return 'shadow_error';
+  if (s.sheetsWriteMismatch) return 'shadow_warning';
   if ((s.dryRunSinTexto ?? 0) > 0) return 'shadow_warning';
   if ((s.crawlErrores ?? 0) > 0) return 'shadow_warning';
   return 'shadow_ok';

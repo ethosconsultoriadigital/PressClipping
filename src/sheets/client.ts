@@ -9,6 +9,7 @@ import { GoogleSpreadsheet } from 'google-spreadsheet';
 import type { GoogleSpreadsheetWorksheet } from 'google-spreadsheet';
 import { JWT } from 'google-auth-library';
 import { requireSheetsEnv, requireOutputSheetsEnv } from '../config/env.js';
+import { logger } from '../utils/logger.js';
 
 /** Nombres canónicos de las pestañas del panel de control / configuración. */
 export const SHEET_TABS = {
@@ -41,48 +42,86 @@ let cachedControl: GoogleSpreadsheet | null = null;
 let cachedOutput: GoogleSpreadsheet | null = null;
 
 /**
- * ¿El error es un fallo de transporte recuperable contra googleapis?
- * En runners de CI (Node 22 + undici) el endpoint OAuth de Google a veces
- * cierra la conexión: "Premature close" / ECONNRESET / socket hang up.
- * Estos casos se reintentan; los errores de credenciales/permisos NO.
+ * ¿El error de Google Sheets/googleapis es transitorio y conviene reintentar?
+ * Cubre tanto fallos de transporte (CI: "Premature close" / ECONNRESET) como
+ * límites de cuota (429 / rateLimitExceeded) y errores de backend (503).
+ * Los errores de credenciales/permisos NO entran aquí (no se reintentan).
  */
-function esErrorTransporteRecuperable(err: unknown): boolean {
+const PATRONES_REINTENTABLES = [
+  'premature close',
+  'econnreset',
+  'socket hang up',
+  'etimedout',
+  'eai_again',
+  'network socket disconnected',
+  'invalid response body',
+  '429',
+  'quota exceeded',
+  'ratelimitexceeded',
+  'userratelimitexceeded',
+  '503',
+  'backenderror',
+] as const;
+
+export function esErrorSheetsReintetnable(err: unknown): boolean {
   const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-  return (
-    msg.includes('premature close') ||
-    msg.includes('econnreset') ||
-    msg.includes('socket hang up') ||
-    msg.includes('etimedout') ||
-    msg.includes('eai_again') ||
-    msg.includes('network socket disconnected') ||
-    msg.includes('invalid response body')
-  );
+  return PATRONES_REINTENTABLES.some((p) => msg.includes(p));
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-/** Abre y autentica un documento por su id (sin caché), con reintentos de transporte. */
+/** Esperas de backoff (ms) entre reintentos. Máximo 4 intentos. */
+export const SHEETS_BACKOFF_MS = [2000, 5000, 10000, 20000] as const;
+
+/**
+ * Ejecuta una operación de Google Sheets con reintentos y backoff exponencial
+ * (2s, 5s, 10s, 20s) + jitter ante 429/5xx/transporte. Máximo 4 intentos.
+ * Loguea cada reintento. Si agota intentos o el error no es reintentable,
+ * relanza el último error.
+ */
+export async function withSheetsRetry<T>(
+  op: () => Promise<T>,
+  etiqueta = 'sheets-op',
+): Promise<T> {
+  const MAX_INTENTOS = 4;
+  let ultimoError: unknown;
+  for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
+    try {
+      return await op();
+    } catch (err) {
+      ultimoError = err;
+      if (intento >= MAX_INTENTOS || !esErrorSheetsReintetnable(err)) break;
+      const base = SHEETS_BACKOFF_MS[intento - 1] ?? 20000;
+      const espera = base + Math.floor(Math.random() * 400); // jitter ≤400ms
+      logger.warn(
+        {
+          etiqueta,
+          intento,
+          de: MAX_INTENTOS,
+          espera_ms: espera,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        'Reintentando operación de Google Sheets (backoff)',
+      );
+      await sleep(espera);
+    }
+  }
+  throw ultimoError;
+}
+
+/** Abre y autentica un documento por su id (sin caché), con reintentos. */
 async function openDoc(
   email: string,
   privateKey: string,
   sheetId: string,
 ): Promise<GoogleSpreadsheet> {
-  const MAX_INTENTOS = 5;
-  let ultimoError: unknown;
-  for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
-    try {
-      // JWT nuevo en cada intento → fuerza una conexión/handshake fresco.
-      const jwt = new JWT({ email, key: privateKey, scopes: SCOPES });
-      const doc = new GoogleSpreadsheet(sheetId, jwt);
-      await doc.loadInfo();
-      return doc;
-    } catch (err) {
-      ultimoError = err;
-      if (intento >= MAX_INTENTOS || !esErrorTransporteRecuperable(err)) break;
-      await sleep(800 * intento); // backoff lineal: 0.8s, 1.6s, 2.4s, 3.2s
-    }
-  }
-  throw ultimoError;
+  return withSheetsRetry(async () => {
+    // JWT nuevo en cada intento → fuerza una conexión/handshake fresco.
+    const jwt = new JWT({ email, key: privateKey, scopes: SCOPES });
+    const doc = new GoogleSpreadsheet(sheetId, jwt);
+    await doc.loadInfo();
+    return doc;
+  }, 'openDoc');
 }
 
 /** Abre (y cachea) el documento del PANEL DE CONTROL (lectura de configuración). */

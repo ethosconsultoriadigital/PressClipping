@@ -177,6 +177,14 @@ function findVal(lines: Record<string, unknown>[], field: string): number | stri
   return undefined;
 }
 
+/** Busca el primer valor booleano de un campo en las líneas JSON. */
+function findBool(lines: Record<string, unknown>[], field: string): boolean | undefined {
+  for (const l of lines) {
+    if (typeof l[field] === 'boolean') return l[field] as boolean;
+  }
+  return undefined;
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const haraCrawl = !!args.crawlMedioIds;
@@ -283,8 +291,26 @@ async function main(): Promise<void> {
     const v = findVal(comp.jsonLines, f);
     if (v !== undefined) resumen[f] = v;
   }
-  const filas05 = findNum(comp.jsonLines, 'escritas');
-  if (filas05 !== undefined) resumen['filas_05_escritas'] = filas05;
+
+  // ── Integridad de escritura de 05 (read-back confirmado en compare-mentions) ─
+  const sheetsWriteFailed = comp.code !== 0;
+  const sheetsWriteMismatch = findBool(comp.jsonLines, 'sheets_write_mismatch') === true;
+  const sheets429 = comp.jsonLines.some((l) => {
+    const m = `${String(l['error'] ?? '')} ${String(l['msg'] ?? '')}`.toLowerCase();
+    return m.includes('quota') || m.includes('429') || m.includes('ratelimit');
+  });
+  // filas_05_escritas SIEMPRE numérico: read-back si OK; 0 si falló la escritura.
+  const filas05 = sheetsWriteFailed ? 0 : (findNum(comp.jsonLines, 'escritas') ?? 0);
+  resumen['filas_05_escritas'] = filas05;
+  resumen['sheets_write_failed'] = sheetsWriteFailed;
+  resumen['sheets_write_mismatch'] = sheetsWriteMismatch;
+  resumen['sheets_429'] = sheets429;
+  if (sheetsWriteFailed || sheetsWriteMismatch) {
+    logger.warn(
+      { sheetsWriteFailed, sheetsWriteMismatch, sheets429, filas_05_escritas: filas05 },
+      'Integridad 05↔07: escritura de 05 no confirmada; el ciclo NO será shadow_ok.',
+    );
+  }
 
   // ── 7b. Append histórico a 07_Metricas_Live (acumulativo, sin replace) ─────
   if (args.appendMetricsHistory && args.output === 'sheet' && !args.dryRun) {
@@ -313,6 +339,12 @@ async function appendMetricsHistory(
   const haraCrawl = !!args.crawlMedioIds;
   const detectMenciones = (resumen['detect_insertadas'] as number) ?? 0;
   const exportMenciones = resumen['export'] === true ? detectMenciones : 0;
+  const writeFailed = resumen['sheets_write_failed'] === true;
+  // Consistencia 05↔07: 07 reporta lo CONFIRMADO por read-back de 05 (no lo
+  // generado en memoria). Si la escritura falló, 05 no tiene datos → 0.
+  const rbMatch = writeFailed ? 0 : (findVal(compLines, 'readback_match') ?? findVal(compLines, 'matches') ?? 0);
+  const rbSoloPC = writeFailed ? 0 : (findVal(compLines, 'readback_solo_pressclipping') ?? findVal(compLines, 'soloPC') ?? '');
+  const rbSoloEthos = writeFailed ? 0 : (findVal(compLines, 'readback_solo_ethos') ?? findVal(compLines, 'soloEthos') ?? '');
   const coberturaClusters = findVal(compLines, 'cobertura_ajustada_clusters');
   const actionableGap = findNum(compLines, 'clusters_actionable_gap') ?? 0;
 
@@ -321,6 +353,8 @@ async function appendMetricsHistory(
         compareOk: resumen['compare'] === true,
         dryRunSinTexto: (resumen['detect_dryrun_sinTexto'] as number) ?? 0,
         potenciales: (resumen['detect_dryrun_potenciales'] as number) ?? 0,
+        sheetsWriteFailed: resumen['sheets_write_failed'] === true,
+        sheetsWriteMismatch: resumen['sheets_write_mismatch'] === true,
       })
     : resumen['compare'] === true && (resumen['detect_dryrun_sinTexto'] ?? 0) === 0
       ? 'estable'
@@ -332,11 +366,16 @@ async function appendMetricsHistory(
       : 'Sin gaps accionables; mantener monitoreo.';
 
   const promovidas = (resumen['promovidas_diagnostico'] as number) ?? 0;
+  const precisionAjustada = findVal(compLines, 'precision_ajustada');
   const notasModo = args.shadow
     ? notasShadow({
         windowHours: args.windowHours,
         mediosCurados: args.mediosCurados,
         promovidasDiagnostico: promovidas,
+        precisionAjustada: precisionAjustada as string | number | undefined,
+        sheets429: resumen['sheets_429'] === true,
+        sheetsWriteFailed: resumen['sheets_write_failed'] === true,
+        sheetsWriteMismatch: resumen['sheets_write_mismatch'] === true,
       })
     : `promovidas_diagnostico=${promovidas}`;
 
@@ -351,10 +390,10 @@ async function appendMetricsHistory(
     pressclipping_registros: findVal(compLines, 'pressclipping_registros') ?? '',
     pressclipping_clusters: findVal(compLines, 'pressclipping_clusters') ?? '',
     ethos_menciones: findVal(compLines, 'menciones_ethos') ?? '',
-    match: findVal(compLines, 'matches') ?? 0,
+    match: rbMatch,
     match_probable: findVal(compLines, 'matchProbables') ?? 0,
-    solo_pressclipping: findVal(compLines, 'soloPC') ?? '',
-    solo_ethos: findVal(compLines, 'soloEthos') ?? '',
+    solo_pressclipping: rbSoloPC,
+    solo_ethos: rbSoloEthos,
     pc_false_positives: findVal(compLines, 'pc_false_positives') ?? 0,
     pc_syndicated_low_value: findVal(compLines, 'clusters_syndicated_low_value') ?? 0,
     clusters_actionable_gap: actionableGap,
@@ -370,7 +409,7 @@ async function appendMetricsHistory(
     enrich_actualizadas: (resumen['enrich_actualizadas'] as number) ?? 0,
     detect_menciones: detectMenciones,
     export_menciones: exportMenciones,
-    filas_05_escritas: filas05 ?? '',
+    filas_05_escritas: filas05 ?? 0,
     estado_ciclo: estadoCiclo,
     siguiente_accion: siguienteAccion,
     notas: notasModo,
