@@ -26,45 +26,16 @@
  *     --no-alerts --no-export-results --no-generate-xml
  */
 import { spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { logger } from '../src/utils/logger.js';
 import { verificarFlagsSombra } from '../src/utils/shadowGuard.js';
 import { ventanaMovil } from '../src/utils/dateWindow.js';
+import { SHADOW_MEDIOS } from '../src/config/shadowMedia.js';
+
+export { SHADOW_MEDIOS };
 
 /** XML PressClipping de producción (solo lectura del feed; nunca se genera XML). */
 const DEFAULT_XML_URL = 'https://tabla.ethosconsultoriadigital.workers.dev/read-xml';
-
-/**
- * Lista curada de medios ESTABLES y ya probados para el primer modo sombra.
- * No incluye Reforma (paywall), 24 Horas / El Siglo de Torreón (403),
- * ni medios DIRECT_EXTRACTION_ONLY / NO_FEED / BLOCKED / TIMEOUT.
- */
-export const SHADOW_MEDIOS: string[] = [
-  'MED-0001', // El Economista
-  'MED-0017', // El Informador
-  'MED-0145', // Forbes Mexico
-  'MED-0148', // EdoMex Al Día
-  'MED-0151', // Hospitalitas
-  'MED-0152', // Xataka México
-  'MED-0153', // Zócalo
-  'MED-0154', // La Crónica de Hoy
-  'MED-0155', // Vanguardia
-  'MED-0156', // El Financiero
-  'MED-0157', // El Heraldo de México
-  'MED-0158', // El Sol de México
-  'MED-0159', // Expansión
-  'MED-0160', // El Diario de Chihuahua
-  'MED-0161', // Amexi
-  'MED-0162', // ContraRéplica
-  'MED-0163', // Líder Empresarial
-  'MED-0164', // Periódico Correo
-  'MED-0165', // Notus Noticias
-  'MED-0166', // Hidrocálido Digital
-  'MED-0167', // Food And Pleasure
-  'MED-0020', // El Imparcial
-  'MED-0031', // Proceso
-  'MED-0034', // La Razón
-  'MED-0060', // Los Noticieristas
-];
 
 interface ShadowArgs {
   xmlUrl: string;
@@ -198,7 +169,20 @@ async function main(): Promise<void> {
   logger.info({ modo: 'shadow' }, '=== Shadow scheduler completado ===');
 }
 
-main().catch(err => {
-  logger.error({ error: err instanceof Error ? err.message : String(err) }, 'Error fatal en run-shadow-scheduler');
-  process.exit(1);
-});
+export { main };
+
+/** ¿El módulo se está ejecutando directamente desde la CLI (no importado)? */
+function esEntrypointCli(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  return import.meta.url === pathToFileURL(entry).href;
+}
+
+// Solo corre el scheduler cuando se invoca por CLI. Importarlo (p. ej. para
+// reutilizar constantes o en tests) NO dispara crawl/compare/efectos.
+if (esEntrypointCli()) {
+  main().catch(err => {
+    logger.error({ error: err instanceof Error ? err.message : String(err) }, 'Error fatal en run-shadow-scheduler');
+    process.exit(1);
+  });
+}
