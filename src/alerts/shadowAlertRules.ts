@@ -2,11 +2,15 @@
  * Reglas DETERMINÍSTICAS de "alertas sombra" (shadow alerts) — SIN IA, SIN red.
  *
  * Simula qué alertas se HABRÍAN enviado a partir de menciones ya detectadas,
- * clasificándolas en inmediata / resumen / monitoreo y registrando el motivo,
- * el canal hipotético y, en su caso, el motivo de bloqueo. NUNCA envía nada.
+ * clasificándolas por prioridad (P1/P2/P3) o descartándolas (BLOQUEADA/DUPLICADA),
+ * y registrando motivo, canal hipotético y la regla de disparo. NUNCA envía nada.
  *
- * Módulo PURO y testeable: recibe menciones normalizadas y devuelve candidatos.
- * No usa OpenAI ni ningún clasificador; la decisión es 100% por reglas.
+ * Calibración anti-sobre-alertamiento:
+ *   - Una misma NOTA para un mismo CLIENTE genera UNA sola alerta (las keywords
+ *     se agrupan en `keywords_detectadas`); el resto se marca DUPLICADA.
+ *   - P1 (inmediata) exige una señal FUERTE (no basta medio/keyword "importante").
+ *
+ * Módulo PURO y testeable. No usa OpenAI ni clasificadores: 100% reglas.
  */
 import { normalizeUrl } from '../comparators/mentionMatcher.js';
 
@@ -19,14 +23,14 @@ export const ALERTAS_SOMBRA_HEADERS = [
   'motivo_bloqueo', 'regla_disparo', 'dedupe_key', 'estado_shadow', 'notas',
 ] as const;
 
-export type TipoAlertaSimulada = 'inmediata' | 'resumen' | 'monitoreo';
-export type CanalSimulado = 'whatsapp' | 'email' | 'dashboard';
+export type TipoAlertaSimulada = 'inmediata' | 'resumen' | 'monitoreo' | 'bloqueada';
+export type CanalSimulado = 'whatsapp' | 'email' | 'dashboard' | 'ninguno';
 export type EstadoShadow =
-  | 'candidato'
-  | 'bloqueada'
-  | 'duplicada'
-  | 'baja_prioridad'
-  | 'error';
+  | 'P1_INMEDIATA'
+  | 'P2_RESUMEN'
+  | 'P3_DASHBOARD'
+  | 'BLOQUEADA'
+  | 'DUPLICADA';
 export type HabriaAlerta = 'SÍ' | 'NO';
 
 /** Mención ya detectada, normalizada para evaluación de alertas sombra. */
@@ -46,17 +50,14 @@ export interface MencionAlertaInput {
   valoracion?: number | null;
   /** Prioridad del medio: alta / media / baja. */
   prioridad_medio?: string | null;
-  // Señales de configuración (panel de control):
   cliente_activo?: boolean;
   cliente_alertas_activas?: boolean;
   keyword_activa?: boolean;
-  /** La keyword está marcada para alertar (keywords.alerta). */
+  /** La keyword está marcada explícitamente para alertar (keywords.alerta). */
   keyword_alerta?: boolean;
-  /** Prioridad de la keyword: alta / critica / media / baja. */
   keyword_prioridad?: string | null;
-  /** Tema reputacional/regulatorio (derivado de temas sensibles). */
+  /** Tema reputacional/regulatorio/crisis fuerte (derivado de temas sensibles). */
   tema_reputacional?: boolean;
-  /** estado_revision indica posible falso positivo. */
   es_falso_positivo?: boolean;
   /** Flag de detect (menciones.requiere_alerta). */
   requiere_alerta?: boolean;
@@ -72,23 +73,34 @@ export interface DecisionAlertaSombra {
   regla_disparo: string;
   dedupe_key: string;
   estado_shadow: EstadoShadow;
+  /** Keywords agrupadas de la misma nota/cliente (separadas por '|'). */
+  keywords_detectadas: string;
 }
 
 export type CandidatoAlertaSombra = MencionAlertaInput & DecisionAlertaSombra;
 
 export interface ResumenAlertasSombra {
+  evaluadas: number;
+  /** Filas que detonarían alerta (P1+P2). */
   candidatas: number;
-  inmediatas: number;
-  resumen: number;
-  bloqueadas: number;
-  duplicadas: number;
-  baja_prioridad: number;
+  p1_inmediata: number;
+  p2_resumen: number;
+  p3_dashboard: number;
+  bloqueada: number;
+  duplicada: number;
 }
 
-/** Umbral de relevancia (0–1) para considerar "valoración alta". */
+/** Relevancia (0–1) mínima para "valoración alta" (señal fuerte P1). */
 export const VALORACION_ALTA_MIN = 0.7;
+/** Relevancia (0–1) por encima de la cual P1 aplica aunque falte otra señal. */
+export const VALORACION_CRITICA_MIN = 0.85;
+/** Relevancia (0–1) mínima para considerar una mención "relevante" (P2). */
+export const VALORACION_RELEVANTE_MIN = 0.4;
+/** Relevancia (0–1) por debajo de la cual es "baja relevancia extrema". */
+export const VALORACION_EXTREMA_MAX = 0.05;
 
 const PRIORIDAD_ALTA = new Set(['alta', 'critica', 'crítica', 'high', 'urgente']);
+const PRIORIDAD_MEDIA = new Set(['media', 'medium', 'normal']);
 const PRIORIDAD_BAJA = new Set(['baja', 'low', 'monitoreo']);
 
 const txt = (v: unknown): string => String(v ?? '').trim();
@@ -112,21 +124,32 @@ export function normalizarValoracion(v: number | null | undefined): number {
 function esPrioridadAlta(p: unknown): boolean {
   return PRIORIDAD_ALTA.has(txt(p).toLowerCase());
 }
-
+function esPrioridadMediaOAlta(p: unknown): boolean {
+  const k = txt(p).toLowerCase();
+  return PRIORIDAD_ALTA.has(k) || PRIORIDAD_MEDIA.has(k);
+}
 function esPrioridadBaja(p: unknown): boolean {
   return PRIORIDAD_BAJA.has(txt(p).toLowerCase());
 }
 
+function tituloNorm(t: unknown): string {
+  return txt(t).toLowerCase();
+}
+
 /**
- * dedupe_key estable:
- *   - preferente: cliente_id + mencion_id
- *   - fallback (sin mencion_id): cliente_id + url_normalizada + keyword
+ * dedupe_key FUERTE (una nota = una alerta por cliente):
+ *   1) cliente_id + noticia_id
+ *   2) cliente_id + url_normalizada
+ *   3) cliente_id + titulo_norm + medio + fecha_publicacion
+ *
+ * NO se usa mencion_id: una misma nota puede tener varias keywords/menciones y
+ * no debe generar varias alertas.
  */
 export function dedupeKey(m: MencionAlertaInput): string {
   const cli = txt(m.cliente_id) || txt(m.cliente) || 'sin_cliente';
-  if (!esVacio(m.mencion_id)) return `${cli}::${txt(m.mencion_id)}`;
-  const url = esVacio(m.url) ? 'sin_url' : normalizeUrl(txt(m.url));
-  return `${cli}::${url}::${txt(m.keyword).toLowerCase()}`;
+  if (!esVacio(m.noticia_id)) return `${cli}::${txt(m.noticia_id)}`;
+  if (esUrlValida(m.url)) return `${cli}::${normalizeUrl(txt(m.url))}`;
+  return `${cli}::${tituloNorm(m.titulo)}::${txt(m.medio).toLowerCase()}::${txt(m.fecha_publicacion)}`;
 }
 
 /** Primer motivo de bloqueo aplicable (o '' si no hay). */
@@ -138,125 +161,206 @@ function motivoBloqueo(m: MencionAlertaInput): string {
   if (!esUrlValida(m.url)) return 'sin_url';
   if (esVacio(m.titulo)) return 'sin_titulo';
   if (esVacio(m.medio)) return 'sin_medio';
+  // Baja relevancia extrema: relevancia ~0 + medio de baja prioridad + sin señales.
+  const val = normalizarValoracion(m.valoracion);
+  if (
+    m.valoracion != null &&
+    val <= VALORACION_EXTREMA_MAX &&
+    esPrioridadBaja(m.prioridad_medio) &&
+    m.keyword_alerta !== true &&
+    m.requiere_alerta !== true &&
+    m.tema_reputacional !== true
+  ) {
+    return 'baja_relevancia_extrema';
+  }
   return '';
 }
 
-/** Señales que detonan una alerta INMEDIATA (al menos una). */
-function senalesCriticas(m: MencionAlertaInput): string[] {
+/**
+ * Señales FUERTES que detonan P1 (inmediata). Al menos una requerida.
+ *
+ * Calibración anti-sobre-alertamiento (clave): los flags `keyword.alerta` y
+ * `requiere_alerta` NO bastan por sí solos — exigen además relevancia alta
+ * (valoración ≥ 0.7) o sentimiento negativo. Así una keyword marcada como
+ * alerta sobre una nota de baja relevancia cae a P2, no a P1.
+ *
+ * Deliberadamente NO incluye "medio prioridad alta" ni "keyword prioridad alta"
+ * por sí solas.
+ */
+function senalesFuertes(m: MencionAlertaInput): string[] {
   const s: string[] = [];
-  if (esSentimientoNegativo(m.sentimiento)) s.push('sentimiento_negativo');
-  if (normalizarValoracion(m.valoracion) >= VALORACION_ALTA_MIN) s.push('valoracion_alta');
-  if (esPrioridadAlta(m.keyword_prioridad)) s.push('keyword_critica');
-  if (esPrioridadAlta(m.prioridad_medio)) s.push('medio_prioridad_alta');
+  const val = normalizarValoracion(m.valoracion);
+  const neg = esSentimientoNegativo(m.sentimiento);
+  const relevanciaAlta = val >= VALORACION_ALTA_MIN || neg;
+  if (neg && val >= VALORACION_ALTA_MIN) s.push('sentimiento_negativo_valoracion_alta');
   if (m.tema_reputacional === true) s.push('tema_reputacional');
-  if (m.requiere_alerta === true) s.push('requiere_alerta');
-  if (m.keyword_alerta === true) s.push('keyword_alerta');
+  if (val >= VALORACION_CRITICA_MIN) s.push('valoracion_critica');
+  if (m.keyword_alerta === true && relevanciaAlta) s.push('keyword_alerta_relevante');
+  if (m.requiere_alerta === true && relevanciaAlta) s.push('requiere_alerta_relevante');
   return s;
 }
 
+/** ¿La mención es "relevante" (candidata a P2) aunque no sea crítica? */
+function esRelevante(m: MencionAlertaInput): boolean {
+  return (
+    normalizarValoracion(m.valoracion) >= VALORACION_RELEVANTE_MIN ||
+    esPrioridadMediaOAlta(m.prioridad_medio) ||
+    esPrioridadMediaOAlta(m.keyword_prioridad)
+  );
+}
+
 /**
- * Evalúa UNA mención (sin considerar duplicados; eso lo resuelve `evaluarLote`).
+ * Evalúa UNA mención (ya agregada por nota+cliente si viene de `evaluarLote`).
+ * NO resuelve duplicados entre notas distintas; eso lo hace `evaluarLote`.
  */
 export function evaluarMencion(m: MencionAlertaInput): DecisionAlertaSombra {
   const key = dedupeKey(m);
+  const keywords = esVacio(m.keyword) ? '' : txt(m.keyword);
 
   const bloqueo = motivoBloqueo(m);
   if (bloqueo) {
     return {
       habria_alerta: 'NO',
-      tipo_alerta_simulada: 'monitoreo',
-      canal_simulado: 'dashboard',
+      tipo_alerta_simulada: 'bloqueada',
+      canal_simulado: 'ninguno',
       motivo_alerta: '',
       motivo_bloqueo: bloqueo,
       regla_disparo: 'bloqueada',
       dedupe_key: key,
-      estado_shadow: 'bloqueada',
+      estado_shadow: 'BLOQUEADA',
+      keywords_detectadas: keywords,
     };
   }
 
-  const criticas = senalesCriticas(m);
-  if (criticas.length > 0) {
+  const fuertes = senalesFuertes(m);
+  if (fuertes.length > 0) {
     return {
       habria_alerta: 'SÍ',
       tipo_alerta_simulada: 'inmediata',
       canal_simulado: 'whatsapp',
-      motivo_alerta: `Mención crítica: ${criticas.join(', ')}.`,
+      motivo_alerta: `P1 inmediata: ${fuertes.join(', ')}.`,
       motivo_bloqueo: '',
-      regla_disparo: criticas.join('|'),
+      regla_disparo: fuertes.join('|'),
       dedupe_key: key,
-      estado_shadow: 'candidato',
+      estado_shadow: 'P1_INMEDIATA',
+      keywords_detectadas: keywords,
     };
   }
 
-  // Válida pero no crítica: baja prioridad explícita → monitoreo (sin alerta).
-  if (esPrioridadBaja(m.prioridad_medio) || esPrioridadBaja(m.keyword_prioridad)) {
+  if (esRelevante(m)) {
     return {
-      habria_alerta: 'NO',
-      tipo_alerta_simulada: 'monitoreo',
-      canal_simulado: 'dashboard',
-      motivo_alerta: '',
-      motivo_bloqueo: 'baja_relevancia',
-      regla_disparo: 'baja_prioridad',
+      habria_alerta: 'SÍ',
+      tipo_alerta_simulada: 'resumen',
+      canal_simulado: 'email',
+      motivo_alerta: 'P2 resumen: mención relevante no crítica (digest).',
+      motivo_bloqueo: '',
+      regla_disparo: 'mencion_relevante_no_critica',
       dedupe_key: key,
-      estado_shadow: 'baja_prioridad',
+      estado_shadow: 'P2_RESUMEN',
+      keywords_detectadas: keywords,
     };
   }
 
-  // Válida no crítica de prioridad media: iría en un resumen (digest), no inmediata.
   return {
-    habria_alerta: 'SÍ',
-    tipo_alerta_simulada: 'resumen',
-    canal_simulado: 'email',
-    motivo_alerta: 'Mención válida no crítica: candidata a resumen.',
+    habria_alerta: 'NO',
+    tipo_alerta_simulada: 'monitoreo',
+    canal_simulado: 'dashboard',
+    motivo_alerta: 'P3 dashboard: monitoreo general, sin urgencia.',
     motivo_bloqueo: '',
-    regla_disparo: 'mencion_valida_no_critica',
+    regla_disparo: 'monitoreo_general',
     dedupe_key: key,
-    estado_shadow: 'candidato',
+    estado_shadow: 'P3_DASHBOARD',
+    keywords_detectadas: keywords,
   };
 }
 
+/** Agrega un grupo de menciones de la MISMA nota+cliente en una sola señal. */
+function agregarGrupo(grupo: MencionAlertaInput[]): {
+  agg: MencionAlertaInput;
+  keywords: string[];
+} {
+  const base = grupo[0]!;
+  const keywords = [...new Set(grupo.map((g) => txt(g.keyword)).filter((k) => k !== ''))];
+  const maxVal = Math.max(...grupo.map((g) => normalizarValoracion(g.valoracion)), 0);
+  const anyNeg = grupo.some((g) => esSentimientoNegativo(g.sentimiento));
+  const prioridadKw = grupo.some((g) => esPrioridadAlta(g.keyword_prioridad))
+    ? 'alta'
+    : grupo.some((g) => esPrioridadMediaOAlta(g.keyword_prioridad))
+      ? 'media'
+      : (base.keyword_prioridad ?? null);
+
+  const agg: MencionAlertaInput = {
+    ...base,
+    sentimiento: anyNeg ? 'negativo' : base.sentimiento,
+    valoracion: maxVal,
+    requiere_alerta: grupo.some((g) => g.requiere_alerta === true),
+    keyword_alerta: grupo.some((g) => g.keyword_alerta === true),
+    tema_reputacional: grupo.some((g) => g.tema_reputacional === true),
+    keyword_activa: grupo.some((g) => g.keyword_activa !== false),
+    es_falso_positivo: grupo.every((g) => g.es_falso_positivo === true),
+    keyword_prioridad: prioridadKw,
+  };
+  return { agg, keywords };
+}
+
 /**
- * Evalúa un LOTE de menciones, resolviendo duplicados por `dedupe_key`
- * (la primera aparición conserva su decisión; las siguientes se marcan
- * `duplicada`). Devuelve los candidatos y un resumen agregado.
+ * Evalúa un LOTE de menciones AGRUPANDO por nota+cliente (`dedupe_key`):
+ * cada nota genera UNA alerta primaria (P1/P2/P3/BLOQUEADA) con las keywords
+ * agrupadas; las menciones extra de la misma nota se marcan DUPLICADA.
  */
 export function evaluarLote(menciones: MencionAlertaInput[]): {
   candidatos: CandidatoAlertaSombra[];
   resumen: ResumenAlertasSombra;
 } {
-  const vistos = new Set<string>();
-  const candidatos: CandidatoAlertaSombra[] = [];
-
+  const grupos = new Map<string, MencionAlertaInput[]>();
   for (const m of menciones) {
-    let decision = evaluarMencion(m);
-    if (vistos.has(decision.dedupe_key)) {
-      decision = {
-        ...decision,
+    const key = dedupeKey(m);
+    const arr = grupos.get(key);
+    if (arr) arr.push(m);
+    else grupos.set(key, [m]);
+  }
+
+  const candidatos: CandidatoAlertaSombra[] = [];
+  for (const [key, grupo] of grupos) {
+    const { agg, keywords } = agregarGrupo(grupo);
+    const decision = evaluarMencion(agg);
+    const keywordsStr = keywords.join('|');
+
+    // Fila primaria (conserva identidad del primer miembro, keywords agrupadas).
+    candidatos.push({
+      ...grupo[0]!,
+      ...decision,
+      dedupe_key: key,
+      keywords_detectadas: keywordsStr,
+    });
+
+    // Menciones extra de la misma nota → DUPLICADA (no se vuelven a alertar).
+    for (let i = 1; i < grupo.length; i++) {
+      candidatos.push({
+        ...grupo[i]!,
         habria_alerta: 'NO',
-        tipo_alerta_simulada: 'monitoreo',
-        canal_simulado: 'dashboard',
+        tipo_alerta_simulada: 'bloqueada',
+        canal_simulado: 'ninguno',
         motivo_alerta: '',
         motivo_bloqueo: 'duplicada_en_ventana',
         regla_disparo: 'duplicada',
-        estado_shadow: 'duplicada',
-      };
-    } else {
-      vistos.add(decision.dedupe_key);
+        dedupe_key: key,
+        estado_shadow: 'DUPLICADA',
+        keywords_detectadas: keywordsStr,
+      });
     }
-    candidatos.push({ ...m, ...decision });
   }
 
+  const cuenta = (e: EstadoShadow): number =>
+    candidatos.filter((c) => c.estado_shadow === e).length;
   const resumen: ResumenAlertasSombra = {
-    candidatas: candidatos.filter((c) => c.estado_shadow === 'candidato').length,
-    inmediatas: candidatos.filter(
-      (c) => c.estado_shadow === 'candidato' && c.tipo_alerta_simulada === 'inmediata',
-    ).length,
-    resumen: candidatos.filter(
-      (c) => c.estado_shadow === 'candidato' && c.tipo_alerta_simulada === 'resumen',
-    ).length,
-    bloqueadas: candidatos.filter((c) => c.estado_shadow === 'bloqueada').length,
-    duplicadas: candidatos.filter((c) => c.estado_shadow === 'duplicada').length,
-    baja_prioridad: candidatos.filter((c) => c.estado_shadow === 'baja_prioridad').length,
+    evaluadas: menciones.length,
+    p1_inmediata: cuenta('P1_INMEDIATA'),
+    p2_resumen: cuenta('P2_RESUMEN'),
+    p3_dashboard: cuenta('P3_DASHBOARD'),
+    bloqueada: cuenta('BLOQUEADA'),
+    duplicada: cuenta('DUPLICADA'),
+    candidatas: cuenta('P1_INMEDIATA') + cuenta('P2_RESUMEN'),
   };
 
   return { candidatos, resumen };

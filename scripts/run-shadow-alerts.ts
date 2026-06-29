@@ -173,11 +173,23 @@ function aFilaSheet(c: CandidatoAlertaSombra, runId: string, fecha: string): Out
     regla_disparo: c.regla_disparo,
     dedupe_key: c.dedupe_key,
     estado_shadow: c.estado_shadow,
-    notas: 'modo=shadow; sin_envios_reales; sin_whatsapp; sin_email; sin_twilio; sin_gmail_smtp',
+    notas:
+      'modo=shadow; sin_envios_reales; sin_whatsapp; sin_email; sin_twilio; sin_gmail_smtp' +
+      (c.keywords_detectadas ? `; keywords_detectadas=${c.keywords_detectadas}` : ''),
   };
 }
 
-/** Lee llaves ya presentes en 10 (run_id::dedupe_key) para no duplicar en reintentos. */
+/** Llave de fila para anti-duplicado en reintentos del MISMO run. */
+function llaveFila(runId: string, mencionId: unknown, dedupeKey: string, idx: number): string {
+  const mid = txt(mencionId);
+  return `${runId}::${mid || `${dedupeKey}#${idx}`}`;
+}
+
+/**
+ * Lee llaves ya presentes en 10 (run_id::mencion_id) para no re-escribir si el
+ * MISMO run se reintenta. Usa mencion_id (no dedupe_key) para no colapsar las
+ * filas DUPLICADA, que comparten dedupe_key con su fila primaria.
+ */
 async function leerLlavesExistentes(): Promise<Set<string>> {
   const set = new Set<string>();
   try {
@@ -185,7 +197,8 @@ async function leerLlavesExistentes(): Promise<Set<string>> {
     await withSheetsRetry(() => tab.loadHeaderRow(), `loadHeaderRow ${ALERTAS_TAB}`);
     const rows = await withSheetsRetry(() => tab.getRows(), `getRows ${ALERTAS_TAB}`);
     for (const r of rows) {
-      set.add(`${txt(r.get('run_id'))}::${txt(r.get('dedupe_key'))}`);
+      const mid = txt(r.get('mencion_id'));
+      if (mid) set.add(`${txt(r.get('run_id'))}::${mid}`);
     }
   } catch {
     // La pestaña aún no existe: no hay llaves previas.
@@ -239,13 +252,13 @@ async function main(): Promise<void> {
 
   logger.info(
     {
-      menciones_evaluadas: inputs.length,
+      menciones_evaluadas: resumen.evaluadas,
       alertas_sombra_candidatas: resumen.candidatas,
-      alertas_sombra_inmediatas: resumen.inmediatas,
-      alertas_sombra_resumen: resumen.resumen,
-      alertas_sombra_bloqueadas: resumen.bloqueadas,
-      alertas_sombra_duplicadas: resumen.duplicadas,
-      alertas_sombra_baja_prioridad: resumen.baja_prioridad,
+      alertas_sombra_p1_inmediata: resumen.p1_inmediata,
+      alertas_sombra_p2_resumen: resumen.p2_resumen,
+      alertas_sombra_p3_dashboard: resumen.p3_dashboard,
+      alertas_sombra_bloqueadas: resumen.bloqueada,
+      alertas_sombra_duplicadas: resumen.duplicada,
     },
     'Resumen de alertas sombra (sin envíos reales).',
   );
@@ -272,12 +285,12 @@ async function main(): Promise<void> {
     const fecha = new Date().toISOString();
     const existentes = await leerLlavesExistentes();
     const filas: OutRow[] = [];
-    for (const c of candidatos) {
-      const llave = `${args.runId}::${c.dedupe_key}`;
-      if (existentes.has(llave)) continue; // ya escrita en un reintento del mismo run
+    candidatos.forEach((c, idx) => {
+      const llave = llaveFila(args.runId, c.mencion_id, c.dedupe_key, idx);
+      if (existentes.has(llave)) return; // ya escrita en un reintento del mismo run
       existentes.add(llave);
       filas.push(aFilaSheet(c, args.runId, fecha));
-    }
+    });
     const escritas = await appendHistoryRows(ALERTAS_TAB, [...ALERTAS_SOMBRA_HEADERS], filas);
     logger.info(
       { tab: ALERTAS_TAB, escritas, candidatos_total: candidatos.length },

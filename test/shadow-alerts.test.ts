@@ -9,7 +9,7 @@ import {
   type MencionAlertaInput,
 } from '../src/alerts/shadowAlertRules.js';
 
-/** Mención base válida y no crítica (prioridad media). */
+/** Mención base VÁLIDA y NO crítica (relevancia media → P2_RESUMEN). */
 const base = (over: Partial<MencionAlertaInput> = {}): MencionAlertaInput => ({
   mencion_id: 'MEN-1',
   cliente_id: 'CLI-1',
@@ -35,125 +35,161 @@ const base = (over: Partial<MencionAlertaInput> = {}): MencionAlertaInput => ({
 
 describe('verificarFlagsAlertasSombra', () => {
   it('permite flags seguros y confirmaciones --no-*', () => {
-    const r = verificarFlagsAlertasSombra([
-      '--window-hours=48', '--output=sheet', '--dry-run',
-      '--no-send', '--no-whatsapp', '--no-email',
-    ]);
-    expect(r.ok).toBe(true);
+    expect(
+      verificarFlagsAlertasSombra([
+        '--window-hours=48', '--output=sheet', '--dry-run',
+        '--no-send', '--no-whatsapp', '--no-email',
+      ]).ok,
+    ).toBe(true);
   });
 
-  it('bloquea --send con mensaje claro y sin enviar', () => {
+  it('bloquea --send con mensaje claro', () => {
     const r = verificarFlagsAlertasSombra(['--send']);
     expect(r.ok).toBe(false);
     expect(r.mensaje).toBe('Shadow alerts forbid real sending.');
   });
 
-  it('bloquea --whatsapp y --email', () => {
-    expect(verificarFlagsAlertasSombra(['--whatsapp']).ok).toBe(false);
-    expect(verificarFlagsAlertasSombra(['--email']).ok).toBe(false);
-  });
-
-  it('bloquea --twilio / --gmail / --smtp / --enviar', () => {
-    for (const f of ['--twilio', '--gmail', '--smtp', '--enviar']) {
+  it('bloquea --whatsapp/--email/--twilio/--gmail/--smtp/--enviar', () => {
+    for (const f of ['--whatsapp', '--email', '--twilio', '--gmail', '--smtp', '--enviar']) {
       expect(verificarFlagsAlertasSombra([f]).ok).toBe(false);
     }
   });
 });
 
-describe('reglas determinísticas de alertas sombra', () => {
-  it('genera alerta INMEDIATA para mención crítica válida (sentimiento negativo)', () => {
-    const d = evaluarMencion(base({ sentimiento: 'negativo' }));
-    expect(d.habria_alerta).toBe('SÍ');
+describe('reglas P1/P2/P3 (anti sobre-alertamiento)', () => {
+  it('sentimiento negativo + valoración alta → P1_INMEDIATA/whatsapp', () => {
+    const d = evaluarMencion(base({ sentimiento: 'negativo', valoracion: 0.8 }));
+    expect(d.estado_shadow).toBe('P1_INMEDIATA');
     expect(d.tipo_alerta_simulada).toBe('inmediata');
     expect(d.canal_simulado).toBe('whatsapp');
-    expect(d.estado_shadow).toBe('candidato');
-    expect(d.regla_disparo).toContain('sentimiento_negativo');
-  });
-
-  it('valoración alta (>=0.7) también detona inmediata', () => {
-    const d = evaluarMencion(base({ valoracion: 0.9 }));
-    expect(d.tipo_alerta_simulada).toBe('inmediata');
-    expect(d.regla_disparo).toContain('valoracion_alta');
-  });
-
-  it('keyword crítica y medio prioridad alta detonan inmediata', () => {
-    expect(evaluarMencion(base({ keyword_prioridad: 'critica' })).regla_disparo)
-      .toContain('keyword_critica');
-    expect(evaluarMencion(base({ prioridad_medio: 'alta' })).regla_disparo)
-      .toContain('medio_prioridad_alta');
-  });
-
-  it('genera RESUMEN para mención válida no crítica (prioridad media)', () => {
-    const d = evaluarMencion(base());
     expect(d.habria_alerta).toBe('SÍ');
+    expect(d.regla_disparo).toContain('sentimiento_negativo_valoracion_alta');
+  });
+
+  it('valoración crítica (≥0.85) → P1 aunque falte otra señal', () => {
+    expect(evaluarMencion(base({ valoracion: 0.9 })).estado_shadow).toBe('P1_INMEDIATA');
+    expect(evaluarMencion(base({ valoracion: 1 })).regla_disparo).toContain('valoracion_critica');
+  });
+
+  it('keyword_alerta/requiere_alerta CON relevancia alta → P1', () => {
+    expect(evaluarMencion(base({ keyword_alerta: true, valoracion: 0.9 })).estado_shadow).toBe('P1_INMEDIATA');
+    expect(evaluarMencion(base({ requiere_alerta: true, valoracion: 0.9 })).estado_shadow).toBe('P1_INMEDIATA');
+    expect(evaluarMencion(base({ tema_reputacional: true })).estado_shadow).toBe('P1_INMEDIATA');
+  });
+
+  it('keyword_alerta/requiere_alerta SIN relevancia alta NO disparan P1 (→ P2)', () => {
+    expect(evaluarMencion(base({ keyword_alerta: true, valoracion: 0.4 })).estado_shadow).toBe('P2_RESUMEN');
+    expect(evaluarMencion(base({ requiere_alerta: true, valoracion: 0.4 })).estado_shadow).toBe('P2_RESUMEN');
+  });
+
+  it('medio prioridad ALTA por sí solo NO dispara P1 (→ P2)', () => {
+    const d = evaluarMencion(base({ prioridad_medio: 'alta' }));
+    expect(d.estado_shadow).toBe('P2_RESUMEN');
+  });
+
+  it('keyword crítica por sí sola NO dispara P1 si no hay señal fuerte (→ P2)', () => {
+    const d = evaluarMencion(base({ keyword_prioridad: 'critica' }));
+    expect(d.estado_shadow).toBe('P2_RESUMEN');
+  });
+
+  it('sentimiento negativo SIN valoración alta NO es P1 (→ P2)', () => {
+    const d = evaluarMencion(base({ sentimiento: 'negativo', valoracion: 0.4 }));
+    expect(d.estado_shadow).toBe('P2_RESUMEN');
+  });
+
+  it('mención laboral/regulatoria neutra relevante → P2_RESUMEN/email', () => {
+    const d = evaluarMencion(base());
+    expect(d.estado_shadow).toBe('P2_RESUMEN');
     expect(d.tipo_alerta_simulada).toBe('resumen');
     expect(d.canal_simulado).toBe('email');
-    expect(d.regla_disparo).toBe('mencion_valida_no_critica');
+    expect(d.habria_alerta).toBe('SÍ');
   });
 
-  it('marca baja_prioridad (monitoreo, sin alerta) para medio prioridad baja no crítico', () => {
-    const d = evaluarMencion(base({ prioridad_medio: 'baja', keyword_prioridad: 'baja' }));
-    expect(d.habria_alerta).toBe('NO');
+  it('monitoreo general (baja urgencia) → P3_DASHBOARD/dashboard, sin alerta', () => {
+    const d = evaluarMencion(base({ valoracion: 0.2, prioridad_medio: 'baja', keyword_prioridad: 'baja' }));
+    expect(d.estado_shadow).toBe('P3_DASHBOARD');
     expect(d.tipo_alerta_simulada).toBe('monitoreo');
-    expect(d.estado_shadow).toBe('baja_prioridad');
-  });
-
-  it('bloquea cliente inactivo', () => {
-    const d = evaluarMencion(base({ cliente_activo: false, sentimiento: 'negativo' }));
-    expect(d.estado_shadow).toBe('bloqueada');
+    expect(d.canal_simulado).toBe('dashboard');
     expect(d.habria_alerta).toBe('NO');
-    expect(d.motivo_bloqueo).toBe('cliente_inactivo');
+  });
+});
+
+describe('bloqueos', () => {
+  it('cliente inactivo / alertas desactivadas / keyword inactiva', () => {
+    expect(evaluarMencion(base({ cliente_activo: false, keyword_alerta: true })).estado_shadow).toBe('BLOQUEADA');
+    expect(evaluarMencion(base({ cliente_alertas_activas: false })).motivo_bloqueo).toBe('alertas_cliente_desactivadas');
+    expect(evaluarMencion(base({ keyword_activa: false })).motivo_bloqueo).toBe('keyword_inactiva');
   });
 
-  it('bloquea alertas de cliente desactivadas', () => {
-    expect(evaluarMencion(base({ cliente_alertas_activas: false })).motivo_bloqueo)
-      .toBe('alertas_cliente_desactivadas');
-  });
-
-  it('bloquea keyword inactiva', () => {
-    const d = evaluarMencion(base({ keyword_activa: false, sentimiento: 'negativo' }));
-    expect(d.estado_shadow).toBe('bloqueada');
-    expect(d.motivo_bloqueo).toBe('keyword_inactiva');
-  });
-
-  it('bloquea falso positivo, sin URL, sin título y sin medio', () => {
+  it('falso positivo / sin url / sin título / sin medio', () => {
     expect(evaluarMencion(base({ es_falso_positivo: true })).motivo_bloqueo).toBe('posible_falso_positivo');
     expect(evaluarMencion(base({ url: '' })).motivo_bloqueo).toBe('sin_url');
     expect(evaluarMencion(base({ titulo: '' })).motivo_bloqueo).toBe('sin_titulo');
     expect(evaluarMencion(base({ medio: '' })).motivo_bloqueo).toBe('sin_medio');
   });
+
+  it('baja relevancia extrema (≈0 + medio baja prioridad) → BLOQUEADA', () => {
+    const d = evaluarMencion(base({ valoracion: 0.02, prioridad_medio: 'baja', keyword_prioridad: 'baja' }));
+    expect(d.estado_shadow).toBe('BLOQUEADA');
+    expect(d.motivo_bloqueo).toBe('baja_relevancia_extrema');
+  });
 });
 
-describe('dedupe_key estable y bloqueo de duplicados', () => {
-  it('dedupe_key usa cliente_id + mencion_id cuando existe', () => {
-    expect(dedupeKey(base())).toBe('CLI-1::MEN-1');
+describe('dedupe fuerte + agrupación de keywords', () => {
+  it('dedupe_key usa cliente_id + noticia_id (no mencion_id)', () => {
+    expect(dedupeKey(base())).toBe('CLI-1::NOT-1');
+    // distinta mención/keyword, misma nota → misma key
+    expect(dedupeKey(base({ mencion_id: 'MEN-2', keyword: 'otra' }))).toBe('CLI-1::NOT-1');
   });
 
-  it('dedupe_key cae a cliente_id + url_norm + keyword sin mencion_id', () => {
-    const k = dedupeKey(base({ mencion_id: null }));
+  it('dedupe_key cae a cliente_id + url_norm sin noticia_id', () => {
+    const k = dedupeKey(base({ noticia_id: null }));
     expect(k.startsWith('CLI-1::')).toBe(true);
-    expect(k).toContain('reforma laboral');
+    expect(k).not.toBe('CLI-1::NOT-1');
   });
 
-  it('dedupe_key es estable entre llamadas con el mismo input', () => {
-    expect(dedupeKey(base())).toBe(dedupeKey(base()));
+  it('dedupe_key cae a cliente+titulo+medio+fecha sin noticia_id ni url', () => {
+    const k = dedupeKey(base({ noticia_id: null, url: '', fecha_publicacion: '2026-06-29' }));
+    expect(k).toContain('una nota válida');
+    expect(k).toContain('2026-06-29');
   });
 
-  it('evaluarLote marca la segunda aparición como duplicada', () => {
+  it('misma nota con 3 keywords → 1 alerta agrupada (no 3 inmediatas) + 2 DUPLICADA', () => {
     const { candidatos, resumen } = evaluarLote([
-      base({ sentimiento: 'negativo' }),
-      base({ sentimiento: 'negativo' }), // mismo mencion_id → duplicada
+      base({ mencion_id: 'M1', keyword: 'reforma laboral', keyword_alerta: true, valoracion: 1 }),
+      base({ mencion_id: 'M2', keyword: 'conciliación laboral' }),
+      base({ mencion_id: 'M3', keyword: 'Centro de Conciliación Laboral' }),
     ]);
-    expect(candidatos[0]!.estado_shadow).toBe('candidato');
-    expect(candidatos[1]!.estado_shadow).toBe('duplicada');
-    expect(candidatos[1]!.habria_alerta).toBe('NO');
-    expect(resumen.duplicadas).toBe(1);
-    expect(resumen.inmediatas).toBe(1);
+    expect(candidatos).toHaveLength(3);
+    expect(candidatos[0]!.estado_shadow).toBe('P1_INMEDIATA');
+    expect(candidatos[1]!.estado_shadow).toBe('DUPLICADA');
+    expect(candidatos[2]!.estado_shadow).toBe('DUPLICADA');
+    expect(resumen.p1_inmediata).toBe(1);
+    expect(resumen.duplicada).toBe(2);
+  });
+
+  it('notas/keywords_detectadas incluye las keywords agrupadas', () => {
+    const { candidatos } = evaluarLote([
+      base({ mencion_id: 'M1', keyword: 'reforma laboral' }),
+      base({ mencion_id: 'M2', keyword: 'conciliación laboral' }),
+    ]);
+    expect(candidatos[0]!.keywords_detectadas).toContain('reforma laboral');
+    expect(candidatos[0]!.keywords_detectadas).toContain('conciliación laboral');
+  });
+
+  it('notas no genera P1 múltiple por keywords de la misma nota', () => {
+    const { resumen } = evaluarLote([
+      base({ mencion_id: 'M1', keyword: 'k1', requiere_alerta: true, valoracion: 1 }),
+      base({ mencion_id: 'M2', keyword: 'k2', requiere_alerta: true, valoracion: 1 }),
+      base({ mencion_id: 'M3', keyword: 'k3', requiere_alerta: true, valoracion: 1 }),
+    ]);
+    expect(resumen.p1_inmediata).toBe(1);
+    expect(resumen.duplicada).toBe(2);
   });
 });
 
 describe('normalizarValoracion', () => {
-  it('mantiene escala 0–1 y convierte 0–100', () => {
+  it('mantiene 0–1 y convierte 0–100', () => {
     expect(normalizarValoracion(0.8)).toBeCloseTo(0.8);
     expect(normalizarValoracion(80)).toBeCloseTo(0.8);
     expect(normalizarValoracion(null)).toBe(0);
@@ -161,7 +197,7 @@ describe('normalizarValoracion', () => {
 });
 
 describe('contrato 10_Alertas_Sombra', () => {
-  it('headers correctos y en orden', () => {
+  it('headers correctos y en orden (25)', () => {
     expect(ALERTAS_SOMBRA_HEADERS).toEqual([
       'run_id', 'fecha_ejecucion', 'modo', 'cliente_id', 'cliente', 'mencion_id',
       'noticia_id', 'fecha_publicacion', 'medio', 'titulo', 'url', 'keyword',
