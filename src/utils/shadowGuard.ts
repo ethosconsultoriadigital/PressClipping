@@ -49,6 +49,44 @@ export function verificarFlagsSombra(argv: string[]): ResultadoGuarda {
   return { ok: true };
 }
 
+/**
+ * Flags que intentan ENVÍO REAL de alertas y están PROHIBIDOS en alertas sombra.
+ * (`--no-<x>` siempre se permite: es confirmación segura.)
+ */
+export const ACCIONES_PROHIBIDAS_ALERTAS = [
+  'send',
+  'enviar',
+  'whatsapp',
+  'twilio',
+  'email',
+  'emails',
+  'correos',
+  'gmail',
+  'smtp',
+  'alerts',
+  'alertas',
+] as const;
+
+/**
+ * Verifica que ningún flag intente habilitar envío real en alertas sombra.
+ * Devuelve ok=false con un mensaje claro para salir con exit 2.
+ */
+export function verificarFlagsAlertasSombra(argv: string[]): ResultadoGuarda {
+  for (const arg of argv) {
+    if (!arg.startsWith('--')) continue;
+    const flag = arg.slice(2).split('=')[0]!.trim().toLowerCase();
+    if (flag.startsWith('no-')) continue; // --no-* = confirmación segura
+    if ((ACCIONES_PROHIBIDAS_ALERTAS as readonly string[]).includes(flag)) {
+      return {
+        ok: false,
+        violacion: flag,
+        mensaje: 'Shadow alerts forbid real sending.',
+      };
+    }
+  }
+  return { ok: true };
+}
+
 /** Valor de la columna `modo` en 07_Metricas_Live según el tipo de corrida. */
 export function modoMetrica(shadow: boolean, haraCrawl: boolean): string {
   if (shadow) return 'shadow';

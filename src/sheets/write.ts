@@ -110,6 +110,36 @@ export async function appendHistoryRow(
 }
 
 /**
+ * Append histórico ACUMULATIVO de VARIAS filas a una pestaña de la Sheet de
+ * salida. Si la pestaña no existe la crea con `headers`; si existe vacía, fija
+ * la cabecera. NUNCA limpia ni hace replace-window. Pensada para pestañas de
+ * solo-append como `10_Alertas_Sombra`. Devuelve cuántas filas se escribieron.
+ */
+export async function appendHistoryRows(
+  title: string,
+  headers: string[],
+  rows: OutRow[],
+): Promise<number> {
+  if (rows.length === 0) return 0;
+  const doc = await getOutputSpreadsheet();
+  let sheet = doc.sheetsByTitle[title];
+  if (!sheet) {
+    sheet = await withSheetsRetry(
+      () => doc.addSheet({ title, headerValues: headers }),
+      `addSheet ${title}`,
+    );
+  } else {
+    await withSheetsRetry(() => sheet!.loadHeaderRow(), `loadHeaderRow ${title}`).catch(
+      () => undefined,
+    );
+    if (!sheet.headerValues || sheet.headerValues.length === 0) {
+      await withSheetsRetry(() => sheet!.setHeaderRow(headers), `setHeaderRow ${title}`);
+    }
+  }
+  return appendToSheet(sheet, rows);
+}
+
+/**
  * REEMPLAZA los datos de una pestaña de salida YA EXISTENTE: borra las filas de
  * datos (conserva la cabecera A1) y escribe `rows`. Si la pestaña no existe,
  * lanza un error claro y NO crea nada (para no inventar pestañas). Devuelve

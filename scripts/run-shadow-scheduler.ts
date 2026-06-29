@@ -74,6 +74,7 @@ interface ShadowArgs {
   output: 'console' | 'sheet';
   appendMetricsHistory: boolean;
   dryRun: boolean;
+  shadowAlerts: boolean;
 }
 
 function parseArgs(argv: string[]): ShadowArgs {
@@ -85,6 +86,7 @@ function parseArgs(argv: string[]): ShadowArgs {
     output: 'sheet',
     appendMetricsHistory: false,
     dryRun: false,
+    shadowAlerts: false,
   };
   for (const arg of argv) {
     if (!arg.startsWith('--')) continue;
@@ -100,6 +102,8 @@ function parseArgs(argv: string[]): ShadowArgs {
       case 'output':         out.output = (val as 'console' | 'sheet') || out.output; break;
       case 'append-metrics-history': out.appendMetricsHistory = true; break;
       case 'dry-run':        out.dryRun = true; break;
+      // Opt-in: tras el ciclo vivo, simular alertas sombra (sin envíos).
+      case 'shadow-alerts':  out.shadowAlerts = true; break;
       // Flags de confirmación de sombra (no habilitan nada; se aceptan tal cual).
       case 'no-alerts': case 'no-export-results': case 'no-generate-xml':
       case 'no-classify-ia': case 'no-whatsapp': case 'no-correos':
@@ -172,6 +176,25 @@ async function main(): Promise<void> {
     logger.error({ code }, 'Shadow scheduler: el ciclo vivo terminó con error.');
     process.exit(code);
   }
+
+  // ── Opcional: alertas sombra (simulación, sin envíos) ─────────────────────
+  // Solo si se pasa --shadow-alerts. NO está en el cron automático todavía.
+  if (args.shadowAlerts && !args.dryRun) {
+    logger.info({ modo: 'shadow', submodo: 'alertas_sombra' }, 'Ejecutando alertas sombra (sin envíos)…');
+    const alertCode = await runChild('scripts/run-shadow-alerts.ts', [
+      `--window-hours=${args.windowHours}`,
+      `--output=${args.output}`,
+      '--dry-run',
+      '--no-send',
+      '--no-whatsapp',
+      '--no-email',
+    ]);
+    if (alertCode !== 0) {
+      // Las alertas sombra NO bloquean el ciclo: solo se reporta el fallo.
+      logger.error({ alertCode }, 'Alertas sombra terminaron con error (no bloquea el ciclo sombra).');
+    }
+  }
+
   logger.info({ modo: 'shadow' }, '=== Shadow scheduler completado ===');
 }
 
