@@ -43,6 +43,13 @@ export interface CrawlFiltros {
   onlyStatus?: string[];
   excludeStatus?: string[];
   soloValidados?: boolean;
+  /**
+   * Crawl DIRIGIDO por --medio-ids: la DB de medios (auditoría actual) es la
+   * fuente canónica. Si el medio tiene fuente DB válida (activo, sin JS/proxy,
+   * con rss/sitemap usable), se procesa aunque `08_Validacion_Medios` tenga un
+   * diagnóstico histórico viejo (especial/sin_fuente). NO relaja JS/proxy/fuente.
+   */
+  dirigido?: boolean;
 }
 
 export interface Decision {
@@ -68,6 +75,35 @@ export function normalizarEstado(s: string): string {
 
 function norm(s: string | null | undefined): string {
   return foldText(s ?? '').trim();
+}
+
+/** ¿La cadena es una URL http(s) usable como fuente? */
+function esUrlHttp(u: string | null | undefined): boolean {
+  return /^https?:\/\//i.test((u ?? '').trim());
+}
+
+/**
+ * ¿El medio tiene una fuente DB válida y segura para crawlear, según la
+ * auditoría actual (tabla `medios`)? Es la fuente canónica para el crawl
+ * dirigido por --medio-ids: NO depende de diagnósticos históricos viejos.
+ *
+ * Exige: activo, sin JavaScript, sin proxy y con una fuente legible (rss/sitemap)
+ * coherente con `metodo_extraccion`. NO relaja ninguna de estas guardas.
+ */
+export function fuenteDbValida(medio: MedioSeleccionable): boolean {
+  if (!medio.activo) return false;
+  if (medio.requiere_javascript) return false;
+  if (medio.requiere_proxy) return false;
+
+  const rssOk = esUrlHttp(medio.rss_url);
+  const sitemapOk = esUrlHttp(medio.sitemap_url);
+  if (!rssOk && !sitemapOk) return false;
+
+  const metodo = norm(medio.metodo_extraccion);
+  if (metodo === 'rss') return rssOk || sitemapOk;
+  if (metodo === 'sitemap' || metodo === 'sitemap_index') return sitemapOk || rssOk;
+  // Método desconocido/otro: basta con tener una fuente http(s) usable.
+  return rssOk || sitemapOk;
 }
 
 /** ¿El medio pertenece al estado/region buscado? (comparación tolerante). */
@@ -98,6 +134,18 @@ export function evaluarMedio(
   if (medio.requiere_proxy) return decide(false, 'requiere_proxy');
   if (norm(medio.ultimo_estado) === 'duplicado') {
     return decide(false, 'ultimo_estado=Duplicado');
+  }
+
+  // --- Crawl dirigido (--medio-ids): la DB/auditoría actual es canónica ----
+  // Cuando el usuario pide explícitamente estos medios, la decisión se basa en
+  // la fuente DB válida (auditoría actual), NO en diagnósticos históricos
+  // viejos de 08_Validacion_Medios. Las guardas duras (JS/proxy/inactivo/
+  // duplicado) ya se aplicaron arriba; aquí solo se exige fuente legible.
+  if (filtros.dirigido) {
+    if (!fuenteDbValida(medio)) {
+      return decide(false, 'crawl dirigido: sin fuente DB válida (rss/sitemap)');
+    }
+    return decide(true, 'crawl dirigido + fuente DB válida (auditoría actual)');
   }
 
   // --- Filtros explícitos por atributo -----------------------------------

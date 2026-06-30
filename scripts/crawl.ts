@@ -200,6 +200,9 @@ async function main() {
     onlyStatus: args.onlyStatus,
     excludeStatus: args.excludeStatus,
     soloValidados: args.soloValidados,
+    // Crawl dirigido: si se pasó --medio-ids, la DB/auditoría actual manda
+    // (un diagnóstico histórico viejo no debe bloquear medios READY).
+    dirigido: Boolean(args.medioIds && args.medioIds.length > 0),
   };
 
   const { incluidos, excluidos } = seleccionarMedios(

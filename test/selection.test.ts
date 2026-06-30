@@ -3,6 +3,7 @@ import {
   evaluarMedio,
   seleccionarMedios,
   normalizarEstado,
+  fuenteDbValida,
   type MedioSeleccionable,
   type DiagnosticoMedio,
 } from '../src/crawlers/selection.js';
@@ -116,6 +117,72 @@ describe('evaluarMedio - filtros explícitos', () => {
     expect(evaluarMedio(medio({}), diag('error'), { soloValidados: true }).incluir).toBe(false);
     expect(evaluarMedio(medio({}), diag('ok', true), { soloValidados: true }).incluir).toBe(false);
     expect(evaluarMedio(medio({}), null, { soloValidados: true }).incluir).toBe(false);
+  });
+});
+
+describe('fuenteDbValida (fuente canónica DB)', () => {
+  it('acepta RSS http válido', () => {
+    expect(fuenteDbValida(medio({ metodo_extraccion: 'rss', rss_url: 'https://m.mx/rss' }))).toBe(true);
+  });
+
+  it('acepta sitemap http válido', () => {
+    expect(
+      fuenteDbValida(
+        medio({ metodo_extraccion: 'sitemap', rss_url: null, sitemap_url: 'https://m.mx/sitemap.xml' }),
+      ),
+    ).toBe(true);
+  });
+
+  it('rechaza medio sin rss ni sitemap', () => {
+    expect(fuenteDbValida(medio({ rss_url: '', sitemap_url: '' }))).toBe(false);
+  });
+
+  it('rechaza requiere_javascript / requiere_proxy / inactivo', () => {
+    expect(fuenteDbValida(medio({ requiere_javascript: true }))).toBe(false);
+    expect(fuenteDbValida(medio({ requiere_proxy: true }))).toBe(false);
+    expect(fuenteDbValida(medio({ activo: false }))).toBe(false);
+  });
+});
+
+describe('evaluarMedio - crawl dirigido (--medio-ids, DB canónica)', () => {
+  it('un medio READY (fuente DB válida) NO se bloquea por diagnóstico viejo especial/sin_fuente', () => {
+    const m = medio({ metodo_extraccion: 'rss', rss_url: 'https://m.mx/rss' });
+    // Diagnóstico histórico viejo dice especial / sin_fuente:
+    expect(evaluarMedio(m, diag('ok', true), { dirigido: true }).incluir).toBe(true);
+    expect(evaluarMedio(m, diag('sin_fuente'), { dirigido: true }).incluir).toBe(true);
+    // Sin --medio-ids (no dirigido) el diagnóstico viejo SÍ excluye (comportamiento por defecto):
+    expect(evaluarMedio(m, diag('sin_fuente'), {}).incluir).toBe(false);
+    expect(evaluarMedio(m, diag('ok', true), {}).incluir).toBe(false);
+  });
+
+  it('crawl dirigido respeta fuente DB: sin rss/sitemap sigue bloqueado', () => {
+    const d = evaluarMedio(medio({ rss_url: '', sitemap_url: '' }), diag('ok'), { dirigido: true });
+    expect(d.incluir).toBe(false);
+    expect(d.motivo).toContain('sin fuente DB válida');
+  });
+
+  it('crawl dirigido: requiere_proxy sigue bloqueado', () => {
+    const d = evaluarMedio(medio({ requiere_proxy: true, rss_url: 'https://m.mx/rss' }), diag('ok'), {
+      dirigido: true,
+    });
+    expect(d.incluir).toBe(false);
+    expect(d.motivo).toBe('requiere_proxy');
+  });
+
+  it('crawl dirigido: requiere_javascript sigue bloqueado', () => {
+    const d = evaluarMedio(medio({ requiere_javascript: true, rss_url: 'https://m.mx/rss' }), diag('ok'), {
+      dirigido: true,
+    });
+    expect(d.incluir).toBe(false);
+    expect(d.motivo).toBe('requiere_javascript');
+  });
+
+  it('crawl dirigido: inactivo sigue bloqueado', () => {
+    const d = evaluarMedio(medio({ activo: false, rss_url: 'https://m.mx/rss' }), diag('ok'), {
+      dirigido: true,
+    });
+    expect(d.incluir).toBe(false);
+    expect(d.motivo).toBe('inactivo');
   });
 });
 
