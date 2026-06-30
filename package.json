@@ -25,6 +25,7 @@
     "classify-ia": "tsx scripts/classify-ia.ts",
     "import-pressclipping": "tsx scripts/import-pressclipping.ts",
     "compare-mentions": "tsx scripts/compare-mentions.ts",
+    "simulate-candidate-keywords": "tsx scripts/simulate-candidate-keywords.ts",
     "live-comparison": "tsx scripts/run-live-comparison.ts",
     "shadow-scheduler": "tsx scripts/run-shadow-scheduler.ts",
     "shadow-alerts": "tsx scripts/run-shadow-alerts.ts",
