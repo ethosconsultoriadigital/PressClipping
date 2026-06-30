@@ -27,6 +27,7 @@
     "compare-mentions": "tsx scripts/compare-mentions.ts",
     "simulate-candidate-keywords": "tsx scripts/simulate-candidate-keywords.ts",
     "tune-national-keywords": "tsx scripts/tune-national-keywords.ts",
+    "tune-tmec-keywords": "tsx scripts/tune-tmec-keywords.ts",
     "live-comparison": "tsx scripts/run-live-comparison.ts",
     "shadow-scheduler": "tsx scripts/run-shadow-scheduler.ts",
     "shadow-national-tier": "tsx scripts/run-shadow-national-tier.ts",
