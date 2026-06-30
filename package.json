@@ -29,6 +29,7 @@
     "tune-national-keywords": "tsx scripts/tune-national-keywords.ts",
     "live-comparison": "tsx scripts/run-live-comparison.ts",
     "shadow-scheduler": "tsx scripts/run-shadow-scheduler.ts",
+    "shadow-national-tier": "tsx scripts/run-shadow-national-tier.ts",
     "shadow-alerts": "tsx scripts/run-shadow-alerts.ts",
     "diagnose-gaps": "tsx scripts/diagnose-comparison-gaps.ts",
     "diagnose-url": "tsx scripts/diagnose-url-extraction.ts",

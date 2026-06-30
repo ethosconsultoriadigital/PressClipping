@@ -35,3 +35,51 @@ export const SHADOW_MEDIOS: readonly string[] = [
   'MED-0034', // La Razón
   'MED-0060', // Los Noticieristas
 ] as const;
+
+// ============================================================================
+// TIER NACIONAL B — medios nacionales de alto volumen, cron sombra cada 6h.
+// ----------------------------------------------------------------------------
+// Bloque SEPARADO de la lista base (SHADOW_MEDIOS). NO modifica el cron base de
+// 25 medios. Solo entran medios nacionales con señal real validada (Reforma
+// laboral) y precisión alta. Milenio y Aristegui NO entran todavía.
+//   - Uno TV  (MED-0025): ~4.5 menciones útiles/100, sin prefiltro.
+//   - Publimetro (MED-0053): ~3.0/100 pero 46% deportes/espectáculos → prefiltro título.
+// ============================================================================
+
+export type FrecuenciaShadow = '2h' | '6h' | 'diario';
+
+export interface ShadowMedioNacional {
+  medio_id: string;
+  nombre: string;
+  frecuencia_shadow: FrecuenciaShadow;
+  /** Tope superior de notas por corrida para este medio (política de tier). */
+  max_notas_shadow: number;
+  /** Aplica prefiltro determinístico de título (anti deportes/espectáculos). */
+  prefiltro_titulo: boolean;
+  activo_shadow: boolean;
+}
+
+export const SHADOW_MEDIOS_NACIONALES_B: readonly ShadowMedioNacional[] = [
+  {
+    medio_id: 'MED-0025',
+    nombre: 'Uno TV Noticias',
+    frecuencia_shadow: '6h',
+    max_notas_shadow: 50,
+    prefiltro_titulo: false,
+    activo_shadow: true,
+  },
+  {
+    medio_id: 'MED-0053',
+    nombre: 'Publimetro',
+    frecuencia_shadow: '6h',
+    max_notas_shadow: 40,
+    prefiltro_titulo: true,
+    activo_shadow: true,
+  },
+] as const;
+
+/** medio_id activos del tier nacional indicado (hoy solo 'B'). */
+export function mediosNacionalesActivos(tier: 'B' = 'B'): ShadowMedioNacional[] {
+  if (tier !== 'B') return [];
+  return SHADOW_MEDIOS_NACIONALES_B.filter((m) => m.activo_shadow);
+}
