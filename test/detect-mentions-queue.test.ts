@@ -24,6 +24,38 @@ describe('NoticiasPendientesOpts', () => {
     const opts: NoticiasPendientesOpts = { limit: 100 };
     expect('onlyWithText' in opts).toBe(false);
   });
+
+  it('acepta medioIds para detección aislada por medio', () => {
+    const opts: NoticiasPendientesOpts = { limit: 500, medioIds: ['MED-0030', 'MED-0025'] };
+    expect(opts.medioIds).toEqual(['MED-0030', 'MED-0025']);
+  });
+
+  it('medioIds es opcional (puede ser undefined)', () => {
+    const opts: NoticiasPendientesOpts = { limit: 100 };
+    expect('medioIds' in opts).toBe(false);
+  });
+});
+
+// ─── Parseo de --medio-ids (lista separada por comas) ───────────────────────
+
+function parseMedioIds(value: string): string[] {
+  return value.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+describe('parseArgs --medio-ids', () => {
+  it('parsea una lista separada por comas', () => {
+    expect(parseMedioIds('MED-0030,MED-0008,MED-0025,MED-0053')).toEqual([
+      'MED-0030', 'MED-0008', 'MED-0025', 'MED-0053',
+    ]);
+  });
+
+  it('ignora espacios y entradas vacías', () => {
+    expect(parseMedioIds(' MED-0030 , , MED-0008 ')).toEqual(['MED-0030', 'MED-0008']);
+  });
+
+  it('lista vacía produce arreglo vacío', () => {
+    expect(parseMedioIds('')).toEqual([]);
+  });
 });
 
 // ─── Lógica de parseo de flags en detect-mentions ───────────────────────────

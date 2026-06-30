@@ -395,6 +395,8 @@ export interface NoticiasPendientesOpts {
    * provienen de URLs de PressClipping y NO deben generar cobertura orgánica.
    */
   excludeDiagnostic?: boolean;
+  /** Aísla a estos medio_id (detección dirigida; no mezcla backlog global). */
+  medioIds?: string[];
 }
 
 /** Lee noticias aún no analizadas para menciones (las pendientes). */
@@ -413,6 +415,10 @@ export async function getNoticiasPendientes(
     .eq('menciones_procesado', false)
     .order('created_at', { ascending: true })
     .limit(opts.limit);
+
+  if (opts.medioIds && opts.medioIds.length > 0) {
+    query = query.in('medio_id', opts.medioIds);
+  }
 
   if (opts.onlyWithText) {
     query = query.not('texto_cuerpo_nota', 'is', null);
@@ -631,6 +637,8 @@ export interface EnriquecerOpts {
   onlyMissingBodyText?: boolean;
   /** Solo noticias con menciones_procesado = false (pendientes de detección). */
   onlyPendingMentions?: boolean;
+  /** Aísla a estos medio_id (enrich dirigido; no procesa backlog global). */
+  medioIds?: string[];
 }
 
 /**
@@ -649,6 +657,9 @@ export async function getNoticiasParaEnriquecer(
     )
     .order('created_at', { ascending: true });
 
+  if (opts.medioIds && opts.medioIds.length > 0) {
+    query = query.in('medio_id', opts.medioIds);
+  }
   if (opts.onlyMissingTitle) query = query.is('titulo', null);
   if (opts.onlyMissingText) query = query.is('texto_extraido', null);
   if (opts.onlyMissingCleanText) query = query.is('texto_nota_limpia', null);

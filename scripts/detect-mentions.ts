@@ -12,6 +12,7 @@
  *   npm run detect-mentions -- --limit=70 --dry-run
  *   npm run detect-mentions -- --limit=50 --only-with-text          # solo noticias con texto_cuerpo_nota
  *   npm run detect-mentions -- --limit=50 --only-with-text --dry-run
+ *   npm run detect-mentions -- --medio-ids=MED-0030,MED-0008 --only-with-text --dry-run  # aislado por medio
  */
 import {
   getConfigMap,
@@ -46,6 +47,12 @@ interface DetectArgs {
   onlyWithText?: boolean;
   /** Incluir notas diagnósticas de PressClipping (por defecto se excluyen, no son cobertura orgánica). */
   includeDiagnostic?: boolean;
+  /** Aísla la detección a estos medio_id (no mezcla backlog global). */
+  medioIds?: string[];
+}
+
+function splitList(v: string): string[] {
+  return v.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
 }
 
 function parseArgs(argv: string[]): DetectArgs {
@@ -60,6 +67,7 @@ function parseArgs(argv: string[]): DetectArgs {
     if (key === 'only-with-text') out.onlyWithText = true;
     if (key === 'include-diagnostic') out.includeDiagnostic = true;
     if (key === 'limit') out.limit = parseIntOrNull(value) ?? undefined;
+    if (key === 'medio-ids') out.medioIds = splitList(value);
   }
   return out;
 }
@@ -120,7 +128,7 @@ async function main() {
   const limit = args.limit ?? configLimit;
 
   logger.info(
-    { dryRun: args.dryRun, limit, onlyWithText: args.onlyWithText ?? false, includeDiagnostic: args.includeDiagnostic ?? false },
+    { dryRun: args.dryRun, limit, onlyWithText: args.onlyWithText ?? false, includeDiagnostic: args.includeDiagnostic ?? false, medioIds: args.medioIds ?? null },
     'Iniciando detección de menciones',
   );
 
@@ -132,6 +140,7 @@ async function main() {
     limit,
     onlyWithText: args.onlyWithText,
     excludeDiagnostic: !args.includeDiagnostic,
+    medioIds: args.medioIds,
   });
   logger.info(
     { keywords: reglas.length, noticias: noticias.length },

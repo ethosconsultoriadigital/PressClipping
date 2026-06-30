@@ -237,6 +237,27 @@ describe('enrichNews', () => {
     );
   });
 
+  it('propaga medioIds a la lectura (enrich aislado por medio)', async () => {
+    const { d, fetchNoticias } = deps();
+    await enrichNews(d, {
+      dryRun: true,
+      medioIds: ['MED-0030', 'MED-0008'],
+      onlyPendingMentions: true,
+      onlyMissingCleanText: true,
+      limit: 500,
+    });
+    expect(fetchNoticias).toHaveBeenCalledWith(
+      expect.objectContaining({ medioIds: ['MED-0030', 'MED-0008'] }),
+    );
+  });
+
+  it('sin medioIds NO restringe por medio (backlog global)', async () => {
+    const { d, fetchNoticias } = deps();
+    await enrichNews(d, { dryRun: true });
+    const [arg] = fetchNoticias.mock.calls[0] as [{ medioIds?: string[] }];
+    expect(arg.medioIds).toBeUndefined();
+  });
+
   it('onlyPendingMentions se combina con onlyMissingCleanText', async () => {
     const { d, fetchNoticias } = deps();
     await enrichNews(d, { dryRun: true, onlyPendingMentions: true, onlyMissingCleanText: true });

@@ -67,6 +67,8 @@ export interface EnrichOpts {
   onlyMissingBodyText?: boolean;
   /** Filtra noticias con menciones_procesado = false (pendientes de detección). */
   onlyPendingMentions?: boolean;
+  /** Aísla el lote a estos medio_id (crawl/enrich dirigido, sin tocar backlog global). */
+  medioIds?: string[];
   dryRun: boolean;
   maxChars?: number;
 }
@@ -79,6 +81,7 @@ export interface EnrichDeps {
     onlyMissingCleanText?: boolean;
     onlyMissingBodyText?: boolean;
     onlyPendingMentions?: boolean;
+    medioIds?: string[];
   }) => Promise<NoticiaEnriquecibleRow[]>;
   extract: (url: string) => Promise<FetchExtractResult>;
   updateNoticia: (id: string, fields: NoticiaEnriquecidaUpdate) => Promise<void>;
@@ -223,6 +226,7 @@ export async function enrichNews(
     onlyMissingCleanText: opts.onlyMissingCleanText,
     onlyMissingBodyText: opts.onlyMissingBodyText,
     onlyPendingMentions: opts.onlyPendingMentions,
+    medioIds: opts.medioIds,
   });
 
   const detalle: EnrichItemResult[] = [];
