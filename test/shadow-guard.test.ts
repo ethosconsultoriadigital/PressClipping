@@ -4,6 +4,7 @@ import {
   estadoCicloSombra,
   modoMetrica,
   notasShadow,
+  notasTrazabilidadWorkflow,
   esPrecisionNA,
   ACCIONES_PROHIBIDAS_SOMBRA,
 } from '../src/utils/shadowGuard.js';
@@ -157,5 +158,57 @@ describe('notasShadow (shadow history row incluye window_hours)', () => {
     expect(n).toContain('sheets_429');
     expect(n).toContain('sheets_write_failed');
     expect(n).toContain('sheets_write_mismatch');
+  });
+
+  it('notas nacional B incluyen workflow/tier/medios/frecuencia sin romper base', () => {
+    const notasExtra = notasTrazabilidadWorkflow({
+      workflow: 'shadow-national-tier',
+      tier: 'nacional_b',
+      medios: 'MED-0025,MED-0053',
+      frecuencia: '6h',
+    });
+    const n = notasShadow({ windowHours: 48, mediosCurados: 2, promovidasDiagnostico: 0, notasExtra });
+    // Base shadow intacta
+    expect(n).toContain('modo=shadow');
+    expect(n).toContain('sin alertas');
+    expect(n).toContain('sin export-results');
+    expect(n).toContain('ventana_movil=48h');
+    expect(n).toContain('medios_curados=2');
+    // Trazabilidad nacional B
+    expect(n).toContain('workflow=shadow-national-tier');
+    expect(n).toContain('tier=nacional_b');
+    expect(n).toContain('medios=MED-0025,MED-0053');
+    expect(n).toContain('frecuencia=6h');
+  });
+
+  it('notas shadow base NO cambian cuando no hay trazabilidad extra', () => {
+    const base = notasShadow({ windowHours: 48, mediosCurados: 25, promovidasDiagnostico: 0 });
+    const conExtraVacio = notasShadow({
+      windowHours: 48,
+      mediosCurados: 25,
+      promovidasDiagnostico: 0,
+      notasExtra: notasTrazabilidadWorkflow({}),
+    });
+    expect(conExtraVacio).toBe(base);
+    expect(base).not.toContain('workflow=');
+    expect(base).not.toContain('tier=');
+  });
+});
+
+describe('notasTrazabilidadWorkflow', () => {
+  it('ensambla solo las partes presentes', () => {
+    expect(
+      notasTrazabilidadWorkflow({ workflow: 'shadow-national-tier', tier: 'nacional_b' }),
+    ).toBe('workflow=shadow-national-tier; tier=nacional_b');
+  });
+
+  it('devuelve cadena vacía sin datos (no rompe shadow base)', () => {
+    expect(notasTrazabilidadWorkflow({})).toBe('');
+    expect(notasTrazabilidadWorkflow({ workflow: '   ' })).toBe('');
+  });
+
+  it('incluye medios CSV y frecuencia', () => {
+    const s = notasTrazabilidadWorkflow({ medios: 'MED-0025,MED-0053', frecuencia: '6h' });
+    expect(s).toBe('medios=MED-0025,MED-0053; frecuencia=6h');
   });
 });

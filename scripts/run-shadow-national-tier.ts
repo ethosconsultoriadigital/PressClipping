@@ -27,6 +27,7 @@ import { verificarFlagsSombra } from '../src/utils/shadowGuard.js';
 import { ventanaMovil } from '../src/utils/dateWindow.js';
 import { mediosNacionalesActivos, type ShadowMedioNacional } from '../src/config/shadowMedia.js';
 import { getSupabase } from '../src/supabase/client.js';
+import { markNoticiasProcesadas } from '../src/supabase/repositories.js';
 import { decidirPrefiltro } from '../src/shadow/nationalPrefilter.js';
 
 const DEFAULT_XML_URL = 'https://tabla.ethosconsultoriadigital.workers.dev/read-xml';
@@ -147,11 +148,8 @@ async function aplicarPrefiltro(
   const procesadas = frescas.length - aSaltar.length;
 
   if (aSaltar.length > 0 && !dryRun) {
-    const { error: upErr } = await sb
-      .from('noticias')
-      .update({ menciones_procesado: true })
-      .in('noticia_id', aSaltar);
-    if (upErr) throw new Error(`Prefiltro: no se pudo marcar saltadas: ${upErr.message}`);
+    // En lotes seguros (anti "Bad Request" por URL larga si crece el volumen).
+    await markNoticiasProcesadas(aSaltar);
   }
 
   logger.info(
@@ -222,12 +220,18 @@ async function main(): Promise<void> {
   // 6. Comparativo 48h vía run-live-comparison SIN crawl (solo import XML + compare + 07).
   //    El crawl/enrich/detect ya se hicieron AISLADOS arriba; aquí no se pasa
   //    --crawl-medio-ids para no reprocesar backlog global.
+  const frecuencia = medios[0]?.frecuencia_shadow ?? '6h';
   const liveArgs = [
     '--shadow', '--no-export-results',
     `--xml-url=${args.xmlUrl}`,
     `--fecha-desde=${desde}`, `--fecha-hasta=${hasta}`,
     `--window-hours=${args.windowHours}`, `--medios-curados=${medios.length}`,
     `--output=${args.output}`, '--replace-window',
+    // Trazabilidad nacional B en 07.notas (tokens sin espacios; CSV con comas seguro):
+    '--workflow-label=shadow-national-tier',
+    `--tier-label=nacional_${args.tier.toLowerCase()}`,
+    `--notas-medios=${medioIds}`,
+    `--frecuencia=${frecuencia}`,
   ];
   if (args.appendMetricsHistory) liveArgs.push('--append-metrics-history');
   if (args.dryRun) liveArgs.push('--dry-run');

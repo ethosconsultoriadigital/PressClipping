@@ -14,6 +14,7 @@ import {
   type PromocionUpdate,
 } from '../crawlers/promocion.js';
 import { childLogger } from '../utils/logger.js';
+import { ejecutarPorLotes } from '../utils/chunk.js';
 import {
   type MencionExportRow,
   SELECT_MENCION_EXPORT,
@@ -467,14 +468,35 @@ export async function insertMenciones(rows: MencionInsert[]): Promise<number> {
   return rows.length;
 }
 
-/** Marca noticias como ya analizadas para menciones. */
+/**
+ * Tamaño de lote para updates por lista de IDs. PostgREST mete los IDs en el
+ * query string; con cientos de UUIDs la URL excede el límite del servidor y
+ * falla con "Bad Request". 200 UUIDs van muy por debajo de ese límite.
+ */
+const ID_BATCH_SIZE = 200;
+
+/**
+ * Actualiza filas por lista de IDs en lotes seguros (anti "Bad Request" por URL
+ * demasiado larga). Devuelve el total de IDs procesados. Lanza con el lote
+ * específico que falló (sin ocultar updates parciales).
+ */
+async function updatePorIdsEnLotes(
+  tabla: string,
+  idColumna: string,
+  ids: string[],
+  patch: Record<string, unknown>,
+): Promise<number> {
+  const log = childLogger({ accion: 'update_por_lotes', tabla, idColumna });
+  return ejecutarPorLotes(ids, ID_BATCH_SIZE, async (lote, index, total) => {
+    const res = await getSupabase().from(tabla).update(patch).in(idColumna, lote);
+    log.debug({ lote: index + 1, total, tamano: lote.length }, 'update por lotes');
+    return { error: res.error };
+  });
+}
+
+/** Marca noticias como ya analizadas para menciones (en lotes seguros). */
 export async function markNoticiasProcesadas(ids: string[]): Promise<void> {
-  if (ids.length === 0) return;
-  const { error } = await getSupabase()
-    .from('noticias')
-    .update({ menciones_procesado: true })
-    .in('noticia_id', ids);
-  if (error) throw new Error(`No se pudo marcar noticias procesadas: ${error.message}`);
+  await updatePorIdsEnLotes('noticias', 'noticia_id', ids, { menciones_procesado: true });
 }
 
 // =============================================================================
@@ -493,14 +515,9 @@ export async function getMencionesPendientesExport(limit: number): Promise<Menci
   return (data ?? []).map(mapMencionExport);
 }
 
-/** Marca menciones como ya exportadas a la pestaña de resultados. */
+/** Marca menciones como ya exportadas a la pestaña de resultados (en lotes). */
 export async function markMencionesExportadas(ids: string[]): Promise<void> {
-  if (ids.length === 0) return;
-  const { error } = await getSupabase()
-    .from('menciones')
-    .update({ exportado_sheets: true })
-    .in('mencion_id', ids);
-  if (error) throw new Error(`No se pudo marcar menciones exportadas: ${error.message}`);
+  await updatePorIdsEnLotes('menciones', 'mencion_id', ids, { exportado_sheets: true });
 }
 
 export interface LogExportRow {
@@ -534,14 +551,9 @@ export async function getMencionesParaXml(limit: number): Promise<MencionExportR
   return (data ?? []).map(mapMencionExport);
 }
 
-/** Marca menciones como exportadas a XML. */
+/** Marca menciones como exportadas a XML (en lotes). */
 export async function markMencionesExportadasXml(ids: string[]): Promise<void> {
-  if (ids.length === 0) return;
-  const { error } = await getSupabase()
-    .from('menciones')
-    .update({ exportado_xml: true })
-    .in('mencion_id', ids);
-  if (error) throw new Error(`No se pudo marcar menciones exportadas a XML: ${error.message}`);
+  await updatePorIdsEnLotes('menciones', 'mencion_id', ids, { exportado_xml: true });
 }
 
 /** Lee logs aún no volcados a 05_Logs. */
@@ -558,14 +570,9 @@ export async function getLogsPendientesExport(limit: number): Promise<LogExportR
   return (data ?? []) as unknown as LogExportRow[];
 }
 
-/** Marca logs como ya volcados a la pestaña de logs. */
+/** Marca logs como ya volcados a la pestaña de logs (en lotes). */
 export async function markLogsExportados(ids: string[]): Promise<void> {
-  if (ids.length === 0) return;
-  const { error } = await getSupabase()
-    .from('logs_ingesta')
-    .update({ exportado_sheets: true })
-    .in('log_id', ids);
-  if (error) throw new Error(`No se pudo marcar logs exportados: ${error.message}`);
+  await updatePorIdsEnLotes('logs_ingesta', 'log_id', ids, { exportado_sheets: true });
 }
 
 // =============================================================================
@@ -608,17 +615,12 @@ export async function getNoticiasParaExportRaw(
   return (data ?? []).map(mapNoticiaRaw);
 }
 
-/** Marca noticias como ya exportadas a 01_Noticias_Raw (anti-duplicado). */
+/** Marca noticias como ya exportadas a 01_Noticias_Raw (anti-duplicado, en lotes). */
 export async function markNoticiasExportadasRaw(ids: string[]): Promise<void> {
-  if (ids.length === 0) return;
-  const { error } = await getSupabase()
-    .from('noticias')
-    .update({
-      exportado_sheet_raw: true,
-      fecha_exportado_sheet_raw: new Date().toISOString(),
-    })
-    .in('noticia_id', ids);
-  if (error) throw new Error(`No se pudo marcar noticias exportadas raw: ${error.message}`);
+  await updatePorIdsEnLotes('noticias', 'noticia_id', ids, {
+    exportado_sheet_raw: true,
+    fecha_exportado_sheet_raw: new Date().toISOString(),
+  });
 }
 
 // =============================================================================

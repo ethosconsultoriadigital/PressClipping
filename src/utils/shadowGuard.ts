@@ -113,6 +113,12 @@ export function notasShadow(opts: {
   sheets429?: boolean;
   sheetsWriteFailed?: boolean;
   sheetsWriteMismatch?: boolean;
+  /**
+   * Trazabilidad adicional del workflow (p.ej. tier nacional B). Se concatena al
+   * final de forma segura sin alterar las notas base del shadow scheduler.
+   * Ej.: "workflow=shadow-national-tier; tier=nacional_b; medios=MED-0025,MED-0053; frecuencia=6h"
+   */
+  notasExtra?: string;
 }): string {
   const partes = ['modo=shadow', 'sin alertas', 'sin export-results'];
   if (opts.windowHours != null) partes.push(`ventana_movil=${opts.windowHours}h`);
@@ -124,6 +130,28 @@ export function notasShadow(opts: {
   if (opts.sheetsWriteFailed) partes.push('sheets_write_failed');
   if (opts.sheetsWriteMismatch) partes.push('sheets_write_mismatch');
   partes.push(`promovidas_diagnostico=${opts.promovidasDiagnostico ?? 0}`);
+  const extra = opts.notasExtra?.trim();
+  if (extra) partes.push(extra);
+  return partes.join('; ');
+}
+
+/**
+ * Ensambla la trazabilidad de workflow/tier para `notasShadow.notasExtra`.
+ * Devuelve '' si no hay datos (el shadow base no se altera). Cada parte es
+ * `clave=valor`; el resultado se concatena con '; '.
+ * Ej.: "workflow=shadow-national-tier; tier=nacional_b; medios=MED-0025,MED-0053; frecuencia=6h"
+ */
+export function notasTrazabilidadWorkflow(opts: {
+  workflow?: string;
+  tier?: string;
+  medios?: string;
+  frecuencia?: string;
+}): string {
+  const partes: string[] = [];
+  if (opts.workflow?.trim()) partes.push(`workflow=${opts.workflow.trim()}`);
+  if (opts.tier?.trim()) partes.push(`tier=${opts.tier.trim()}`);
+  if (opts.medios?.trim()) partes.push(`medios=${opts.medios.trim()}`);
+  if (opts.frecuencia?.trim()) partes.push(`frecuencia=${opts.frecuencia.trim()}`);
   return partes.join('; ');
 }
 

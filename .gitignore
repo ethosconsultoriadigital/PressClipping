@@ -23,6 +23,8 @@ npm-debug.log*
 output/
 *.xml
 !docs/**/*.xml
+# Fixtures de test deben ir versionados (CI los necesita):
+!test/**/*.xml
 
 # Cloudflare Worker (local)
 worker/.dev.vars

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pressclipping>
+  <nota>
+    <fecha>2026-05-10</fecha>
+    <cliente>Bebidas alcohólicas</cliente>
+    <grupo>Industria tequilera</grupo>
+    <keyword>tequila</keyword>
+    <medio>El Universal</medio>
+    <titulo>Exportaciones de tequila alcanzan récord histórico en 2026</titulo>
+    <url>https://www.eluniversal.com.mx/economia/exportaciones-tequila-record-2026</url>
+    <autor>María López</autor>
+    <seccion>Economía</seccion>
+    <tipo>Nota informativa</tipo>
+  </nota>
+  <nota>
+    <fecha>2026-05-11</fecha>
+    <cliente>Bebidas alcohólicas</cliente>
+    <grupo>Industria tequilera</grupo>
+    <keyword>denominación de origen</keyword>
+    <medio>Reforma</medio>
+    <titulo>CRT refuerza controles de denominación de origen del tequila</titulo>
+    <url>https://www.reforma.com/crt-denominacion-origen-tequila-2026</url>
+    <autor>Carlos Ruiz</autor>
+    <seccion>Negocios</seccion>
+    <tipo>Nota informativa</tipo>
+  </nota>
+  <nota>
+    <fecha>2026-05-12</fecha>
+    <cliente>Laboral</cliente>
+    <grupo>Reforma laboral</grupo>
+    <keyword>reforma laboral</keyword>
+    <medio>El Economista</medio>
+    <titulo>Reforma laboral avanza con nuevo reglamento de conciliación</titulo>
+    <url>https://www.eleconomista.com.mx/empresas/reforma-laboral-conciliacion-2026</url>
+    <autor>Juan García</autor>
+    <seccion>Empresas</seccion>
+    <tipo>Análisis</tipo>
+  </nota>
+</pressclipping>

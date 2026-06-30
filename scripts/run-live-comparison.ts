@@ -29,7 +29,12 @@ import { spawn } from 'node:child_process';
 import { logger } from '../src/utils/logger.js';
 import { appendHistoryRow } from '../src/sheets/write.js';
 import { OUTPUT_TABS } from '../src/sheets/client.js';
-import { estadoCicloSombra, modoMetrica, notasShadow } from '../src/utils/shadowGuard.js';
+import {
+  estadoCicloSombra,
+  modoMetrica,
+  notasShadow,
+  notasTrazabilidadWorkflow,
+} from '../src/utils/shadowGuard.js';
 
 interface LiveArgs {
   xmlUrl?: string;
@@ -51,6 +56,14 @@ interface LiveArgs {
   windowHours?: number;
   /** Trazabilidad sombra: número de medios curados en la lista. */
   mediosCurados?: number;
+  /** Trazabilidad de workflow (p.ej. shadow-national-tier). Token sin espacios. */
+  workflowLabel?: string;
+  /** Trazabilidad de tier (p.ej. nacional_b). Token sin espacios. */
+  tierLabel?: string;
+  /** Trazabilidad de medios del tier (CSV, p.ej. MED-0025,MED-0053). */
+  notasMedios?: string;
+  /** Trazabilidad de frecuencia del tier (p.ej. 6h). */
+  frecuencia?: string;
 }
 
 function parseArgs(argv: string[]): LiveArgs {
@@ -87,6 +100,10 @@ function parseArgs(argv: string[]): LiveArgs {
       case 'no-export-results': out.noExportResults = true; break;
       case 'window-hours':    out.windowHours = Number(val) || out.windowHours; break;
       case 'medios-curados':  out.mediosCurados = Number(val) || out.mediosCurados; break;
+      case 'workflow-label':  out.workflowLabel = val || undefined; break;
+      case 'tier-label':      out.tierLabel = val || undefined; break;
+      case 'notas-medios':    out.notasMedios = val || undefined; break;
+      case 'frecuencia':      out.frecuencia = val || undefined; break;
       // Flags de confirmación de modo sombra (no habilitan nada; se aceptan):
       case 'no-alerts': case 'no-generate-xml': case 'no-classify-ia': break;
     }
@@ -367,6 +384,12 @@ async function appendMetricsHistory(
 
   const promovidas = (resumen['promovidas_diagnostico'] as number) ?? 0;
   const precisionAjustada = findVal(compLines, 'precision_ajustada');
+  const notasExtra = notasTrazabilidadWorkflow({
+    workflow: args.workflowLabel,
+    tier: args.tierLabel,
+    medios: args.notasMedios,
+    frecuencia: args.frecuencia,
+  });
   const notasModo = args.shadow
     ? notasShadow({
         windowHours: args.windowHours,
@@ -376,6 +399,7 @@ async function appendMetricsHistory(
         sheets429: resumen['sheets_429'] === true,
         sheetsWriteFailed: resumen['sheets_write_failed'] === true,
         sheetsWriteMismatch: resumen['sheets_write_mismatch'] === true,
+        notasExtra,
       })
     : `promovidas_diagnostico=${promovidas}`;
 
