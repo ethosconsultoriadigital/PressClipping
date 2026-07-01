@@ -23,6 +23,13 @@
  *   npm run crawl -- --exclude-status=error,sin_fuente,especial
  *   npm run crawl -- --medio-ids=MED-0001,MED-0029  # solo estos medios (sobrescribe otros filtros)
  *
+ * Backfill dirigido por sitemap (requiere --medio-ids; no afecta cron ni crawl normal):
+ *   npm run crawl -- --medio-ids=MED-0033,MED-0171 --source=sitemap --max-notas=200 --sitemap-max-subs=40
+ *   --source=rss|sitemap|news-sitemap  fuerza la fuente ignorando la cascada RSS→sitemap
+ *   --max-notas=N                      tope de notas por medio en esta corrida
+ *   --sitemap-max-subs=N               sub-sitemaps a resolver en índices
+ *   --sitemap-max-depth=N              profundidad de recursión de índices
+ *
  * Los flags se pueden combinar, p.ej.:
  *   npm run crawl -- --dry-run --limit=10 --solo-validados
  */
@@ -33,7 +40,7 @@ import {
   updateMedioEstado,
   type MedioRow,
 } from '../src/supabase/repositories.js';
-import { crawlMedio } from '../src/crawlers/index.js';
+import { crawlMedio, type CrawlMedioOpts } from '../src/crawlers/index.js';
 import {
   seleccionarMedios,
   type CrawlFiltros,
@@ -50,6 +57,14 @@ interface CrawlArgs extends CrawlFiltros {
   limit?: number;
   dryRun: boolean;
   medioIds?: string[];
+  /** Backfill dirigido: fuerza la fuente (rss|sitemap) ignorando la cascada. */
+  source?: 'rss' | 'sitemap';
+  /** Presupuesto de sub-sitemaps para índices (solo con --source=sitemap). */
+  sitemapMaxSubs?: number;
+  /** Profundidad de recursión de índices (solo con --source=sitemap). */
+  sitemapMaxDepth?: number;
+  /** Sobrescribe el tope de notas por medio (config max_notas_por_medio_por_corrida). */
+  maxNotas?: number;
 }
 
 function splitList(v: string): string[] {
@@ -93,6 +108,24 @@ function parseArgs(argv: string[]): CrawlArgs {
         break;
       case 'medio-ids':
         out.medioIds = splitList(value);
+        break;
+      case 'source':
+      case 'prefer-source': {
+        // news-sitemap se trata como sitemap (usa sitemap_url del medio).
+        const v = value.trim().toLowerCase();
+        if (v === 'sitemap' || v === 'news-sitemap') out.source = 'sitemap';
+        else if (v === 'rss') out.source = 'rss';
+        else logger.warn({ value }, 'Valor --source no reconocido (usa rss|sitemap|news-sitemap)');
+        break;
+      }
+      case 'sitemap-max-subs':
+        out.sitemapMaxSubs = parseIntOrNull(value) ?? undefined;
+        break;
+      case 'sitemap-max-depth':
+        out.sitemapMaxDepth = parseIntOrNull(value) ?? undefined;
+        break;
+      case 'max-notas':
+        out.maxNotas = parseIntOrNull(value) ?? undefined;
         break;
       default:
         logger.warn({ flag: arg }, 'Flag desconocido ignorado');
@@ -161,9 +194,17 @@ function imprimirDryRun(seleccion: Decision[], excluidos: Decision[]): void {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
 
+  // Salvaguarda: forzar fuente (backfill) solo es válido en crawl dirigido por
+  // --medio-ids; nunca sobre el catálogo completo ni el cron.
+  if (args.source && !(args.medioIds && args.medioIds.length > 0)) {
+    logger.error('--source solo se permite junto con --medio-ids (crawl dirigido). Abortando.');
+    process.exit(1);
+  }
+
   const config = await getConfigMap();
   const modoMvp = parseBool(config['modo_mvp'], true);
-  const maxNotas = parseIntOrNull(config['max_notas_por_medio_por_corrida']) ?? 25;
+  const maxNotas =
+    args.maxNotas ?? parseIntOrNull(config['max_notas_por_medio_por_corrida']) ?? 25;
 
   let medios = await getMediosActivos();
 
@@ -253,7 +294,12 @@ async function main() {
     if (!medio) continue;
 
     const started = Date.now();
-    const result = await crawlMedio(medio, maxNotas);
+    const crawlOpts: CrawlMedioOpts = {
+      forceFuente: args.source,
+      sitemapMaxSubs: args.sitemapMaxSubs,
+      sitemapMaxDepth: args.sitemapMaxDepth,
+    };
+    const result = await crawlMedio(medio, maxNotas, crawlOpts);
 
     let insertadas = 0;
     let duplicados = 0;

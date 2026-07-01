@@ -24,6 +24,16 @@ export interface CrawlResult {
 
 const METODOS_MVP = new Set(['rss', 'sitemap']);
 
+/** Opciones de crawl dirigido (backfill). No afectan el crawl normal si se omiten. */
+export interface CrawlMedioOpts {
+  /** Fuerza la fuente (rss|sitemap) e ignora la cascada. Útil para backfill por sitemap. */
+  forceFuente?: 'rss' | 'sitemap';
+  /** Presupuesto de sub-sitemaps a descargar en índices (solo aplica a sitemap). */
+  sitemapMaxSubs?: number;
+  /** Profundidad máxima de recursión de índices (solo aplica a sitemap). */
+  sitemapMaxDepth?: number;
+}
+
 /**
  * Ejecuta la ingesta de un medio respetando `limit` (max_notas_por_medio).
  * Nunca lanza: encapsula los errores en el CrawlResult para no tumbar la corrida.
@@ -31,6 +41,7 @@ const METODOS_MVP = new Set(['rss', 'sitemap']);
 export async function crawlMedio(
   medio: MedioRow,
   limit: number,
+  opts: CrawlMedioOpts = {},
 ): Promise<CrawlResult> {
   const log = childLogger({ medio_id: medio.medio_id });
   const base: Omit<CrawlResult, 'fuente' | 'urls_detectadas' | 'items' | 'estado' | 'error'> = {
@@ -43,12 +54,17 @@ export async function crawlMedio(
     return { ...base, fuente: null, urls_detectadas: 0, items: [], estado: 'omitido', error: null };
   }
 
-  // Construye el orden de intentos: método declarado primero, luego cascada.
+  // Construye el orden de intentos. Con forceFuente se usa SOLO esa fuente
+  // (backfill dirigido); si no, método declarado primero y luego cascada.
   const orden: ('rss' | 'sitemap')[] = [];
   const declarado = medio.metodo_extraccion?.trim().toLowerCase();
-  if (declarado && METODOS_MVP.has(declarado)) orden.push(declarado as 'rss' | 'sitemap');
-  for (const m of ['rss', 'sitemap'] as const) {
-    if (!orden.includes(m)) orden.push(m);
+  if (opts.forceFuente) {
+    orden.push(opts.forceFuente);
+  } else {
+    if (declarado && METODOS_MVP.has(declarado)) orden.push(declarado as 'rss' | 'sitemap');
+    for (const m of ['rss', 'sitemap'] as const) {
+      if (!orden.includes(m)) orden.push(m);
+    }
   }
 
   const ctx = {
@@ -68,7 +84,11 @@ export async function crawlMedio(
       const raw =
         metodo === 'rss'
           ? await fetchRss(url)
-          : await fetchSitemap(url, { limit });
+          : await fetchSitemap(url, {
+              limit,
+              maxSubSitemaps: opts.sitemapMaxSubs,
+              maxDepth: opts.sitemapMaxDepth,
+            });
 
       const items = raw
         .map((it) => normalizeNoticia(it, { ...ctx, fuente: metodo }))
