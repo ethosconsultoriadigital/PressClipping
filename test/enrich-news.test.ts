@@ -113,6 +113,45 @@ describe('construirActualizacion', () => {
     expect(campos).not.toContain('texto_nota_limpia');
   });
 
+  it('force-refresh SÍ sobrescribe texto_extraido/limpio/cuerpo aunque existan', () => {
+    const ext = extracto({
+      texto_extraido: 'Cuerpo re-extraído sin relacionados.',
+      texto_nota_limpia: 'Cuerpo limpio re-extraído.',
+      texto_cuerpo_nota: 'Cuerpo re-extraído.',
+      extracto_cuerpo_1300: 'Cuerpo re-extraído.',
+      cuerpo_nota_chars: 19,
+      tipo_nota: 'Noticias',
+    });
+    const { fields, campos } = construirActualizacion(
+      noticia({
+        titulo: 'Título Real',
+        texto_extraido: 'viejo con teaser tequila adulterado',
+        texto_nota_limpia: 'viejo limpio con teaser tequila adulterado',
+        texto_cuerpo_nota: 'viejo cuerpo con teaser tequila adulterado',
+      }),
+      ext,
+      { forceRefreshCleanText: true },
+    );
+    expect(fields.texto_extraido).toBe('Cuerpo re-extraído sin relacionados.');
+    expect(fields.texto_nota_limpia).toBe('Cuerpo limpio re-extraído.');
+    expect(fields.texto_cuerpo_nota).toBe('Cuerpo re-extraído.');
+    expect(campos).toEqual(
+      expect.arrayContaining(['texto_extraido', 'texto_nota_limpia', 'texto_cuerpo_nota']),
+    );
+    // No toca el título real existente ni siquiera en force-refresh.
+    expect(fields.titulo).toBeUndefined();
+  });
+
+  it('force-refresh NO sobrescribe si la extracción falló (ok=false)', () => {
+    const { fields, campos } = construirActualizacion(
+      noticia({ texto_nota_limpia: 'contenido bueno previo' }),
+      extracto({ ok: false, error: 'timeout', texto_extraido: null, texto_nota_limpia: null }),
+      { forceRefreshCleanText: true },
+    );
+    expect(fields.texto_nota_limpia).toBeUndefined();
+    expect(campos).not.toContain('texto_nota_limpia');
+  });
+
   it('rellena los 4 campos de cuerpo/tipo cuando están vacíos', () => {
     const ext = extracto({
       texto_cuerpo_nota: 'Cuerpo real.',

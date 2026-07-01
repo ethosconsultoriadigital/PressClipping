@@ -421,6 +421,70 @@ describe('extraerCuerpoNota - texto_cuerpo_nota', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Contaminación por teaser de "relacionados" incrustado (patrón El Otro Enfoque)
+// ---------------------------------------------------------------------------
+
+/**
+ * Simula el patrón real de El Otro Enfoque (WordPress): a media nota inyecta un
+ * párrafo cuyo único contenido es un enlace-pregunta a otra nota
+ * (`<p><strong><a>¿…tequila adulterado…?</a></strong></p>`). Ese teaser
+ * contaminaba el matcher haciendo que notas ajenas parecieran de crisis.
+ */
+const HTML_EL_OTRO_ENFOQUE = `<html><head><meta property="og:title" content="Pronostican inundaciones en Guanajuato"></head><body>
+  <article class="post-1 category-noticias">
+    <div class="single-content-full"><div class="bs-desc">
+      <p class="wp-block-paragraph">La Coordinación Estatal de Protección Civil exhortó a la población a reforzar medidas de prevención ante lluvias intensas en el estado de Guanajuato durante la temporada.</p>
+      <p class="wp-block-paragraph"><strong><a href="/tequila-adulterado-sseg/">¿Tequila adulterado causa ceguera y qué más?</a></strong></p>
+      <p class="wp-block-paragraph">Asimismo se pidió a la ciudadanía reportar cualquier situación de riesgo al número de emergencias 9-1-1 y seguir las indicaciones de las autoridades locales en todo momento.</p>
+      <p class="wp-block-paragraph"><a href="https://tiktok.com/@x">Sigue nuestras noticias a través de TikTok</a></p>
+    </div></div>
+  </article>
+</body></html>`;
+
+describe('extractFromHtml - teaser de relacionados incrustado (El Otro Enfoque)', () => {
+  it('elimina el párrafo que es solo un enlace-pregunta de relacionados', () => {
+    const r = extractFromHtml(HTML_EL_OTRO_ENFOQUE, 'https://elotroenfoque.mx/index.php/2026/06/30/pronostican-inundaciones/');
+    expect(r.texto_extraido).not.toContain('Tequila adulterado causa ceguera');
+    expect(r.texto_nota_limpia).not.toContain('Tequila adulterado causa ceguera');
+    expect(r.texto_cuerpo_nota).not.toContain('Tequila adulterado causa ceguera');
+  });
+
+  it('conserva el cuerpo principal real de la nota', () => {
+    const r = extractFromHtml(HTML_EL_OTRO_ENFOQUE, 'https://elotroenfoque.mx/x');
+    expect(r.texto_extraido).toContain('Coordinación Estatal de Protección Civil');
+    expect(r.texto_extraido).toContain('reportar cualquier situación de riesgo');
+  });
+
+  it('el matcher ya no ve "tequila adulterado" ubicado solo en el relacionado', () => {
+    const r = extractFromHtml(HTML_EL_OTRO_ENFOQUE, 'https://elotroenfoque.mx/x');
+    const cuerpo = (r.texto_cuerpo_nota ?? '').toLowerCase();
+    expect(cuerpo).not.toContain('tequila adulterado');
+  });
+
+  it('remueve el CTA de seguir en redes ("Sigue nuestras noticias a través de TikTok")', () => {
+    const r = extractFromHtml(HTML_EL_OTRO_ENFOQUE, 'https://elotroenfoque.mx/x');
+    expect(r.texto_nota_limpia).not.toContain('Sigue nuestras noticias a través de TikTok');
+  });
+
+  it('NO borra un párrafo de prosa que contiene un enlace pequeño (no es teaser)', () => {
+    const html = `<html><body><article>
+      <p>${PARRAFO}</p>
+      <p>El informe completo está disponible en <a href="/doc">este documento oficial</a> según la dependencia estatal responsable del reporte anual.</p>
+      <p>${PARRAFO}</p>
+    </article></body></html>`;
+    const r = extractFromHtml(html, 'https://m.mx/x');
+    expect(r.texto_extraido).toContain('El informe completo está disponible');
+  });
+
+  it('no afecta a un artículo de otro medio sin teasers (regresión)', () => {
+    const html = `<html><body>${articulo()}</body></html>`;
+    const r = extractFromHtml(html, 'https://otromedio.mx/x');
+    expect(r.texto_extraido).toContain('Lorem ipsum');
+    expect(r.metodo_texto).toBe('html_article');
+  });
+});
+
 describe('fetchAndExtract', () => {
   const realFetch = globalThis.fetch;
 

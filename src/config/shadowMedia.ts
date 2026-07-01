@@ -83,3 +83,46 @@ export function mediosNacionalesActivos(tier: 'B' = 'B'): ShadowMedioNacional[] 
   if (tier !== 'B') return [];
   return SHADOW_MEDIOS_NACIONALES_B.filter((m) => m.activo_shadow);
 }
+
+// ============================================================================
+// TIER CRISIS — cron sombra dedicado a fuentes con señal de crisis validada.
+// ----------------------------------------------------------------------------
+// Bloque SEPARADO de SHADOW_MEDIOS y del tier nacional B. Pensado para medios
+// donde el BACKFILL POR SITEMAP recuperó notas de crisis (tequila/alcohol
+// adulterado) que el RSS ya había rotado, con precisión alta y FP ~0.
+//
+// Inicia SOLO con UNO MAS UNO (MED-0170): el sitemap recuperó crisis real, con
+// 3 P1 y 0 FP. Usa fuente=sitemap (no RSS) porque el RSS pierde las notas antes
+// de crawlear. NO incluye El Otro Enfoque (MED-0171) todavía (su extracción se
+// acaba de limpiar; requiere 1–2 ciclos de validación). NO incluye El Sol de
+// Irapuato (sin sitemap propio). NO integra alertas.
+// ============================================================================
+
+export type FuenteShadow = 'rss' | 'sitemap';
+
+export interface ShadowMedioCrisis {
+  medio_id: string;
+  nombre: string;
+  /** Fuente preferida para el backfill/crawl del tier (sitemap recupera crisis). */
+  fuente_preferida: FuenteShadow;
+  frecuencia_shadow: FrecuenciaShadow;
+  /** Tope superior de notas por corrida para este medio. */
+  max_notas_shadow: number;
+  activo_shadow: boolean;
+}
+
+export const SHADOW_MEDIOS_CRISIS: readonly ShadowMedioCrisis[] = [
+  {
+    medio_id: 'MED-0170',
+    nombre: 'UNO MAS UNO',
+    fuente_preferida: 'sitemap',
+    frecuencia_shadow: '6h',
+    max_notas_shadow: 80,
+    activo_shadow: true,
+  },
+] as const;
+
+/** medio_id (config) activos del tier crisis. */
+export function mediosCrisisActivos(): ShadowMedioCrisis[] {
+  return SHADOW_MEDIOS_CRISIS.filter((m) => m.activo_shadow);
+}

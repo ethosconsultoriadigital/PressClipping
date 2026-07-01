@@ -64,6 +64,8 @@ interface LiveArgs {
   notasMedios?: string;
   /** Trazabilidad de frecuencia del tier (p.ej. 6h). */
   frecuencia?: string;
+  /** Trazabilidad de fuente preferida del tier (p.ej. sitemap). */
+  fuenteLabel?: string;
 }
 
 function parseArgs(argv: string[]): LiveArgs {
@@ -104,6 +106,7 @@ function parseArgs(argv: string[]): LiveArgs {
       case 'tier-label':      out.tierLabel = val || undefined; break;
       case 'notas-medios':    out.notasMedios = val || undefined; break;
       case 'frecuencia':      out.frecuencia = val || undefined; break;
+      case 'fuente':          out.fuenteLabel = val || undefined; break;
       // Flags de confirmación de modo sombra (no habilitan nada; se aceptan):
       case 'no-alerts': case 'no-generate-xml': case 'no-classify-ia': break;
     }
@@ -388,6 +391,7 @@ async function appendMetricsHistory(
     workflow: args.workflowLabel,
     tier: args.tierLabel,
     medios: args.notasMedios,
+    fuente: args.fuenteLabel,
     frecuencia: args.frecuencia,
   });
   const notasModo = args.shadow

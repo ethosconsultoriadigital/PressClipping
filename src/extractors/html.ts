@@ -143,6 +143,8 @@ const PATRONES_PROMO = [
   /https?:\/\/[^\s]{0,30}\.ly\b/i,  // bit.ly, etc.
   /t\.me\//i,
   /wa\.me\//i,
+  // CTA de seguir en redes ("Sigue nuestras/también las noticias ... en TikTok")
+  /^sigue\s+(nuestras|tambi[eé]n|nuestro|las)\b.*\b(tiktok|facebook|instagram|whatsapp|telegram|x|twitter|google\s*news)\b/i,
 ];
 
 /**
@@ -517,11 +519,34 @@ function extraerSeccion($: cheerio.CheerioAPI): string | null {
   ]);
 }
 
+/**
+ * ¿El <p> es únicamente uno o varios enlaces, sin prosa propia? Es el patrón de
+ * los teasers de "contenido relacionado" que algunos temas (p. ej. WordPress de
+ * El Otro Enfoque) inyectan a media nota como `<p><strong><a>¿…?</a></strong></p>`.
+ * Un párrafo que es solo enlace nunca es cuerpo real: se descarta con seguridad.
+ */
+function esParrafoSoloEnlace($: cheerio.CheerioAPI, el: any): boolean {
+  const $p = $(el);
+  const pText = limpiarTexto($p.text());
+  if (!pText) return false;
+  const $links = $p.find('a');
+  if ($links.length === 0) return false;
+  const linkText = limpiarTexto(
+    $links
+      .map((_j, a) => $(a).text())
+      .get()
+      .join(' '),
+  );
+  // El texto del párrafo es (casi) exclusivamente el de sus enlaces.
+  return linkText.length >= pText.length - 3;
+}
+
 /** Junta el texto de los <p> de un contenedor, filtrando ruido y vacíos. */
 function textoDeContenedor($: cheerio.CheerioAPI, $cont: cheerio.Cheerio<any>): string {
   $cont.find(RUIDO).remove();
   const parrafos: string[] = [];
   $cont.find('p').each((_i, el) => {
+    if (esParrafoSoloEnlace($, el)) return; // teaser de relacionados / navegación
     const t = limpiarTexto($(el).text());
     if (t.length > 0) parrafos.push(t);
   });
@@ -557,6 +582,7 @@ function extraerTexto(
   $body.find(RUIDO).remove();
   const parrafos: string[] = [];
   $body.find('p').each((_i, el) => {
+    if (esParrafoSoloEnlace($, el)) return; // teaser de relacionados / navegación
     const t = limpiarTexto($(el).text());
     if (t.length > 0) parrafos.push(t);
   });

@@ -14,6 +14,7 @@
  *   npm run enrich-news -- --limit=20 --only-missing-body-text    # sin texto_cuerpo_nota
  *   npm run enrich-news -- --limit=50 --only-pending-mentions --only-missing-clean-text --dry-run
  *   npm run enrich-news -- --medio-ids=MED-0030,MED-0008 --limit=500 --only-pending-mentions --only-missing-clean-text  # aislado por medio
+ *   npm run enrich-news -- --medio-ids=MED-0171 --limit=500 --force-refresh-clean-text   # re-extrae y sobrescribe texto tras fix del extractor
  *   npm run enrich-news -- --url=https://medio.mx/nota/x          # diagnóstico 1 URL
  *   npm run enrich-news -- --url=https://medio.mx/nota/x --dry-run
  *
@@ -72,6 +73,9 @@ function parseArgs(argv: string[]): EnrichArgs {
         break;
       case 'only-pending-mentions':
         out.onlyPendingMentions = true;
+        break;
+      case 'force-refresh-clean-text':
+        out.forceRefreshCleanText = true;
         break;
       case 'limit':
         out.limit = parseIntOrNull(value) ?? undefined;
@@ -146,6 +150,7 @@ async function main() {
       onlyMissingCleanText: args.onlyMissingCleanText,
       onlyMissingBodyText: args.onlyMissingBodyText,
       onlyPendingMentions: args.onlyPendingMentions,
+      forceRefreshCleanText: args.forceRefreshCleanText,
       medioIds: args.medioIds ?? null,
     },
     'Iniciando enrich-news',

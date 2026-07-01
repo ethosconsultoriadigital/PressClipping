@@ -1,0 +1,79 @@
+# ============================================================================
+# LIVE COMPARISON — TIER CRISIS (shadow, cada 6 horas, desfasado)
+# ----------------------------------------------------------------------------
+# WORKFLOW ACTIVO EN MODO SOMBRA (NO producción), SEPARADO del shadow base y del
+# tier nacional B.
+#
+# Procesa SOLO el tier crisis (hoy UNO MAS UNO, MED-0170) con pipeline AISLADO
+# por medio_id, usando SITEMAP como fuente (el RSS pierde las notas de crisis
+# antes de crawlear). Por código (run-shadow-crisis-tier.ts) impide:
+#   export-results · generate-xml · classify-ia · alertas · WhatsApp/correos ·
+#   export-raw-news. NO toca 01_Noticias_Raw / 02_Menciones / 04_Logs.
+#
+# NO incluye El Otro Enfoque (MED-0171) ni El Sol de Irapuato todavía.
+# NO integra --shadow-alerts.
+#
+# CONCURRENCY: comparte grupo con el shadow base y el nacional B
+# (`live-comparison-shadow`) para que NUNCA dos workflows escriban 05/07 al mismo
+# tiempo. cancel-in-progress=false → si otro está corriendo, este se ENCOLA. El
+# cron va al minuto ':15' cada 6h para desfasarse del base (':00' cada 2h) y del
+# nacional B (':30' cada 6h).
+#
+# Secrets requeridos (Settings → Secrets and variables → Actions):
+#   SUPABASE_URL · SUPABASE_SERVICE_ROLE_KEY · GOOGLE_SERVICE_ACCOUNT_EMAIL ·
+#   GOOGLE_PRIVATE_KEY · GOOGLE_OUTPUT_SHEET_ID (fallback GOOGLE_SHEET_ID)
+# ============================================================================
+name: live-comparison-shadow-crisis
+
+on:
+  schedule:
+    - cron: '15 */6 * * *'   # cada 6 horas, al minuto 15 (desfasado del base y del nacional B)
+  workflow_dispatch:
+    inputs:
+      window_hours:
+        description: 'Tamaño de la ventana móvil en horas.'
+        required: false
+        default: '48'
+
+concurrency:
+  group: live-comparison-shadow   # MISMO grupo que el shadow base y nacional B → lock compartido de 05/07
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Shadow crisis tier (UNO MAS UNO, sitemap, aislado por medio)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+      GOOGLE_OUTPUT_SHEET_ID: ${{ secrets.GOOGLE_OUTPUT_SHEET_ID }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      LOG_FORMAT: json
+      RUN_BY: github-actions-shadow-crisis
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'   # Node 20: OAuth de Google Sheets funciona; Supabase usa el polyfill ws
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Shadow crisis tier (ventana móvil 48h, sitemap, sin alertas, sin export-results)
+        # Node 20: inyecta WebSocket global (ws) para Supabase; IPv4 por runners sin IPv6.
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+        run: |
+          WINDOW="${{ github.event.inputs.window_hours || '48' }}"
+          npm run shadow-crisis-tier -- \
+            --window-hours=$WINDOW \
+            --output=sheet \
+            --append-metrics-history \
+            --no-alerts \
+            --no-export-results \
+            --no-generate-xml

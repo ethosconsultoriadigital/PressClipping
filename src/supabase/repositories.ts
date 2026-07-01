@@ -641,6 +641,11 @@ export interface EnriquecerOpts {
   onlyPendingMentions?: boolean;
   /** Aísla a estos medio_id (enrich dirigido; no procesa backlog global). */
   medioIds?: string[];
+  /**
+   * Re-selecciona noticias que YA tienen texto_nota_limpia para re-extraerlas
+   * tras un fix del extractor (force-refresh). Se combina con medioIds.
+   */
+  forceRefreshCleanText?: boolean;
 }
 
 /**
@@ -672,6 +677,10 @@ export async function getNoticiasParaEnriquecer(
   }
   if (opts.onlyPendingMentions) {
     query = query.eq('menciones_procesado', false);
+  }
+  // force-refresh: re-extraer solo notas que ya tienen texto limpio (para re-limpiarlas).
+  if (opts.forceRefreshCleanText) {
+    query = query.not('texto_nota_limpia', 'is', null);
   }
   if (opts.limit && opts.limit > 0) query = query.limit(opts.limit);
 

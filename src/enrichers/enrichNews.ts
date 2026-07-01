@@ -69,6 +69,13 @@ export interface EnrichOpts {
   onlyPendingMentions?: boolean;
   /** Aísla el lote a estos medio_id (crawl/enrich dirigido, sin tocar backlog global). */
   medioIds?: string[];
+  /**
+   * Re-extrae y SOBRESCRIBE los campos de texto (texto_extraido, texto_nota_limpia
+   * y derivados, texto_cuerpo_nota y derivados, tipo_nota) aunque ya existan.
+   * Pensado para re-limpiar notas tras un fix del extractor. No toca menciones,
+   * ni 01/02/04, ni exportado_sheet_raw. Úsese siempre acotado por --medio-ids.
+   */
+  forceRefreshCleanText?: boolean;
   dryRun: boolean;
   maxChars?: number;
 }
@@ -82,6 +89,7 @@ export interface EnrichDeps {
     onlyMissingBodyText?: boolean;
     onlyPendingMentions?: boolean;
     medioIds?: string[];
+    forceRefreshCleanText?: boolean;
   }) => Promise<NoticiaEnriquecibleRow[]>;
   extract: (url: string) => Promise<FetchExtractResult>;
   updateNoticia: (id: string, fields: NoticiaEnriquecidaUpdate) => Promise<void>;
@@ -121,10 +129,14 @@ function vacio(v: string | null | undefined): boolean {
 export function construirActualizacion(
   noticia: NoticiaEnriquecibleRow,
   extracto: FetchExtractResult,
+  opts: { forceRefreshCleanText?: boolean } = {},
 ): { fields: NoticiaEnriquecidaUpdate; campos: string[]; marcadores: string[] } {
   const fields: NoticiaEnriquecidaUpdate = {};
   const campos: string[] = [];
   const marcadores: string[] = [];
+  // En force-refresh solo sobrescribimos si la extracción fue OK (no borrar
+  // contenido bueno por un fallo de red puntual).
+  const force = Boolean(opts.forceRefreshCleanText) && extracto.ok;
 
   // Título: respeta el real; si falta, usa extracción y, en su defecto, slug.
   if (vacio(noticia.titulo)) {
@@ -149,7 +161,7 @@ export function construirActualizacion(
     campos.push('resumen');
   }
 
-  if (vacio(noticia.texto_extraido) && extracto.texto_extraido) {
+  if ((force || vacio(noticia.texto_extraido)) && extracto.texto_extraido) {
     fields.texto_extraido = extracto.texto_extraido;
     campos.push('texto_extraido');
     if (extracto.metodo_texto) marcadores.push(`texto:${extracto.metodo_texto}`);
@@ -170,8 +182,8 @@ export function construirActualizacion(
     campos.push('imagen_principal');
   }
 
-  // Texto limpio: rellenar si falta
-  if (extracto.texto_nota_limpia != null && vacio(noticia.texto_nota_limpia)) {
+  // Texto limpio: rellenar si falta (o sobrescribir en force-refresh)
+  if (extracto.texto_nota_limpia != null && (force || vacio(noticia.texto_nota_limpia))) {
     fields.texto_nota_limpia = extracto.texto_nota_limpia;
     fields.extracto_nota_1300 = extracto.extracto_nota_1300;
     fields.calidad_extraccion = extracto.calidad_extraccion;
@@ -183,13 +195,13 @@ export function construirActualizacion(
   // --only-missing-body-text puede llegar a noticias que YA tienen texto_nota_limpia
   // pero no tienen texto_cuerpo_nota: en ese caso el extractor recalculó cuerpo
   // a partir del texto_nota_limpia ya existente en el extracto.
-  if (extracto.texto_cuerpo_nota != null && vacio(noticia.texto_cuerpo_nota)) {
+  if (extracto.texto_cuerpo_nota != null && (force || vacio(noticia.texto_cuerpo_nota))) {
     fields.texto_cuerpo_nota = extracto.texto_cuerpo_nota;
     fields.extracto_cuerpo_1300 = extracto.extracto_cuerpo_1300;
     fields.cuerpo_nota_chars = extracto.cuerpo_nota_chars;
     campos.push('texto_cuerpo_nota', 'extracto_cuerpo_1300', 'cuerpo_nota_chars');
   }
-  if (extracto.tipo_nota != null && vacio(noticia.tipo_nota)) {
+  if (extracto.tipo_nota != null && (force || vacio(noticia.tipo_nota))) {
     fields.tipo_nota = extracto.tipo_nota;
     campos.push('tipo_nota');
   }
@@ -227,6 +239,7 @@ export async function enrichNews(
     onlyMissingBodyText: opts.onlyMissingBodyText,
     onlyPendingMentions: opts.onlyPendingMentions,
     medioIds: opts.medioIds,
+    forceRefreshCleanText: opts.forceRefreshCleanText,
   });
 
   const detalle: EnrichItemResult[] = [];
@@ -251,7 +264,9 @@ export async function enrichNews(
     }
 
     const extracto = await deps.extract(url);
-    const { fields, campos, marcadores } = construirActualizacion(noticia, extracto);
+    const { fields, campos, marcadores } = construirActualizacion(noticia, extracto, {
+      forceRefreshCleanText: opts.forceRefreshCleanText,
+    });
 
     const item: EnrichItemResult = {
       noticia_id: noticia.noticia_id,

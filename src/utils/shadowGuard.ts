@@ -146,11 +146,14 @@ export function notasTrazabilidadWorkflow(opts: {
   tier?: string;
   medios?: string;
   frecuencia?: string;
+  /** Fuente preferida usada por el tier (p.ej. 'sitemap' en el tier crisis). */
+  fuente?: string;
 }): string {
   const partes: string[] = [];
   if (opts.workflow?.trim()) partes.push(`workflow=${opts.workflow.trim()}`);
   if (opts.tier?.trim()) partes.push(`tier=${opts.tier.trim()}`);
   if (opts.medios?.trim()) partes.push(`medios=${opts.medios.trim()}`);
+  if (opts.fuente?.trim()) partes.push(`fuente=${opts.fuente.trim()}`);
   if (opts.frecuencia?.trim()) partes.push(`frecuencia=${opts.frecuencia.trim()}`);
   return partes.join('; ');
 }
