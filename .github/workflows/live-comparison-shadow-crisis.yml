@@ -7,11 +7,16 @@
 # Procesa SOLO el tier crisis (hoy UNO MAS UNO, MED-0170) con pipeline AISLADO
 # por medio_id, usando SITEMAP como fuente (el RSS pierde las notas de crisis
 # antes de crawlear). Por código (run-shadow-crisis-tier.ts) impide:
-#   export-results · generate-xml · classify-ia · alertas · WhatsApp/correos ·
+#   export-results · generate-xml · classify-ia · WhatsApp/correos ·
 #   export-raw-news. NO toca 01_Noticias_Raw / 02_Menciones / 04_Logs.
 #
 # NO incluye El Otro Enfoque (MED-0171) ni El Sol de Irapuato todavía.
-# NO integra --shadow-alerts.
+#
+# INTEGRA shadow-alerts en MODO OBSERVACIÓN (--run-shadow-alerts): tras el
+# comparativo evalúa reglas P1/P2/P3 con allowlist CLI-0002 y ESCRIBE en
+# 10_Alertas_Sombra. NUNCA envía: guardas duras (--no-send/--no-whatsapp/
+# --no-email + verificación de env) abortan ante cualquier intento de envío.
+# NO cambia clientes.alertas_activas.
 #
 # CONCURRENCY: comparte grupo con el shadow base y el nacional B
 # (`live-comparison-shadow`) para que NUNCA dos workflows escriban 05/07 al mismo
@@ -64,8 +69,10 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
 
-      - name: Shadow crisis tier (ventana móvil 48h, sitemap, sin alertas, sin export-results)
+      - name: Shadow crisis tier (ventana móvil 48h, sitemap, observación shadow-alerts, sin envíos)
         # Node 20: inyecta WebSocket global (ws) para Supabase; IPv4 por runners sin IPv6.
+        # NOTA: NO usar --no-alerts aquí; impediría/confundiría la observación shadow-alerts.
+        # El no-envío se garantiza con --no-send --no-whatsapp --no-email + guardas de código.
         env:
           NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
         run: |
@@ -74,6 +81,11 @@ jobs:
             --window-hours=$WINDOW \
             --output=sheet \
             --append-metrics-history \
-            --no-alerts \
             --no-export-results \
-            --no-generate-xml
+            --no-generate-xml \
+            --run-shadow-alerts \
+            --shadow-client-allowlist=CLI-0002 \
+            --shadow-alerts-output=sheet \
+            --no-send \
+            --no-whatsapp \
+            --no-email

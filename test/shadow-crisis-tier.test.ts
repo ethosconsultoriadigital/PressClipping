@@ -96,18 +96,35 @@ describe('workflow crisis sombra', () => {
 
   it('usa shadow-crisis-tier con flags de seguridad', () => {
     expect(wf).toContain('npm run shadow-crisis-tier');
-    expect(wf).toContain('--no-alerts');
     expect(wf).toContain('--no-export-results');
     expect(wf).toContain('--no-generate-xml');
   });
 
-  it('el comando ejecutado NO invoca acciones de producción ni alertas', () => {
+  it('integra la observación shadow-alerts con allowlist CLI-0002 y sin envío', () => {
+    const cmd = wf.slice(wf.indexOf('npm run shadow-crisis-tier'));
+    expect(cmd).toContain('--run-shadow-alerts');
+    expect(cmd).toContain('--shadow-client-allowlist=CLI-0002');
+    expect(cmd).toContain('--shadow-alerts-output=sheet');
+    expect(cmd).toContain('--no-send');
+    expect(cmd).toContain('--no-whatsapp');
+    expect(cmd).toContain('--no-email');
+  });
+
+  it('NO usa --no-alerts (impediría la observación) ni flags de envío real', () => {
+    const cmd = wf.slice(wf.indexOf('npm run shadow-crisis-tier'));
+    expect(cmd).not.toContain('--no-alerts');
+    // Sin flags de envío real (--no-send/--no-whatsapp/--no-email SÍ están permitidos).
+    expect(cmd).not.toMatch(/--send\b/);
+    expect(cmd).not.toMatch(/--whatsapp\b/);
+    expect(cmd).not.toMatch(/--email\b/);
+    expect(cmd).not.toMatch(/twilio|smtp|gmail/i);
+  });
+
+  it('el comando ejecutado NO invoca acciones de producción', () => {
     const cmd = wf.slice(wf.indexOf('npm run shadow-crisis-tier'));
     expect(cmd).not.toMatch(/(?<!no-)\bexport-results\b/);
     expect(cmd).not.toMatch(/(?<!no-)\bgenerate-xml\b/);
     expect(cmd).not.toContain('classify-ia');
-    expect(cmd).not.toContain('shadow-alerts');
     expect(cmd).not.toContain('export-raw-news');
-    expect(cmd).not.toMatch(/twilio|smtp|gmail/i);
   });
 });

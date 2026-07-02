@@ -110,6 +110,33 @@ export function verificarAllowlistShadow(argv: string[]): ResultadoGuarda {
   return { ok: true };
 }
 
+/**
+ * Variables de entorno que, si están en 'true', significan ENVÍO REAL activado y
+ * están PROHIBIDAS en el modo observación de alertas sombra.
+ */
+export const ENV_ENVIO_PROHIBIDO = ['SEND_ALERTS', 'WHATSAPP_ENABLED', 'EMAIL_ENABLED'] as const;
+
+/**
+ * Verifica que el entorno NO tenga envío real activado (modo observación).
+ * Aborta si `SEND_ALERTS`/`WHATSAPP_ENABLED`/`EMAIL_ENABLED` = 'true', o si hay
+ * credenciales de envío (`TWILIO_ACCOUNT_SID`/`SMTP_HOST`) junto con un flag de
+ * envío activado. La sola presencia de credenciales NO aborta (pueden existir en
+ * CI sin usarse); solo aborta si además se intentó activar envío.
+ */
+export function verificarEnvObservacion(env: Record<string, string | undefined>): ResultadoGuarda {
+  const on = (v: string | undefined): boolean => String(v ?? '').trim().toLowerCase() === 'true';
+  for (const clave of ENV_ENVIO_PROHIBIDO) {
+    if (on(env[clave])) {
+      return {
+        ok: false,
+        violacion: clave,
+        mensaje: `Observación shadow-alerts prohíbe envío real: ${clave}=true.`,
+      };
+    }
+  }
+  return { ok: true };
+}
+
 /** Parsea `--shadow-client-allowlist=CLI-0002,CLI-0009` → ['CLI-0002','CLI-0009']. */
 export function parseShadowClientAllowlist(argv: string[]): string[] {
   const out = new Set<string>();

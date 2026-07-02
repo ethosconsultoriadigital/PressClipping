@@ -19,6 +19,7 @@ import { logger } from '../src/utils/logger.js';
 import {
   verificarFlagsAlertasSombra,
   verificarAllowlistShadow,
+  verificarEnvObservacion,
   parseShadowClientAllowlist,
 } from '../src/utils/shadowGuard.js';
 import { ventanaMovil } from '../src/utils/dateWindow.js';
@@ -41,6 +42,12 @@ interface AlertArgs {
   runId: string;
   /** Clientes con alertas_activas=false permitidos SOLO en shadow/dry-run. */
   shadowClientAllowlist: string[];
+  /** Modo observación: fuerza output=sheet y registra trazabilidad sin envío. */
+  observeOnly: boolean;
+  /** Trazabilidad para 10.notas (workflow/tier/fuente que dispara la observación). */
+  workflowLabel?: string;
+  tierLabel?: string;
+  fuente?: string;
 }
 
 function parseArgs(argv: string[]): AlertArgs {
@@ -49,6 +56,7 @@ function parseArgs(argv: string[]): AlertArgs {
     output: 'sheet',
     runId: `SA-${new Date().toISOString().replace(/[:.]/g, '-')}`,
     shadowClientAllowlist: parseShadowClientAllowlist(argv),
+    observeOnly: false,
   };
   for (const arg of argv) {
     if (!arg.startsWith('--')) continue;
@@ -60,6 +68,10 @@ function parseArgs(argv: string[]): AlertArgs {
       case 'window-hours': out.windowHours = Number(val) || out.windowHours; break;
       case 'output':       out.output = (val as 'console' | 'sheet') || out.output; break;
       case 'run-id':       out.runId = val || out.runId; break;
+      case 'observe-only': out.observeOnly = true; break;
+      case 'workflow-label': out.workflowLabel = val || out.workflowLabel; break;
+      case 'tier-label':   out.tierLabel = val || out.tierLabel; break;
+      case 'fuente':       out.fuente = val || out.fuente; break;
       case 'shadow-client-allowlist': break; // ya parseado arriba (parseShadowClientAllowlist)
       // Confirmaciones seguras (no habilitan nada): se aceptan tal cual.
       case 'dry-run': case 'no-send': case 'no-whatsapp': case 'no-email':
@@ -67,6 +79,8 @@ function parseArgs(argv: string[]): AlertArgs {
         break;
     }
   }
+  // El modo observación SIEMPRE escribe a la pestaña 10 (nunca console).
+  if (out.observeOnly) out.output = 'sheet';
   return out;
 }
 
@@ -157,7 +171,36 @@ function aInput(
   };
 }
 
-function aFilaSheet(c: CandidatoAlertaSombra, runId: string, fecha: string): OutRow {
+interface TrazaObservacion {
+  workflow?: string;
+  tier?: string;
+  fuente?: string;
+  allowlist?: string[];
+}
+
+function aFilaSheet(
+  c: CandidatoAlertaSombra,
+  runId: string,
+  fecha: string,
+  traza: TrazaObservacion = {},
+): OutRow {
+  // Trazabilidad y no-envío se preservan en `notas` como tokens clave=valor
+  // (sin cambiar el esquema de headers de 10_Alertas_Sombra).
+  const notas = [
+    'modo=shadow',
+    'sin_envios_reales', 'sin_whatsapp', 'sin_email', 'sin_twilio', 'sin_gmail_smtp',
+    'sin_envio=true',
+    `requiere_alerta=${c.requiere_alerta === true}`,
+  ];
+  if (c.permitir_shadow_cliente_inactivo === true) {
+    notas.push('cliente_alertas_inactivas_permitido_por_shadow_allowlist');
+  }
+  if (traza.allowlist && traza.allowlist.length > 0) notas.push(`shadow_client_allowlist=${traza.allowlist.join(',')}`);
+  if (traza.workflow) notas.push(`workflow=${traza.workflow}`);
+  if (traza.tier) notas.push(`tier=${traza.tier}`);
+  if (traza.fuente) notas.push(`fuente=${traza.fuente}`);
+  if (c.keywords_detectadas) notas.push(`keywords_detectadas=${c.keywords_detectadas}`);
+
   return {
     run_id: runId,
     fecha_ejecucion: fecha,
@@ -183,12 +226,7 @@ function aFilaSheet(c: CandidatoAlertaSombra, runId: string, fecha: string): Out
     regla_disparo: c.regla_disparo,
     dedupe_key: c.dedupe_key,
     estado_shadow: c.estado_shadow,
-    notas:
-      'modo=shadow; sin_envios_reales; sin_whatsapp; sin_email; sin_twilio; sin_gmail_smtp' +
-      (c.permitir_shadow_cliente_inactivo === true
-        ? '; cliente_alertas_inactivas_permitido_por_shadow_allowlist'
-        : '') +
-      (c.keywords_detectadas ? `; keywords_detectadas=${c.keywords_detectadas}` : ''),
+    notas: notas.join('; '),
   };
 }
 
@@ -219,6 +257,18 @@ async function leerLlavesExistentes(): Promise<Set<string>> {
   return set;
 }
 
+/** Cuenta filas ya presentes en 10 para un run_id dado (readback post-write). */
+async function contarFilasDeRun(runId: string): Promise<number> {
+  try {
+    const tab = await getOutputTab(ALERTAS_TAB);
+    await withSheetsRetry(() => tab.loadHeaderRow(), `loadHeaderRow ${ALERTAS_TAB}`);
+    const rows = await withSheetsRetry(() => tab.getRows(), `getRows ${ALERTAS_TAB}`);
+    return rows.filter((r) => txt(r.get('run_id')) === runId).length;
+  } catch {
+    return 0;
+  }
+}
+
 async function main(): Promise<void> {
   const rawArgv = process.argv.slice(2);
 
@@ -236,6 +286,13 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
+  // ── Guarda de entorno anti-envío (SEND_ALERTS/WHATSAPP_ENABLED/EMAIL_ENABLED) ──
+  const guardaEnv = verificarEnvObservacion(process.env);
+  if (!guardaEnv.ok) {
+    logger.error({ violacion: guardaEnv.violacion }, guardaEnv.mensaje ?? 'Envío real detectado en el entorno.');
+    process.exit(2);
+  }
+
   const args = parseArgs(rawArgv);
   const { desde, hasta } = ventanaMovil(args.windowHours);
 
@@ -243,19 +300,26 @@ async function main(): Promise<void> {
     {
       modo: 'shadow',
       submodo: 'alertas_sombra',
+      shadow_alerts_observacion: args.observeOnly,
       windowHours: args.windowHours,
       fechaDesde: desde,
       fechaHasta: hasta,
       output: args.output,
+      tab: args.output === 'sheet' ? ALERTAS_TAB : null,
       runId: args.runId,
-      envio: false,
+      send: false,
       whatsapp: false,
       email: false,
       twilio: false,
       gmail_smtp: false,
       shadow_client_allowlist: args.shadowClientAllowlist,
+      workflow: args.workflowLabel ?? null,
+      tier: args.tierLabel ?? null,
+      fuente: args.fuente ?? null,
     },
-    '=== Iniciando ALERTAS SOMBRA (simulación, sin envíos) ===',
+    args.observeOnly
+      ? '=== Iniciando ALERTAS SOMBRA — MODO OBSERVACIÓN (escribe 10, sin envíos) ==='
+      : '=== Iniciando ALERTAS SOMBRA (simulación, sin envíos) ===',
   );
 
   const sb: SupabaseClient = createClient(
@@ -305,18 +369,42 @@ async function main(): Promise<void> {
 
   if (args.output === 'sheet') {
     const fecha = new Date().toISOString();
+    const traza: TrazaObservacion = {
+      workflow: args.workflowLabel,
+      tier: args.tierLabel,
+      fuente: args.fuente,
+      allowlist: args.shadowClientAllowlist,
+    };
     const existentes = await leerLlavesExistentes();
+    const preexistentesDelRun = await contarFilasDeRun(args.runId);
     const filas: OutRow[] = [];
     candidatos.forEach((c, idx) => {
       const llave = llaveFila(args.runId, c.mencion_id, c.dedupe_key, idx);
       if (existentes.has(llave)) return; // ya escrita en un reintento del mismo run
       existentes.add(llave);
-      filas.push(aFilaSheet(c, args.runId, fecha));
+      filas.push(aFilaSheet(c, args.runId, fecha, traza));
     });
     const escritas = await appendHistoryRows(ALERTAS_TAB, [...ALERTAS_SOMBRA_HEADERS], filas);
+    // Readback obligatorio: releer 10 y contar filas de este run.
+    const filas10Readback = await contarFilasDeRun(args.runId);
+    const esperado = preexistentesDelRun + escritas;
+    const mismatch = filas10Readback !== esperado;
     logger.info(
-      { tab: ALERTAS_TAB, escritas, candidatos_total: candidatos.length },
-      'Alertas sombra registradas (append histórico, sin envíos).',
+      {
+        tab: ALERTAS_TAB,
+        shadow_alerts_observacion: args.observeOnly,
+        filas_10_escritas: escritas,
+        filas_10_readback: filas10Readback,
+        filas_10_esperadas: esperado,
+        mismatch,
+        candidatos_total: candidatos.length,
+        send: false,
+        whatsapp: false,
+        email: false,
+      },
+      mismatch
+        ? 'Alertas sombra: MISMATCH en readback de 10_Alertas_Sombra.'
+        : 'Alertas sombra registradas en 10_Alertas_Sombra (append histórico, sin envíos).',
     );
   } else {
     logger.info({ candidatos_total: candidatos.length }, 'output=console: no se escribió en Sheets.');

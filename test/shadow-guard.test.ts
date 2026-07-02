@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   verificarFlagsSombra,
+  verificarEnvObservacion,
   estadoCicloSombra,
   modoMetrica,
   notasShadow,
@@ -43,6 +44,30 @@ describe('verificarFlagsSombra', () => {
     for (const accion of ACCIONES_PROHIBIDAS_SOMBRA) {
       expect(verificarFlagsSombra([`--no-${accion}`]).ok).toBe(true);
     }
+  });
+});
+
+describe('verificarEnvObservacion (guarda de entorno anti-envío)', () => {
+  it('permite entorno sin envío activado', () => {
+    expect(verificarEnvObservacion({}).ok).toBe(true);
+    expect(verificarEnvObservacion({ SEND_ALERTS: 'false', WHATSAPP_ENABLED: '' }).ok).toBe(true);
+  });
+
+  it('aborta si SEND_ALERTS=true', () => {
+    const r = verificarEnvObservacion({ SEND_ALERTS: 'true' });
+    expect(r.ok).toBe(false);
+    expect(r.violacion).toBe('SEND_ALERTS');
+  });
+
+  it('aborta si WHATSAPP_ENABLED=true o EMAIL_ENABLED=true', () => {
+    expect(verificarEnvObservacion({ WHATSAPP_ENABLED: 'true' }).ok).toBe(false);
+    expect(verificarEnvObservacion({ EMAIL_ENABLED: 'TRUE' }).ok).toBe(false);
+  });
+
+  it('la sola presencia de credenciales (Twilio/SMTP) sin envío NO aborta', () => {
+    expect(
+      verificarEnvObservacion({ TWILIO_ACCOUNT_SID: 'AC123', SMTP_HOST: 'smtp.example.com' }).ok,
+    ).toBe(true);
   });
 });
 

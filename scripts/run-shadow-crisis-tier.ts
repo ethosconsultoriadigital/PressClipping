@@ -7,21 +7,37 @@
  *
  *   crawl dirigido (--source=sitemap)  →  enrich aislado  →
  *   detect dry-run aislado (gate)      →  detect real aislado  →
- *   live-comparison 48h (import XML + compare + append 07).
+ *   live-comparison 48h (import XML + compare + append 07)  →
+ *   [opcional] shadow-alerts OBSERVACIÓN (escribe 10, SIN envíos).
  *
  * Fuerza modo sombra por código y bloquea flags de producción (export-results,
- * alertas, generate-xml, classify-ia, export-raw-news). NO toca 01/02/04. NO
- * procesa backlog global (todo va acotado por --medio-ids). NO integra alertas.
+ * generate-xml, classify-ia, export-raw-news). NO toca 01/02/04. NO procesa
+ * backlog global (todo va acotado por --medio-ids).
+ *
+ * La observación shadow-alerts (--run-shadow-alerts) es SOLO lectura + escritura
+ * controlada en 10_Alertas_Sombra: nunca envía WhatsApp/correo ni llama
+ * Twilio/Gmail/SMTP. Guardas duras abortan (exit 2) ante cualquier flag/env de
+ * envío real.
  *
  * Uso:
  *   npm run shadow-crisis-tier -- --window-hours=48 --output=sheet \
- *     --append-metrics-history --no-alerts --no-export-results --no-generate-xml
+ *     --append-metrics-history --no-export-results --no-generate-xml
+ *   # con observación de alertas sombra (sin envíos):
+ *   npm run shadow-crisis-tier -- --window-hours=48 --output=sheet \
+ *     --append-metrics-history --no-export-results --no-generate-xml \
+ *     --run-shadow-alerts --shadow-client-allowlist=CLI-0002 \
+ *     --shadow-alerts-output=sheet --no-send --no-whatsapp --no-email
  *   npm run shadow-crisis-tier -- --dry-run
  */
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { logger } from '../src/utils/logger.js';
-import { verificarFlagsSombra } from '../src/utils/shadowGuard.js';
+import {
+  verificarFlagsSombra,
+  verificarFlagsAlertasSombra,
+  verificarEnvObservacion,
+  parseShadowClientAllowlist,
+} from '../src/utils/shadowGuard.js';
 import { ventanaMovil } from '../src/utils/dateWindow.js';
 import { mediosCrisisActivos, type ShadowMedioCrisis } from '../src/config/shadowMedia.js';
 
@@ -36,6 +52,12 @@ interface CrisisArgs {
   output: 'console' | 'sheet';
   appendMetricsHistory: boolean;
   dryRun: boolean;
+  /** Ejecuta shadow-alerts en modo observación tras el comparativo. */
+  runShadowAlerts: boolean;
+  /** Clientes con alertas_activas=false permitidos SOLO en observación. */
+  shadowClientAllowlist: string[];
+  /** Salida de la observación shadow-alerts (sheet = escribe 10). */
+  shadowAlertsOutput: 'console' | 'sheet';
 }
 
 function parseArgs(argv: string[]): CrisisArgs {
@@ -48,6 +70,9 @@ function parseArgs(argv: string[]): CrisisArgs {
     output: 'sheet',
     appendMetricsHistory: false,
     dryRun: false,
+    runShadowAlerts: false,
+    shadowClientAllowlist: parseShadowClientAllowlist(argv),
+    shadowAlertsOutput: 'sheet',
   };
   for (const arg of argv) {
     if (!arg.startsWith('--')) continue;
@@ -64,9 +89,13 @@ function parseArgs(argv: string[]): CrisisArgs {
       case 'output': out.output = (val as 'console' | 'sheet') || out.output; break;
       case 'append-metrics-history': out.appendMetricsHistory = true; break;
       case 'dry-run': out.dryRun = true; break;
+      case 'run-shadow-alerts': out.runShadowAlerts = true; break;
+      case 'shadow-alerts-output': out.shadowAlertsOutput = (val as 'console' | 'sheet') || out.shadowAlertsOutput; break;
+      case 'shadow-client-allowlist': break; // ya parseado (parseShadowClientAllowlist)
       // Confirmaciones de seguridad (no habilitan nada):
       case 'no-alerts': case 'no-export-results': case 'no-generate-xml':
       case 'no-classify-ia': case 'no-export-raw-news': case 'no-whatsapp': case 'no-correos':
+      case 'no-send': case 'no-email': case 'no-twilio': case 'no-gmail': case 'no-smtp':
         break;
     }
   }
@@ -120,6 +149,22 @@ async function main(): Promise<void> {
   }
 
   const args = parseArgs(rawArgv);
+
+  // Guardas EXTRA cuando se integra la observación shadow-alerts: ningún flag ni
+  // variable de entorno puede habilitar envío real.
+  if (args.runShadowAlerts) {
+    const gEnvio = verificarFlagsAlertasSombra(rawArgv);
+    if (!gEnvio.ok) {
+      logger.error({ violacion: gEnvio.violacion }, gEnvio.mensaje ?? 'Observación shadow-alerts prohíbe envío real.');
+      process.exit(2);
+    }
+    const gEnv = verificarEnvObservacion(process.env);
+    if (!gEnv.ok) {
+      logger.error({ violacion: gEnv.violacion }, gEnv.mensaje ?? 'Envío real detectado en el entorno.');
+      process.exit(2);
+    }
+  }
+
   const medios = mediosCrisisActivos();
   if (medios.length === 0) { logger.error('Tier crisis sin medios activos.'); process.exit(2); }
   const medioIds = medios.map((m) => m.medio_id).join(',');
@@ -184,6 +229,39 @@ async function main(): Promise<void> {
 
   const comp = await runStep('5. live-comparison (import + compare + 07)', 'scripts/run-live-comparison.ts', liveArgs);
   if (comp.code !== 0) { logger.error({ code: comp.code }, 'live-comparison terminó con error.'); process.exit(comp.code); }
+
+  // 6. Shadow-alerts en MODO OBSERVACIÓN (opcional): evalúa y escribe 10, sin envíos.
+  if (args.runShadowAlerts && !args.dryRun) {
+    const saRunId = `SCA-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    const saArgs = [
+      '--observe-only',
+      `--window-hours=${args.windowHours}`,
+      `--output=${args.shadowAlertsOutput}`,
+      `--run-id=${saRunId}`,
+      '--workflow-label=shadow-crisis-tier',
+      '--tier-label=crisis',
+      `--fuente=${fuente}`,
+      '--no-send', '--no-whatsapp', '--no-email',
+    ];
+    if (args.shadowClientAllowlist.length > 0) {
+      saArgs.push(`--shadow-client-allowlist=${args.shadowClientAllowlist.join(',')}`);
+    }
+    const sa = await runStep('6. shadow-alerts observación (escribe 10, sin envíos)', 'scripts/run-shadow-alerts.ts', saArgs);
+    if (sa.code !== 0) { logger.error({ code: sa.code }, 'shadow-alerts observación terminó con error.'); process.exit(sa.code); }
+    logger.info(
+      {
+        run_id: saRunId,
+        shadow_client_allowlist: args.shadowClientAllowlist,
+        filas_10_escritas: findNum(sa.jsonLines, 'filas_10_escritas'),
+        filas_10_readback: findNum(sa.jsonLines, 'filas_10_readback'),
+        p1: findNum(sa.jsonLines, 'alertas_sombra_p1_inmediata'),
+        p2: findNum(sa.jsonLines, 'alertas_sombra_p2_resumen'),
+      },
+      'Observación shadow-alerts integrada (sin envíos).',
+    );
+  } else if (args.runShadowAlerts && args.dryRun) {
+    logger.info({}, 'Modo --dry-run: se OMITE la observación shadow-alerts.');
+  }
 
   logger.info({ modo: 'shadow_crisis' }, '=== Shadow crisis tier completado ===');
 }
