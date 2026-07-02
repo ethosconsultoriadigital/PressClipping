@@ -87,6 +87,46 @@ export function verificarFlagsAlertasSombra(argv: string[]): ResultadoGuarda {
   return { ok: true };
 }
 
+/**
+ * Guarda del allowlist shadow-only de clientes (`--shadow-client-allowlist`).
+ *
+ * El allowlist permite EVALUAR (en shadow/dry-run) clientes con
+ * `alertas_activas=false`, pero NUNCA debe coexistir con envío real. Si se
+ * detecta cualquier flag de envío junto al allowlist, aborta.
+ */
+export function verificarAllowlistShadow(argv: string[]): ResultadoGuarda {
+  const usaAllowlist = argv.some(
+    (a) => a.startsWith('--') && a.slice(2).split('=')[0]!.trim().toLowerCase() === 'shadow-client-allowlist',
+  );
+  if (!usaAllowlist) return { ok: true };
+  const envio = verificarFlagsAlertasSombra(argv);
+  if (!envio.ok) {
+    return {
+      ok: false,
+      violacion: envio.violacion,
+      mensaje: 'shadow-client-allowlist solo se permite en modo shadow/dry-run sin envío real.',
+    };
+  }
+  return { ok: true };
+}
+
+/** Parsea `--shadow-client-allowlist=CLI-0002,CLI-0009` → ['CLI-0002','CLI-0009']. */
+export function parseShadowClientAllowlist(argv: string[]): string[] {
+  const out = new Set<string>();
+  for (const arg of argv) {
+    if (!arg.startsWith('--')) continue;
+    const body = arg.slice(2);
+    const eq = body.indexOf('=');
+    if (eq === -1) continue;
+    if (body.slice(0, eq).trim().toLowerCase() !== 'shadow-client-allowlist') continue;
+    for (const id of body.slice(eq + 1).split(',')) {
+      const v = id.trim();
+      if (v) out.add(v);
+    }
+  }
+  return [...out];
+}
+
 /** Valor de la columna `modo` en 07_Metricas_Live según el tipo de corrida. */
 export function modoMetrica(shadow: boolean, haraCrawl: boolean): string {
   if (shadow) return 'shadow';

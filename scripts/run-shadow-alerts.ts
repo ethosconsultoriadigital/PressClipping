@@ -16,7 +16,11 @@
 import 'dotenv/config';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../src/utils/logger.js';
-import { verificarFlagsAlertasSombra } from '../src/utils/shadowGuard.js';
+import {
+  verificarFlagsAlertasSombra,
+  verificarAllowlistShadow,
+  parseShadowClientAllowlist,
+} from '../src/utils/shadowGuard.js';
 import { ventanaMovil } from '../src/utils/dateWindow.js';
 import { OUTPUT_TABS, getOutputTab, withSheetsRetry } from '../src/sheets/client.js';
 import { appendHistoryRows, type OutRow } from '../src/sheets/write.js';
@@ -35,6 +39,8 @@ interface AlertArgs {
   windowHours: number;
   output: 'console' | 'sheet';
   runId: string;
+  /** Clientes con alertas_activas=false permitidos SOLO en shadow/dry-run. */
+  shadowClientAllowlist: string[];
 }
 
 function parseArgs(argv: string[]): AlertArgs {
@@ -42,6 +48,7 @@ function parseArgs(argv: string[]): AlertArgs {
     windowHours: 48,
     output: 'sheet',
     runId: `SA-${new Date().toISOString().replace(/[:.]/g, '-')}`,
+    shadowClientAllowlist: parseShadowClientAllowlist(argv),
   };
   for (const arg of argv) {
     if (!arg.startsWith('--')) continue;
@@ -53,6 +60,7 @@ function parseArgs(argv: string[]): AlertArgs {
       case 'window-hours': out.windowHours = Number(val) || out.windowHours; break;
       case 'output':       out.output = (val as 'console' | 'sheet') || out.output; break;
       case 'run-id':       out.runId = val || out.runId; break;
+      case 'shadow-client-allowlist': break; // ya parseado arriba (parseShadowClientAllowlist)
       // Confirmaciones seguras (no habilitan nada): se aceptan tal cual.
       case 'dry-run': case 'no-send': case 'no-whatsapp': case 'no-email':
       case 'no-correos': case 'no-twilio': case 'no-gmail': case 'no-smtp':
@@ -112,6 +120,7 @@ async function cargarMencionesRecientes(
 function aInput(
   m: any,
   keywords: Map<string, { activa: boolean; alerta: boolean; prioridad: string | null }>,
+  allowlist: Set<string> = new Set(),
 ): MencionAlertaInput {
   const kw = m.keyword_id ? keywords.get(m.keyword_id) : undefined;
   const temasSensibles = txt(m.clientes?.temas_sensibles).toLowerCase();
@@ -144,6 +153,7 @@ function aInput(
     tema_reputacional: temaReputacional,
     es_falso_positivo: esFalsoPositivo(m.estado_revision),
     requiere_alerta: m.requiere_alerta === true,
+    permitir_shadow_cliente_inactivo: allowlist.has(txt(m.cliente_id)),
   };
 }
 
@@ -175,6 +185,9 @@ function aFilaSheet(c: CandidatoAlertaSombra, runId: string, fecha: string): Out
     estado_shadow: c.estado_shadow,
     notas:
       'modo=shadow; sin_envios_reales; sin_whatsapp; sin_email; sin_twilio; sin_gmail_smtp' +
+      (c.permitir_shadow_cliente_inactivo === true
+        ? '; cliente_alertas_inactivas_permitido_por_shadow_allowlist'
+        : '') +
       (c.keywords_detectadas ? `; keywords_detectadas=${c.keywords_detectadas}` : ''),
   };
 }
@@ -216,6 +229,13 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
+  // ── Guarda del allowlist shadow-only (nunca junto a envío real) ───────────
+  const guardaAllowlist = verificarAllowlistShadow(rawArgv);
+  if (!guardaAllowlist.ok) {
+    logger.error({ violacion: guardaAllowlist.violacion }, guardaAllowlist.mensaje ?? 'shadow-client-allowlist inválido.');
+    process.exit(2);
+  }
+
   const args = parseArgs(rawArgv);
   const { desde, hasta } = ventanaMovil(args.windowHours);
 
@@ -233,6 +253,7 @@ async function main(): Promise<void> {
       email: false,
       twilio: false,
       gmail_smtp: false,
+      shadow_client_allowlist: args.shadowClientAllowlist,
     },
     '=== Iniciando ALERTAS SOMBRA (simulación, sin envíos) ===',
   );
@@ -247,7 +268,8 @@ async function main(): Promise<void> {
     cargarMencionesRecientes(sb, desde),
   ]);
 
-  const inputs = crudas.map((m) => aInput(m, keywords));
+  const allowlist = new Set(args.shadowClientAllowlist);
+  const inputs = crudas.map((m) => aInput(m, keywords, allowlist));
   const { candidatos, resumen } = evaluarLote(inputs);
 
   logger.info(

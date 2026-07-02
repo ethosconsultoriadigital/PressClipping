@@ -61,6 +61,13 @@ export interface MencionAlertaInput {
   es_falso_positivo?: boolean;
   /** Flag de detect (menciones.requiere_alerta). */
   requiere_alerta?: boolean;
+  /**
+   * Override SOLO-SOMBRA: permite evaluar un cliente con `alertas_activas=false`
+   * (bloqueo `alertas_cliente_desactivadas`) cuando está en el allowlist de
+   * shadow-alerts. NUNCA habilita envío real (lo garantizan las guardas del
+   * runner). No afecta `cliente_inactivo` ni `keyword_inactiva`.
+   */
+  permitir_shadow_cliente_inactivo?: boolean;
 }
 
 /** Decisión de la regla para una mención (sin metadatos de corrida). */
@@ -155,6 +162,14 @@ const KEYWORDS_CRISIS_BEBIDAS = [
   'bebidas clandestinas', 'metanol', 'intoxicación por alcohol', 'intoxicacion por alcohol',
 ];
 
+/**
+ * El título referencia una bebida/alcohol. Requisito para la rama "keyword de
+ * crisis + requiere_alerta", que evita falsos positivos por contaminación de
+ * keyword a nivel detect (p.ej. una nota de fútbol/tala con keyword
+ * 'alcohol adulterado' pegada desde el cuerpo).
+ */
+const TITULO_MENCIONA_BEBIDA = /alcohol|bebida|licor|tequila|mezcal|metanol|destilad|vinater|cerveza|aguardiente|etílico|etilico|adulter/i;
+
 const txt = (v: unknown): string => String(v ?? '').trim();
 const esVacio = (v: unknown): boolean => txt(v) === '';
 
@@ -207,7 +222,10 @@ export function dedupeKey(m: MencionAlertaInput): string {
 /** Primer motivo de bloqueo aplicable (o '' si no hay). */
 function motivoBloqueo(m: MencionAlertaInput): string {
   if (m.cliente_activo === false) return 'cliente_inactivo';
-  if (m.cliente_alertas_activas === false) return 'alertas_cliente_desactivadas';
+  // `alertas_activas=false` bloquea, salvo override SOLO-SOMBRA (allowlist dry-run).
+  if (m.cliente_alertas_activas === false && m.permitir_shadow_cliente_inactivo !== true) {
+    return 'alertas_cliente_desactivadas';
+  }
   if (m.keyword_activa === false) return 'keyword_inactiva';
   if (m.es_falso_positivo === true) return 'posible_falso_positivo';
   if (!esUrlValida(m.url)) return 'sin_url';
@@ -258,7 +276,9 @@ export function esCrisisBebidasP1(m: MencionAlertaInput): boolean {
   if (PATRONES_CRISIS_BEBIDAS.some((re) => re.test(titulo))) return true;
   const k = txt(m.keyword).toLowerCase();
   const keywordEsCrisis = KEYWORDS_CRISIS_BEBIDAS.some((kw) => k.includes(kw));
-  return keywordEsCrisis && m.requiere_alerta === true;
+  // Rama por keyword: exige que el título referencie bebida/alcohol para no
+  // elevar contaminación de keyword (fútbol, tala, etc.) a P1.
+  return keywordEsCrisis && m.requiere_alerta === true && TITULO_MENCIONA_BEBIDA.test(titulo);
 }
 
 /**
@@ -408,6 +428,7 @@ function agregarGrupo(grupo: MencionAlertaInput[]): {
     tema_reputacional: grupo.some((g) => g.tema_reputacional === true),
     keyword_activa: grupo.some((g) => g.keyword_activa !== false),
     es_falso_positivo: grupo.every((g) => g.es_falso_positivo === true),
+    permitir_shadow_cliente_inactivo: grupo.some((g) => g.permitir_shadow_cliente_inactivo === true),
     keyword_prioridad: prioridadKw,
   };
   return { agg, keywords };

@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { verificarFlagsAlertasSombra } from '../src/utils/shadowGuard.js';
+import {
+  verificarFlagsAlertasSombra,
+  verificarAllowlistShadow,
+  parseShadowClientAllowlist,
+} from '../src/utils/shadowGuard.js';
 import {
   evaluarMencion,
   evaluarLote,
@@ -186,9 +190,17 @@ describe('calibración P1 — casos reales del dry-run', () => {
       });
     }
 
-    it('P1: keyword de crisis + requiere_alerta aunque el título sea escueto', () => {
-      const d = evaluarMencion(bebidas({ titulo: 'Operativo en Irapuato', keyword: 'alcohol adulterado', requiere_alerta: true, valoracion: 0.3 }));
+    it('P1: keyword de crisis + requiere_alerta si el título menciona alcohol/bebida', () => {
+      const d = evaluarMencion(bebidas({ titulo: 'Operativo por venta de alcohol en Irapuato', keyword: 'alcohol adulterado', requiere_alerta: true, valoracion: 0.3 }));
       expect(d.estado_shadow).toBe('P1_INMEDIATA');
+      expect(d.regla_disparo).toContain('crisis_bebidas');
+    });
+
+    it('NO P1: contaminación de keyword (fútbol/tala) con título ajeno a bebidas', () => {
+      const futbol = evaluarMencion(bebidas({ titulo: 'Contrata Club Irapuato como vicepresidente a Alfredo Castillo', keyword: 'alcohol adulterado', requiere_alerta: true, valoracion: 0.3 }));
+      expect(futbol.estado_shadow).not.toBe('P1_INMEDIATA');
+      const tala = evaluarMencion(bebidas({ titulo: 'Vecinos denuncian presunta tala ilegal de árboles en Quintanilla', keyword: 'alcohol adulterado', requiere_alerta: true, valoracion: 0.3 }));
+      expect(tala.estado_shadow).not.toBe('P1_INMEDIATA');
     });
   });
 
@@ -221,7 +233,67 @@ describe('calibración P1 — casos reales del dry-run', () => {
     it('esCrisisBebidasP1 exige título de crisis o keyword+requiere_alerta', () => {
       expect(esCrisisBebidasP1(base({ titulo: 'Muertos por tequila adulterado', keyword: 'tequila adulterado' }))).toBe(true);
       expect(esCrisisBebidasP1(base({ titulo: 'Pronostican inundaciones', keyword: 'tequila adulterado', requiere_alerta: false }))).toBe(false);
-      expect(esCrisisBebidasP1(base({ titulo: 'Operativo local', keyword: 'alcohol adulterado', requiere_alerta: true }))).toBe(true);
+      // keyword de crisis + requiere_alerta pero título ajeno (fútbol) → NO crisis.
+      expect(esCrisisBebidasP1(base({ titulo: 'Club Irapuato va por el ascenso', keyword: 'alcohol adulterado', requiere_alerta: true }))).toBe(false);
+      // keyword de crisis + requiere_alerta con título que menciona alcohol → crisis.
+      expect(esCrisisBebidasP1(base({ titulo: 'Operativo por alcohol en Irapuato', keyword: 'alcohol adulterado', requiere_alerta: true }))).toBe(true);
+    });
+  });
+});
+
+describe('allowlist shadow-only (CLI-0002 alertas_activas=false)', () => {
+  // Simula una mención de CLI-0002 Bebidas alcohólicas con alertas_activas=false.
+  const cli2 = (over: Partial<MencionAlertaInput> = {}): MencionAlertaInput =>
+    base({
+      cliente_id: 'CLI-0002', cliente: 'Bebidas alcohólicas',
+      cliente_alertas_activas: false, keyword: 'tequila adulterado',
+      keyword_alerta: true, requiere_alerta: true, valoracion: 0.5, ...over,
+    });
+
+  it('sin allowlist: crisis bebidas de CLI-0002 queda BLOQUEADA (alertas_cliente_desactivadas)', () => {
+    const d = evaluarMencion(cli2({ titulo: 'Suman seis muertos por tequila adulterado' }));
+    expect(d.estado_shadow).toBe('BLOQUEADA');
+    expect(d.motivo_bloqueo).toBe('alertas_cliente_desactivadas');
+  });
+
+  it('con allowlist (permitir_shadow_cliente_inactivo): crisis bebidas → P1_INMEDIATA', () => {
+    const d = evaluarMencion(cli2({ titulo: 'Suman seis muertos por tequila adulterado', permitir_shadow_cliente_inactivo: true }));
+    expect(d.estado_shadow).toBe('P1_INMEDIATA');
+    expect(d.regla_disparo).toContain('crisis_bebidas');
+  });
+
+  it('con allowlist: nota de bebidas NO crisis no sube a P1 (→ P2/P3)', () => {
+    const d = evaluarMencion(cli2({ titulo: 'Isadora y Minerva son excluidas de un evento social', keyword: 'tequila', requiere_alerta: false, valoracion: 0.4, permitir_shadow_cliente_inactivo: true }));
+    expect(d.estado_shadow).not.toBe('P1_INMEDIATA');
+    expect(['P2_RESUMEN', 'P3_DASHBOARD']).toContain(d.estado_shadow);
+  });
+
+  it('cliente_inactivo NO se levanta por el allowlist (sigue BLOQUEADA)', () => {
+    const d = evaluarMencion(cli2({ titulo: 'Muertos por tequila adulterado', cliente_activo: false, permitir_shadow_cliente_inactivo: true }));
+    expect(d.estado_shadow).toBe('BLOQUEADA');
+    expect(d.motivo_bloqueo).toBe('cliente_inactivo');
+  });
+
+  it('el allowlist para CLI-0002 NO afecta la calibración de CLI-0003 (genérico NO P1)', () => {
+    const d = evaluarMencion(base({ cliente_id: 'CLI-0003', keyword: 'trabajadores', titulo: 'Maestros reciben plazas', tema_reputacional: true }));
+    expect(d.estado_shadow).not.toBe('P1_INMEDIATA');
+  });
+
+  describe('guardas del flag --shadow-client-allowlist', () => {
+    it('permitido en modo dry-run sin envío', () => {
+      expect(verificarAllowlistShadow(['--shadow-client-allowlist=CLI-0002', '--dry-run', '--no-send']).ok).toBe(true);
+    });
+    it('aborta si coexiste con --send / --whatsapp / --email', () => {
+      expect(verificarAllowlistShadow(['--shadow-client-allowlist=CLI-0002', '--send']).ok).toBe(false);
+      expect(verificarAllowlistShadow(['--shadow-client-allowlist=CLI-0002', '--whatsapp']).ok).toBe(false);
+      expect(verificarAllowlistShadow(['--shadow-client-allowlist=CLI-0002', '--email']).ok).toBe(false);
+    });
+    it('sin allowlist no impone restricción extra', () => {
+      expect(verificarAllowlistShadow(['--dry-run']).ok).toBe(true);
+    });
+    it('parseShadowClientAllowlist separa CSV y limpia', () => {
+      expect(parseShadowClientAllowlist(['--shadow-client-allowlist=CLI-0002, CLI-0009 '])).toEqual(['CLI-0002', 'CLI-0009']);
+      expect(parseShadowClientAllowlist(['--window-hours=48'])).toEqual([]);
     });
   });
 });
