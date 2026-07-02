@@ -10,6 +10,7 @@
  */
 import { foldText, indexOfWord, indexOfSubstring, anyWordPresent } from './text.js';
 import { evalBoolean, operandsOf } from './boolean.js';
+import { pasaPuertaContextualClienteKeyword } from '../matching/contextualKeywordRules.js';
 
 export type TipoKeyword =
   | 'exacta'
@@ -101,6 +102,23 @@ export function matchKeyword(
     return null;
   }
   // exacta_contextual sin contexto definido degrada a exacta (no bloquea).
+
+  // Puerta contextual cliente/keyword (código): p.ej. keywords comerciales
+  // amplias de CLI-0002 exigen contexto de bebidas. Se evalúa sobre el
+  // título + cuerpo (se excluye el nombre del medio para no contaminar).
+  const textoContexto = campos
+    .filter((c) => c.nombre !== 'medio')
+    .map((c) => c.texto)
+    .join('\n');
+  if (
+    !pasaPuertaContextualClienteKeyword({
+      cliente_id: rule.cliente_id,
+      keyword: rule.keyword,
+      texto: textoContexto,
+    }).pasa
+  ) {
+    return null;
+  }
 
   // --- Regla booleana: se evalúa sobre el documento completo ----------------
   if (rule.tipo === 'booleana') {
