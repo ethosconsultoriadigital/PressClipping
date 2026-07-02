@@ -103,6 +103,58 @@ const PRIORIDAD_ALTA = new Set(['alta', 'critica', 'crítica', 'high', 'urgente'
 const PRIORIDAD_MEDIA = new Set(['media', 'medium', 'normal']);
 const PRIORIDAD_BAJA = new Set(['baja', 'low', 'monitoreo']);
 
+/**
+ * Calibración P1 (anti-falsos-positivos por keywords amplias).
+ *
+ * Keywords amplias laborales: por sí solas NO justifican P1. Una nota que solo
+ * las contiene (sin contexto crítico) baja a P2/P3, aunque sea `tema_reputacional`.
+ */
+const KEYWORDS_AMPLIAS_LABORALES = ['trabajador', 'sindicat', 'derecho laboral', 'derechos laboral', 'gremio'];
+
+/**
+ * Contexto crítico laboral: patrones (título/keyword) que SÍ justifican elevar
+ * una nota laboral a P1 cuando además hay gravedad (negativo o valoración crítica).
+ */
+const PATRONES_CRITICOS_LABORALES: RegExp[] = [
+  /\bhuelga\b/i,
+  /paro (de labores|laboral|nacional|sindical|patronal)/i,
+  /emplazamiento a huelga/i,
+  /estall\w*.{0,12}huelga/i,
+  /contratos? colectivos?/i,
+  /conflicto laboral/i,
+  /litigios? laboral/i,
+  /despidos? masivos?/i,
+  /bloqueo sindical/i,
+  /(sindicat|trabajador|obrer|miner)\w*.{0,40}narco|narco.{0,40}(sindicat|trabajador|obrer|miner)/i,
+  /(trabajador|obrer|miner)\w*.{0,30}desaparecid/i,
+  /accidente (mortal|laboral|fatal)/i,
+  /violencia laboral/i,
+];
+
+/**
+ * Crisis de bebidas/alcohol adulterado: patrones de crisis REAL en el título.
+ * Justifican P1 directa (independiente de valoración/sentimiento).
+ */
+const PATRONES_CRISIS_BEBIDAS: RegExp[] = [
+  /adulterad/i,
+  /\bmetanol\b/i,
+  /(alcohol|bebida|licor|destilad|mezcal|tequila)\w*.{0,30}(clandestin|ilegal|apócrif|apocrif|pirata)/i,
+  /intoxicaci[oó]n.{0,25}(alcohol|bebida|licor|metanol|tequila|mezcal)/i,
+  /(muert|fallecid|deces|ciega|ceguera|convulsi|envenena).{0,40}(alcohol|bebida|licor|metanol|tequila|mezcal|vinater)/i,
+  /(alcohol|bebida|licor|metanol|tequila|mezcal|vinater)\w*.{0,40}(muert|fallecid|deces|intoxica|envenena|ceguera|convulsi)/i,
+  /decomiso.{0,25}(alcohol|bebida|licor|tequila|mezcal)/i,
+  /(alcohol|bebida|licor|tequila|mezcal)\w*.{0,25}decomiso/i,
+  /cofepris.{0,40}(alcohol|bebida|licor|tequila|mezcal|adulter)/i,
+  /catea\w*.{0,20}vinater|vinater\w*.{0,20}catea/i,
+];
+
+/** Keywords de crisis de bebidas (corroboran P1 junto con requiere_alerta). */
+const KEYWORDS_CRISIS_BEBIDAS = [
+  'tequila adulterado', 'alcohol adulterado', 'bebidas adulteradas', 'bebida adulterada',
+  'licor adulterado', 'destilados adulterados', 'destilado adulterado', 'mezcal adulterado',
+  'bebidas clandestinas', 'metanol', 'intoxicación por alcohol', 'intoxicacion por alcohol',
+];
+
 const txt = (v: unknown): string => String(v ?? '').trim();
 const esVacio = (v: unknown): boolean => txt(v) === '';
 
@@ -176,13 +228,48 @@ function motivoBloqueo(m: MencionAlertaInput): string {
   return '';
 }
 
+/** Texto combinado (título + keyword) en minúsculas, para búsqueda de patrones. */
+function textoBusqueda(m: MencionAlertaInput): string {
+  return `${txt(m.titulo)} ${txt(m.keyword)}`.toLowerCase();
+}
+
+/** ¿La keyword es una "amplia laboral" (trabajador/sindicato/derechos laborales)? */
+export function esKeywordAmpliaLaboral(m: MencionAlertaInput): boolean {
+  const k = txt(m.keyword).toLowerCase();
+  if (k === '') return false;
+  return KEYWORDS_AMPLIAS_LABORALES.some((stem) => k.includes(stem));
+}
+
+/** ¿Hay contexto crítico laboral fuerte (huelga, narco, desaparecidos, etc.)? */
+export function tieneContextoCriticoLaboral(m: MencionAlertaInput): boolean {
+  const t = `${txt(m.titulo)} ${txt(m.keyword)}`;
+  return PATRONES_CRITICOS_LABORALES.some((re) => re.test(t));
+}
+
+/**
+ * ¿Es crisis de bebidas/alcohol adulterado que justifica P1?
+ *   - Título con patrón de crisis explícito (muertes/adulterado/metanol/…), o
+ *   - Keyword de crisis de bebidas CORROBORADA por requiere_alerta=true (detect).
+ * Nota: una keyword de crisis SIN evidencia en el título ni requiere_alerta
+ * (p. ej. contaminación por teaser ya descartada) NO cuenta como crisis P1.
+ */
+export function esCrisisBebidasP1(m: MencionAlertaInput): boolean {
+  const titulo = txt(m.titulo);
+  if (PATRONES_CRISIS_BEBIDAS.some((re) => re.test(titulo))) return true;
+  const k = txt(m.keyword).toLowerCase();
+  const keywordEsCrisis = KEYWORDS_CRISIS_BEBIDAS.some((kw) => k.includes(kw));
+  return keywordEsCrisis && m.requiere_alerta === true;
+}
+
 /**
  * Señales FUERTES que detonan P1 (inmediata). Al menos una requerida.
  *
- * Calibración anti-sobre-alertamiento (clave): los flags `keyword.alerta` y
- * `requiere_alerta` NO bastan por sí solos — exigen además relevancia alta
- * (valoración ≥ 0.7) o sentimiento negativo. Así una keyword marcada como
- * alerta sobre una nota de baja relevancia cae a P2, no a P1.
+ * Calibración P1 (anti-falsos-positivos por keywords amplias):
+ *   - `tema_reputacional` y `valoracion_critica` YA NO disparan P1 por sí solos.
+ *   - Una keyword amplia laboral (trabajador/sindicato/derechos laborales) SIN
+ *     contexto crítico laboral NUNCA es P1 (baja a P2/P3), aunque venga marcada.
+ *   - Crisis de bebidas/alcohol adulterado (patrón en título, o keyword de crisis
+ *     + requiere_alerta) se conserva SIEMPRE como P1.
  *
  * Deliberadamente NO incluye "medio prioridad alta" ni "keyword prioridad alta"
  * por sí solas.
@@ -192,20 +279,43 @@ function senalesFuertes(m: MencionAlertaInput): string[] {
   const val = normalizarValoracion(m.valoracion);
   const neg = esSentimientoNegativo(m.sentimiento);
   const relevanciaAlta = val >= VALORACION_ALTA_MIN || neg;
-  if (neg && val >= VALORACION_ALTA_MIN) s.push('sentimiento_negativo_valoracion_alta');
-  if (m.tema_reputacional === true) s.push('tema_reputacional');
-  if (val >= VALORACION_CRITICA_MIN) s.push('valoracion_critica');
-  if (m.keyword_alerta === true && relevanciaAlta) s.push('keyword_alerta_relevante');
-  if (m.requiere_alerta === true && relevanciaAlta) s.push('requiere_alerta_relevante');
+  // Keyword amplia laboral sin contexto crítico: se veta de todo camino a P1.
+  const vetoLaboral = esKeywordAmpliaLaboral(m) && !tieneContextoCriticoLaboral(m);
+
+  // 1. Crisis de bebidas/alcohol adulterado → P1 directa (no depende de valoración).
+  if (esCrisisBebidasP1(m)) s.push('crisis_bebidas');
+
+  if (!vetoLaboral) {
+    // 2. Contexto crítico laboral fuerte + gravedad (negativo o valoración crítica).
+    if (tieneContextoCriticoLaboral(m) && (neg || val >= VALORACION_CRITICA_MIN)) {
+      s.push('contexto_critico_laboral');
+    }
+    // 3. Sentimiento negativo + valoración alta (nota negativa de alto impacto).
+    if (neg && val >= VALORACION_ALTA_MIN) s.push('sentimiento_negativo_valoracion_alta');
+    // 4. requiere_alerta (detect) con relevancia alta.
+    if (m.requiere_alerta === true && relevanciaAlta) s.push('requiere_alerta_relevante');
+    // 5. keyword marcada alerta + prioridad alta + relevancia alta.
+    if (m.keyword_alerta === true && esPrioridadAlta(m.keyword_prioridad) && relevanciaAlta) {
+      s.push('keyword_alerta_prioritaria');
+    }
+  }
   return s;
 }
 
-/** ¿La mención es "relevante" (candidata a P2) aunque no sea crítica? */
+/**
+ * ¿La mención es "relevante" (candidata a P2) aunque no sea crítica?
+ * Incluye señales que fueron "degradadas" de P1 (tema_reputacional, requiere_alerta,
+ * keyword_alerta, contexto laboral) para que aterricen en P2, no en P3.
+ */
 function esRelevante(m: MencionAlertaInput): boolean {
   return (
     normalizarValoracion(m.valoracion) >= VALORACION_RELEVANTE_MIN ||
     esPrioridadMediaOAlta(m.prioridad_medio) ||
-    esPrioridadMediaOAlta(m.keyword_prioridad)
+    esPrioridadMediaOAlta(m.keyword_prioridad) ||
+    m.tema_reputacional === true ||
+    m.requiere_alerta === true ||
+    m.keyword_alerta === true ||
+    tieneContextoCriticoLaboral(m)
   );
 }
 

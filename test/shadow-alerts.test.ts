@@ -5,6 +5,9 @@ import {
   evaluarLote,
   dedupeKey,
   normalizarValoracion,
+  esCrisisBebidasP1,
+  esKeywordAmpliaLaboral,
+  tieneContextoCriticoLaboral,
   ALERTAS_SOMBRA_HEADERS,
   type MencionAlertaInput,
 } from '../src/alerts/shadowAlertRules.js';
@@ -66,15 +69,20 @@ describe('reglas P1/P2/P3 (anti sobre-alertamiento)', () => {
     expect(d.regla_disparo).toContain('sentimiento_negativo_valoracion_alta');
   });
 
-  it('valoración crítica (≥0.85) → P1 aunque falte otra señal', () => {
-    expect(evaluarMencion(base({ valoracion: 0.9 })).estado_shadow).toBe('P1_INMEDIATA');
-    expect(evaluarMencion(base({ valoracion: 1 })).regla_disparo).toContain('valoracion_critica');
+  it('valoración crítica (≥0.85) SOLA ya NO dispara P1 (calibración → P2)', () => {
+    expect(evaluarMencion(base({ valoracion: 0.9 })).estado_shadow).toBe('P2_RESUMEN');
+    expect(evaluarMencion(base({ valoracion: 1 })).estado_shadow).toBe('P2_RESUMEN');
   });
 
-  it('keyword_alerta/requiere_alerta CON relevancia alta → P1', () => {
-    expect(evaluarMencion(base({ keyword_alerta: true, valoracion: 0.9 })).estado_shadow).toBe('P1_INMEDIATA');
+  it('requiere_alerta CON relevancia alta → P1; keyword_alerta exige prioridad alta', () => {
     expect(evaluarMencion(base({ requiere_alerta: true, valoracion: 0.9 })).estado_shadow).toBe('P1_INMEDIATA');
-    expect(evaluarMencion(base({ tema_reputacional: true })).estado_shadow).toBe('P1_INMEDIATA');
+    expect(evaluarMencion(base({ keyword_alerta: true, keyword_prioridad: 'alta', valoracion: 0.9 })).estado_shadow).toBe('P1_INMEDIATA');
+    // keyword_alerta con prioridad media (no alta) no basta para P1.
+    expect(evaluarMencion(base({ keyword_alerta: true, valoracion: 0.9 })).estado_shadow).toBe('P2_RESUMEN');
+  });
+
+  it('tema_reputacional SOLO ya NO dispara P1 (calibración → P2)', () => {
+    expect(evaluarMencion(base({ tema_reputacional: true })).estado_shadow).toBe('P2_RESUMEN');
   });
 
   it('keyword_alerta/requiere_alerta SIN relevancia alta NO disparan P1 (→ P2)', () => {
@@ -111,6 +119,110 @@ describe('reglas P1/P2/P3 (anti sobre-alertamiento)', () => {
     expect(d.tipo_alerta_simulada).toBe('monitoreo');
     expect(d.canal_simulado).toBe('dashboard');
     expect(d.habria_alerta).toBe('NO');
+  });
+});
+
+describe('calibración P1 — casos reales del dry-run', () => {
+  // Nota laboral: base con keyword amplia, tema_reputacional y valoración variable.
+  const laboral = (over: Partial<MencionAlertaInput> = {}): MencionAlertaInput =>
+    base({ cliente_id: 'CLI-0003', cliente: 'Reforma laboral', tema_reputacional: true, keyword_alerta: true, ...over });
+  // Nota de bebidas: cliente crisis, keyword de crisis.
+  const bebidas = (over: Partial<MencionAlertaInput> = {}): MencionAlertaInput =>
+    base({ cliente_id: 'CLI-0002', cliente: 'Bebidas alcohólicas', keyword: 'tequila adulterado', keyword_alerta: true, requiere_alerta: true, valoracion: 0.5, ...over });
+
+  describe('DEBEN bajar de P1 (ruido keyword amplia laboral)', () => {
+    const casos: Array<[string, string, number]> = [
+      ['Qué pasa si ICE llega a tu trabajo en California: derechos del empleado', 'trabajadores', 0.5],
+      ['Maestros en Guanajuato reciben mil 125 plazas definitivas', 'sindicato', 0.5],
+      ['Volkswagen en Alemania analiza cerrar cuatro fábricas', 'sindicato', 0.6],
+      ['La educación no puede ser rehén de intereses políticos y económicos', 'derechos laborales', 0.5],
+      ['Sates llama a aprovechar descuentos en trámites vehiculares', 'sindicato', 0.4],
+      ['¿Cuándo regresan a clases en la UABC? Ya hay fecha para el semestre 2026', 'sindicato', 0.5],
+      ['Agotamiento e irritabilidad: 5 señales de burnout bajo la NOM-035', 'trabajadores', 0.9],
+      ['Bolivia libera el precio del dólar tras 15 años de cotización fijada', 'sindicato', 0.6],
+    ];
+    for (const [titulo, keyword, valoracion] of casos) {
+      it(`NO P1: "${titulo.slice(0, 40)}" (${keyword})`, () => {
+        const d = evaluarMencion(laboral({ titulo, keyword, valoracion }));
+        expect(d.estado_shadow).not.toBe('P1_INMEDIATA');
+        expect(['P2_RESUMEN', 'P3_DASHBOARD']).toContain(d.estado_shadow);
+      });
+    }
+  });
+
+  describe('DEBEN conservar P1/P2 fuerte (contexto crítico laboral)', () => {
+    it('P1: Stashag — estalla la huelga (huelga + valoración crítica)', () => {
+      const d = evaluarMencion(laboral({ titulo: 'Stashag decide esta noche en voto secreto si estalla la huelga este martes', keyword: 'huelga', valoracion: 0.9 }));
+      expect(d.estado_shadow).toBe('P1_INMEDIATA');
+      expect(d.regla_disparo).toContain('contexto_critico_laboral');
+    });
+    it('P1: trabajadores de la CFE desaparecidos (contexto crítico + val crítica)', () => {
+      const d = evaluarMencion(laboral({ titulo: 'FGR tomará caso de trabajadores de la CFE desaparecidos en Hidalgo', keyword: 'trabajadores', valoracion: 0.9 }));
+      expect(d.estado_shadow).toBe('P1_INMEDIATA');
+    });
+    it('P1: Sindicato Minero + narco (contexto crítico)', () => {
+      const d = evaluarMencion(laboral({ titulo: 'Denuncia Sindicato Minero intromisión del narco con apoyo de trasnacionales', keyword: 'sindicato', valoracion: 0.9 }));
+      expect(d.estado_shadow).toBe('P1_INMEDIATA');
+    });
+    it('P2 (no inmediata): contratos colectivos / litigios sin gravedad', () => {
+      const d = evaluarMencion(laboral({ titulo: 'Disputas por titularidad de contratos colectivos disparan litigios laborales: INEGI', keyword: 'trabajadores', valoracion: 0.5, sentimiento: 'neutro' }));
+      expect(d.estado_shadow).toBe('P2_RESUMEN');
+    });
+  });
+
+  describe('DEBEN conservar P1 (crisis bebidas)', () => {
+    const crisis: Array<[string, string]> = [
+      ['Suman seis los muertos por consumo de tequila adulterado', 'tequila adulterado'],
+      ['Causa ceguera y convulsiones tequila adulterado: SSEG', 'tequila adulterado'],
+      ['Fiscalía catea vinatería por muerte ligada a tequila adulterado', 'tequila adulterado'],
+      ['Intoxicación por metanol deja varios hospitalizados', 'metanol'],
+      ['Muere hombre por consumir tequila adulterado en Guanajuato', 'tequila adulterado'],
+    ];
+    for (const [titulo, keyword] of crisis) {
+      it(`P1: "${titulo.slice(0, 40)}"`, () => {
+        const d = evaluarMencion(bebidas({ titulo, keyword, valoracion: 0.5 }));
+        expect(d.estado_shadow).toBe('P1_INMEDIATA');
+        expect(d.regla_disparo).toContain('crisis_bebidas');
+      });
+    }
+
+    it('P1: keyword de crisis + requiere_alerta aunque el título sea escueto', () => {
+      const d = evaluarMencion(bebidas({ titulo: 'Operativo en Irapuato', keyword: 'alcohol adulterado', requiere_alerta: true, valoracion: 0.3 }));
+      expect(d.estado_shadow).toBe('P1_INMEDIATA');
+    });
+  });
+
+  describe('las 2 residuales descartadas de MED-0171 NO reaparecen como P1', () => {
+    // Descartadas: requiere_alerta=false, título NO es crisis (keyword contaminada).
+    it('NO P1: Pronostican inundaciones (keyword tequila adulterado, requiere_alerta=false)', () => {
+      const d = evaluarMencion(bebidas({ titulo: 'Pronostican inundaciones en diversas zonas de Guanajuato', requiere_alerta: false, valoracion: 0.4 }));
+      expect(d.estado_shadow).not.toBe('P1_INMEDIATA');
+    });
+    it('NO P1: Dan 60 años a secuestradores (keyword tequila adulterado, requiere_alerta=false)', () => {
+      const d = evaluarMencion(bebidas({ titulo: 'Dan 60 años de cárcel a secuestradores de Salamanca', requiere_alerta: false, valoracion: 0.4 }));
+      expect(d.estado_shadow).not.toBe('P1_INMEDIATA');
+    });
+  });
+
+  describe('helpers de calibración', () => {
+    it('esKeywordAmpliaLaboral detecta trabajador/sindicato/derechos laborales', () => {
+      expect(esKeywordAmpliaLaboral(base({ keyword: 'trabajadores' }))).toBe(true);
+      expect(esKeywordAmpliaLaboral(base({ keyword: 'sindicato' }))).toBe(true);
+      expect(esKeywordAmpliaLaboral(base({ keyword: 'derechos laborales' }))).toBe(true);
+      expect(esKeywordAmpliaLaboral(base({ keyword: 'huelga' }))).toBe(false);
+      expect(esKeywordAmpliaLaboral(base({ keyword: 'tequila adulterado' }))).toBe(false);
+    });
+    it('tieneContextoCriticoLaboral detecta huelga/narco/desaparecidos', () => {
+      expect(tieneContextoCriticoLaboral(base({ titulo: 'estalla la huelga en Guasave' }))).toBe(true);
+      expect(tieneContextoCriticoLaboral(base({ titulo: 'Sindicato Minero y el narco' }))).toBe(true);
+      expect(tieneContextoCriticoLaboral(base({ titulo: 'trabajadores desaparecidos en Hidalgo' }))).toBe(true);
+      expect(tieneContextoCriticoLaboral(base({ titulo: 'Maestros reciben plazas' }))).toBe(false);
+    });
+    it('esCrisisBebidasP1 exige título de crisis o keyword+requiere_alerta', () => {
+      expect(esCrisisBebidasP1(base({ titulo: 'Muertos por tequila adulterado', keyword: 'tequila adulterado' }))).toBe(true);
+      expect(esCrisisBebidasP1(base({ titulo: 'Pronostican inundaciones', keyword: 'tequila adulterado', requiere_alerta: false }))).toBe(false);
+      expect(esCrisisBebidasP1(base({ titulo: 'Operativo local', keyword: 'alcohol adulterado', requiere_alerta: true }))).toBe(true);
+    });
   });
 });
 
@@ -156,7 +268,7 @@ describe('dedupe fuerte + agrupación de keywords', () => {
 
   it('misma nota con 3 keywords → 1 alerta agrupada (no 3 inmediatas) + 2 DUPLICADA', () => {
     const { candidatos, resumen } = evaluarLote([
-      base({ mencion_id: 'M1', keyword: 'reforma laboral', keyword_alerta: true, valoracion: 1 }),
+      base({ mencion_id: 'M1', keyword: 'reforma laboral', requiere_alerta: true, valoracion: 1 }),
       base({ mencion_id: 'M2', keyword: 'conciliación laboral' }),
       base({ mencion_id: 'M3', keyword: 'Centro de Conciliación Laboral' }),
     ]);
