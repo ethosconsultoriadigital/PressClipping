@@ -65,6 +65,74 @@ export function esCrisisBebidasDirecta(texto: string): boolean {
   return anyWordPresent(CRISIS_BEBIDAS_DIRECTA, foldText(texto));
 }
 
+// ---------------------------------------------------------------------------
+// CLI-0003 Reforma laboral — puerta laboral
+// ---------------------------------------------------------------------------
+
+/**
+ * Keywords laborales AMPLIAS que, para CLI-0003, exigen contexto laboral real.
+ * NO incluye keywords laborales fuertes (huelga, paro, contrato colectivo,
+ * salario mínimo, STPS, tribunal/conciliación…), que ya son accionables por sí
+ * mismas y no se gatean.
+ */
+export const KEYWORDS_LABORAL_AMPLIAS: string[] = [
+  'trabajadores', 'trabajador', 'sindicato', 'sindicatos',
+  'derechos laborales', 'derecho laboral', 'reforma laboral',
+];
+
+const KEYWORDS_LABORAL_AMPLIAS_SET = new Set(KEYWORDS_LABORAL_AMPLIAS);
+
+/**
+ * Familias de contexto laboral REAL y accionable. Si alguna aparece (límite de
+ * palabra) en título + texto limpio, la puerta laboral se abre.
+ */
+export const CONTEXTO_LABORAL_ACCIONABLE: string[] = [
+  'huelga', 'paro', 'paro de labores', 'paro laboral', 'emplazamiento',
+  'contrato colectivo', 'negociacion colectiva', 'revision contractual',
+  'salario', 'salarios', 'salario minimo', 'retencion de salario', 'retenciones de salario',
+  'prestaciones', 'aguinaldo', 'reparto de utilidades', 'liquidacion', 'indemnizacion',
+  'despido', 'despidos', 'reinstalacion', 'jornada laboral', 'reforma laboral',
+  'stps', 'secretaria del trabajo', 'tribunal laboral', 'junta de conciliacion',
+  'centro federal de conciliacion', 'centro de conciliacion', 'conciliacion laboral',
+  'queja laboral', 'quejas laborales', 'conflicto laboral', 'demanda laboral',
+  'sindicato minero', 'outsourcing', 'subcontratacion', 'nom-035',
+  'riesgo laboral', 'accidente laboral', 'muerte laboral', 'accidente de trabajo',
+  'violencia laboral', 'acoso laboral', 'trabajadores desaparecidos', 'pension', 'pensiones',
+  'jubilacion', 'sindical', 'seccion sindical', 'lider sindical', 'toma de nota',
+];
+
+/**
+ * Marcadores de temas off-topic donde una keyword laboral suele aparecer de
+ * forma incidental. Solo se usa para diagnóstico/reporte, no decide la puerta
+ * (la puerta se decide por AUSENCIA de contexto accionable).
+ */
+export const OFFTOPIC_LABORAL: string[] = [
+  't-mec', 'tratado de libre comercio', 'aranceles', 'comercio exterior',
+  'regreso a clases', 'vehicular', 'tramite', 'deporte', 'futbol', 'beisbol',
+  'clima', 'pronostico', 'dolar', 'bolsa', 'peso mexicano', 'migracion', 'ciudadania',
+];
+
+/** ¿La keyword es una laboral amplia (para la regla CLI-0003)? */
+export function esKeywordLaboralAmpliaCli0003(keyword: string): boolean {
+  return KEYWORDS_LABORAL_AMPLIAS_SET.has(foldText(keyword).trim());
+}
+
+/** ¿El texto tiene contexto laboral real y accionable? */
+export function tieneContextoLaboralAccionable(texto: string): boolean {
+  const f = foldText(texto);
+  if (anyWordPresent(CONTEXTO_LABORAL_ACCIONABLE, f)) return true;
+  // Combos específicos accionables (crimen organizado + ámbito sindical).
+  const hayNarco = anyWordPresent(['narco', 'narcotrafico', 'crimen organizado', 'delincuencia organizada'], f);
+  const haySindical = anyWordPresent(['sindicato', 'sindicatos', 'sindical'], f);
+  if (hayNarco && haySindical) return true;
+  return false;
+}
+
+/** ¿El texto parece off-topic para lo laboral? (solo diagnóstico) */
+export function esOffTopicLaboral(texto: string): boolean {
+  return anyWordPresent(OFFTOPIC_LABORAL, foldText(texto)) && !tieneContextoLaboralAccionable(texto);
+}
+
 export interface PuertaContextualInput {
   cliente_id: string | null;
   keyword: string;
@@ -78,10 +146,26 @@ export interface PuertaContextualResultado {
 }
 
 /**
+ * Puerta laboral para CLI-0003: keywords amplias solo pasan con contexto
+ * laboral accionable. En cualquier otro caso, pasa.
+ */
+export function pasaPuertaContextualLaboralCli0003(
+  input: PuertaContextualInput,
+): PuertaContextualResultado {
+  if (input.cliente_id === 'CLI-0003' && esKeywordLaboralAmpliaCli0003(input.keyword)) {
+    if (tieneContextoLaboralAccionable(input.texto)) return { pasa: true };
+    return { pasa: false, razon: 'contexto_laboral_ausente' };
+  }
+  return { pasa: true };
+}
+
+/**
  * Aplica la puerta contextual cliente/keyword.
  *
- * Regla actual: para CLI-0002 con keyword comercial amplia, exige contexto de
- * bebidas (o crisis directa de bebidas). En cualquier otro caso, pasa.
+ * - CLI-0002 con keyword comercial amplia: exige contexto de bebidas (o crisis
+ *   directa de bebidas).
+ * - CLI-0003 con keyword laboral amplia: exige contexto laboral accionable.
+ * En cualquier otro caso, pasa.
  */
 export function pasaPuertaContextualClienteKeyword(
   input: PuertaContextualInput,
@@ -91,6 +175,9 @@ export function pasaPuertaContextualClienteKeyword(
       return { pasa: true };
     }
     return { pasa: false, razon: 'contexto_bebidas_ausente' };
+  }
+  if (input.cliente_id === 'CLI-0003' && esKeywordLaboralAmpliaCli0003(input.keyword)) {
+    return pasaPuertaContextualLaboralCli0003(input);
   }
   return { pasa: true };
 }

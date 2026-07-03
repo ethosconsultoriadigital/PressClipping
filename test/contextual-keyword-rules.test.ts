@@ -3,6 +3,10 @@ import {
   esKeywordComercioAmpliaCli0002,
   tieneContextoBebidas,
   esCrisisBebidasDirecta,
+  esKeywordLaboralAmpliaCli0003,
+  tieneContextoLaboralAccionable,
+  esOffTopicLaboral,
+  pasaPuertaContextualLaboralCli0003,
   pasaPuertaContextualClienteKeyword,
 } from '../src/matching/contextualKeywordRules.js';
 import {
@@ -123,5 +127,92 @@ describe('no regresión: otros clientes/keywords', () => {
   it('otro cliente con keyword comercial no se bloquea', () => {
     const r = reglaComercio('aranceles', 'CLI-0009');
     expect(matchKeyword(r, campos({ titulo: 'Aranceles a los autos de China' }))).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CLI-0003 Reforma laboral — puerta laboral
+// ---------------------------------------------------------------------------
+
+function reglaLaboral(keyword: string, cliente_id = 'CLI-0003'): KeywordRule {
+  return {
+    keyword_id: 'k', cliente_id, keyword,
+    terminos: [keyword], tipo: 'contiene', regla: null,
+    contextoIncluir: [], contextoExcluir: [],
+  };
+}
+
+describe('CLI-0003 helpers', () => {
+  it('esKeywordLaboralAmpliaCli0003 detecta las amplias', () => {
+    for (const k of ['trabajadores', 'sindicato', 'derechos laborales', 'reforma laboral']) {
+      expect(esKeywordLaboralAmpliaCli0003(k)).toBe(true);
+    }
+  });
+  it('NO marca laborales fuertes como amplias', () => {
+    for (const k of ['huelga', 'paro', 'contrato colectivo', 'salario mínimo', 'STPS', 'tribunal laboral']) {
+      expect(esKeywordLaboralAmpliaCli0003(k)).toBe(false);
+    }
+  });
+  it('tieneContextoLaboralAccionable reconoce señales fuertes y combos', () => {
+    expect(tieneContextoLaboralAccionable('estalla huelga en la planta')).toBe(true);
+    expect(tieneContextoLaboralAccionable('retenciones de salario ilegales')).toBe(true);
+    expect(tieneContextoLaboralAccionable('acuden al tribunal laboral')).toBe(true);
+    expect(tieneContextoLaboralAccionable('Sindicato Minero denuncia intromisión del narco')).toBe(true);
+    expect(tieneContextoLaboralAccionable('columna de opinión sobre política general')).toBe(false);
+  });
+  it('esOffTopicLaboral marca off-topic sin contexto accionable', () => {
+    expect(esOffTopicLaboral('análisis del T-MEC y la bolsa')).toBe(true);
+    expect(esOffTopicLaboral('T-MEC y su capítulo laboral: nueva huelga')).toBe(false);
+  });
+});
+
+describe('CLI-0003 DEBE bloquear (sin contexto laboral accionable)', () => {
+  const casos: [string, Partial<Record<string, string>>][] = [
+    ['trabajadores', { titulo: 'De la muerte del T-MEC al purgatorio de 10 años', texto: 'análisis político del tratado y sus trabajadores afectados' }],
+    ['derechos laborales', { titulo: 'El valor de la palabra dada', texto: 'columna de opinión sobre la confianza y los derechos laborales del ciudadano' }],
+    ['sindicato', { titulo: 'El sindicato de músicos cumple 70 años', texto: 'aniversario histórico sin conflicto actual' }],
+    ['trabajadores', { titulo: 'Regreso a clases: trabajadores de limpieza preparan escuelas', texto: 'labores de mantenimiento' }],
+    ['sindicato', { titulo: 'Sindicato de taxistas informa trámites vehiculares', texto: 'renovación de placas' }],
+    ['trabajadores', { titulo: 'El dólar sube y golpea a los trabajadores', texto: 'macroeconomía y bolsa' }],
+  ];
+  for (const [kw, parts] of casos) {
+    it(`bloquea "${kw}" en: ${parts.titulo}`, () => {
+      expect(matchKeyword(reglaLaboral(kw), campos(parts))).toBeNull();
+      const p = pasaPuertaContextualLaboralCli0003({ cliente_id: 'CLI-0003', keyword: kw, texto: `${parts.titulo} ${parts.texto ?? ''}` });
+      expect(p.pasa).toBe(false);
+      expect(p.razon).toBe('contexto_laboral_ausente');
+    });
+  }
+});
+
+describe('CLI-0003 DEBE pasar (con contexto laboral accionable)', () => {
+  const casos: [string, Partial<Record<string, string>>][] = [
+    ['trabajadores', { titulo: 'Trabajadores del Monte de Piedad estallan huelga' }],
+    ['trabajadores', { titulo: 'Paro de trabajadores de la UAS por adeudos' }],
+    ['sindicato', { titulo: 'Sindicato firma contrato colectivo con la empresa' }],
+    ['sindicato', { titulo: 'El sindicato avanza en la negociación colectiva' }],
+    ['derechos laborales', { titulo: 'Denuncian retenciones de salario', texto: 'derechos laborales vulnerados' }],
+    ['trabajadores', { titulo: 'Trabajadores desaparecidos de la CFE' }],
+    ['sindicato', { titulo: 'Sindicato Minero denuncia intromisión del narco' }],
+    ['trabajadores', { titulo: 'Despidos masivos en la planta', texto: 'trabajadores afectados' }],
+    ['trabajadores', { titulo: 'STPS interviene en el tribunal laboral', texto: 'trabajadores presentan queja' }],
+    ['sindicato', { titulo: 'Denuncian outsourcing ilegal', texto: 'el sindicato exige subcontratación regulada' }],
+  ];
+  for (const [kw, parts] of casos) {
+    it(`pasa "${kw}" en: ${parts.titulo}`, () => {
+      expect(matchKeyword(reglaLaboral(kw), campos(parts))).not.toBeNull();
+    });
+  }
+});
+
+describe('CLI-0003 no afecta keywords fuertes ni otros clientes', () => {
+  it('keyword fuerte "huelga" pasa sin exigir contexto extra', () => {
+    expect(matchKeyword(reglaLaboral('huelga'), campos({ titulo: 'Estalla la huelga' }))).not.toBeNull();
+  });
+  it('salario mínimo (fuerte) pasa', () => {
+    expect(matchKeyword(reglaLaboral('salario mínimo'), campos({ titulo: 'Sube el salario mínimo' }))).not.toBeNull();
+  });
+  it('trabajadores en otro cliente no se bloquea', () => {
+    expect(matchKeyword(reglaLaboral('trabajadores', 'CLI-0001'), campos({ titulo: 'Los trabajadores de la empresa' }))).not.toBeNull();
   });
 });
