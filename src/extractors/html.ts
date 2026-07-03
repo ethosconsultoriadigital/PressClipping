@@ -32,6 +32,7 @@ export type MetodoTexto =
   | 'html_main'
   | 'html_container'
   | 'html_paragraphs'
+  | 'oem_storyline'
   | null;
 
 export interface HtmlExtract {
@@ -603,6 +604,58 @@ function textoDeContenedor($: cheerio.CheerioAPI, $cont: cheerio.Cheerio<any>): 
   return parrafos.join('\n\n');
 }
 
+/**
+ * Extractor específico para sitios OEM/El Sol (Next.js + RSC).
+ *
+ * En estos medios el HTML ESTÁTICO renderizado solo contiene el lead/summary
+ * de la nota; el CUERPO COMPLETO viaja en el payload de React Server Components
+ * (`self.__next_f.push`) como objetos JSON estructurados:
+ *
+ *   {"type":"storyline_paragraph","fields":{"paragraph":{"value":"...texto..."}}}
+ *
+ * Ventajas frente a leer el DOM:
+ *  - Recupera el cuerpo íntegro (varias veces más largo que el lead estático).
+ *  - Los teasers/recirculación NO son `storyline_paragraph` (se renderizan como
+ *    `<p class="Typography...">`), así que quedan excluidos POR CONSTRUCCIÓN:
+ *    no se reintroduce ruido de "notas relacionadas" (p. ej. aranceles/alcohol).
+ *
+ * Es una heurística GENERAL (se dispara por la presencia de la estructura
+ * `storyline_paragraph`, no por URL) y no requiere JS ni navegador: el texto ya
+ * está en el HTML público, solo hay que desescaparlo del literal JS.
+ *
+ * Devuelve null si el patrón no está presente (medio no-OEM): el extractor
+ * genérico sigue su cascada normal sin cambios.
+ */
+const RE_STORYLINE_PARRAFO =
+  /"type":"storyline_paragraph","fields":\{"paragraph":\{"value":"((?:[^"\\]|\\.)*)"/g;
+
+function desescaparRsc(html: string): string {
+  return html
+    .replace(/\\r/g, ' ')
+    .replace(/\\n/g, ' ')
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_m, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, '\\');
+}
+
+export function extraerStorylineOem(html: string): string | null {
+  // Descartar rápido si el marcador no aparece (no es OEM/El Sol).
+  if (!html.includes('storyline_paragraph')) return null;
+
+  const decoded = desescaparRsc(html);
+  const parrafos: string[] = [];
+  const vistos = new Set<string>();
+  for (const m of decoded.matchAll(RE_STORYLINE_PARRAFO)) {
+    const txt = limpiarTexto((m[1] ?? '').replace(/<[^>]+>/g, ''));
+    if (txt.length === 0) continue;
+    // El payload RSC suele duplicarse (SSR + hidratación): dedupe por valor.
+    if (vistos.has(txt)) continue;
+    vistos.add(txt);
+    parrafos.push(txt);
+  }
+  return parrafos.length > 0 ? parrafos.join('\n\n') : null;
+}
+
 function extraerTexto(
   $: cheerio.CheerioAPI,
   maxChars: number,
@@ -669,7 +722,17 @@ export function extractFromHtml(
   const $ = cheerio.load(html);
 
   const { titulo, metodo: metodo_titulo } = extraerTitulo($, url);
-  const { texto, metodo: metodo_texto } = extraerTexto($, maxChars);
+  let { texto, metodo: metodo_texto } = extraerTexto($, maxChars);
+
+  // Preferir el cuerpo estructurado de OEM/El Sol (RSC storyline) cuando exista
+  // y sea claramente más completo que lo obtenido del DOM renderizado (que en
+  // estos medios solo trae el lead). Excluye teasers por construcción.
+  const storyline = extraerStorylineOem(html);
+  if (storyline && storyline.length >= 200 && storyline.length > (texto?.length ?? 0)) {
+    texto = recortar(storyline, maxChars);
+    metodo_texto = 'oem_storyline';
+  }
+
   const resumen = extraerResumen($, texto);
   const imagen = extraerImagen($, url);
   const autor = extraerAutor($);

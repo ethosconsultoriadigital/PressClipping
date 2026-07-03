@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { extractFromHtml, fetchAndExtract, normalizarUrlImagen, limpiarTextoExtraido, extraerCuerpoNota } from '../src/extractors/html.js';
+import { extractFromHtml, fetchAndExtract, normalizarUrlImagen, limpiarTextoExtraido, extraerCuerpoNota, extraerStorylineOem } from '../src/extractors/html.js';
 
 const PARRAFO = 'Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. ';
 
@@ -547,6 +547,101 @@ describe('extractFromHtml - recirculación OEM/El Sol (teasers de otras notas)',
   it('NO remueve el contenedor de grid que envuelve el cuerpo real (group-grid-*)', () => {
     const r = extractFromHtml(HTML_OEM, 'https://oem.com.mx/elsoldesanluis/local/clima-slp-1');
     expect((r.texto_nota_limpia ?? '').length).toBeGreaterThan(80);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cuerpo estructurado OEM/El Sol vía RSC (self.__next_f -> storyline_paragraph)
+// ---------------------------------------------------------------------------
+
+/**
+ * En OEM/El Sol el HTML renderizado solo trae el lead; el cuerpo completo viaja
+ * en el payload RSC como objetos `storyline_paragraph`. Los teasers de otras
+ * notas se renderizan como <p class="Typography..."> (NO son storyline), así
+ * que el extractor storyline los excluye por construcción.
+ *
+ * Este helper reproduce el patrón escapado tal como aparece en el HTML público:
+ * dentro de `self.__next_f.push([1,"...JSON escapado..."])`.
+ */
+function rscStoryline(paras: string[]): string {
+  const inner = paras
+    .map(
+      (p) =>
+        `{\\"type\\":\\"storyline_paragraph\\",\\"fields\\":{\\"paragraph\\":{\\"value\\":\\"${p}\\"}}}`,
+    )
+    .join(',');
+  return `<script>self.__next_f.push([1,"12:[${inner}]"])</script>`;
+}
+
+const OEM_BODY_1 =
+  'La Comisión Nacional del Agua informó que este fin de semana se esperan chubascos y lluvias fuertes en gran parte del estado por el paso de ondas tropicales.';
+const OEM_BODY_2 =
+  'En la capital potosina se prevé cielo nublado con temperatura mínima de once grados y máxima de veinticinco, además de rachas de viento de hasta veintiún kilómetros por hora.';
+const OEM_BODY_3 =
+  'Las autoridades de Protección Civil recomendaron a la población extremar precauciones, evitar cruzar zonas inundadas y mantenerse atentos a los avisos oficiales durante la temporada.';
+
+// HTML renderizado (solo lead corto) + teasers de otras notas (aranceles/alcohol)
+// + payload RSC con el cuerpo real completo.
+const HTML_OEM_RSC = `<!doctype html><html><head>
+  <meta property="og:title" content="Cielo nublado y fuertes lluvias, el clima del fin de semana en SLP">
+</head><body>
+  <main class="pages_main__dDN5U">
+    <article class="article-index_article__jyKgb">
+      <div class="Summary_summary__gpJTn"><p>Se esperan lluvias fuertes este fin de semana en San Luis Potosí.</p></div>
+      <div class="Teaser_wrapper__bPTQy"><p class="Typography-module__text-l">Empresarios esperan avances en la eliminación de aranceles del T-MEC para el sector de autopartes.</p></div>
+      <div class="Teaser_wrapper__bPTQy"><p class="Typography-module__text-l">El alcalde confirmó el cierre de establecimientos con venta de alcohol durante los festejos del domingo.</p></div>
+    </article>
+  </main>
+  ${rscStoryline([OEM_BODY_1, OEM_BODY_2, OEM_BODY_3, OEM_BODY_2])}
+</body></html>`;
+
+describe('extraerStorylineOem - cuerpo estructurado RSC', () => {
+  it('devuelve null en HTML que no es OEM (sin storyline_paragraph)', () => {
+    const html = `<html><body>${articulo()}</body></html>`;
+    expect(extraerStorylineOem(html)).toBeNull();
+  });
+
+  it('reconstruye el cuerpo desde storyline_paragraph', () => {
+    const cuerpo = extraerStorylineOem(HTML_OEM_RSC);
+    expect(cuerpo).toBeTruthy();
+    expect(cuerpo!).toContain('Comisión Nacional del Agua');
+    expect(cuerpo!).toContain('Protección Civil');
+  });
+
+  it('deduplica párrafos repetidos del payload (SSR + hidratación)', () => {
+    const cuerpo = extraerStorylineOem(HTML_OEM_RSC) ?? '';
+    const ocurrencias = cuerpo.split('cielo nublado con temperatura mínima').length - 1;
+    expect(ocurrencias).toBe(1);
+  });
+
+  it('NO incluye teasers de otras notas (aranceles/alcohol)', () => {
+    const cuerpo = (extraerStorylineOem(HTML_OEM_RSC) ?? '').toLowerCase();
+    expect(cuerpo).not.toContain('aranceles');
+    expect(cuerpo).not.toContain('alcohol');
+  });
+});
+
+describe('extractFromHtml - prefiere cuerpo storyline OEM sobre el lead del DOM', () => {
+  it('usa metodo_texto oem_storyline cuando el cuerpo estructurado es más completo', () => {
+    const r = extractFromHtml(HTML_OEM_RSC, 'https://oem.com.mx/elsoldesanluis/local/clima-slp-1');
+    expect(r.metodo_texto).toBe('oem_storyline');
+    expect((r.texto_cuerpo_nota ?? '').length).toBeGreaterThan(300);
+  });
+
+  it('el cuerpo final contiene la nota real y excluye aranceles/alcohol de teasers', () => {
+    const r = extractFromHtml(HTML_OEM_RSC, 'https://oem.com.mx/elsoldesanluis/local/clima-slp-1');
+    const cuerpo = (r.texto_cuerpo_nota ?? '').toLowerCase();
+    expect(cuerpo).toContain('comisión nacional del agua');
+    expect(cuerpo).not.toContain('aranceles');
+    expect(cuerpo).not.toContain('venta de alcohol');
+    expect(['alta', 'media']).toContain(r.calidad_extraccion);
+  });
+
+  it('no altera medios no-OEM: sigue usando la cascada DOM normal', () => {
+    const html = `<html><body>${articulo()}</body></html>`;
+    const r = extractFromHtml(html, 'https://otromedio.mx/x');
+    expect(r.metodo_texto).toBe('html_article');
+    expect(r.texto_extraido).toContain('Lorem ipsum');
   });
 });
 
