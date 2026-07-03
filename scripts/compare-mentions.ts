@@ -150,21 +150,29 @@ async function cargarNoticiasDiagnostico(
   noticiaIds: string[],
 ): Promise<Set<string>> {
   if (noticiaIds.length === 0) return new Set();
-  const { data, error } = await sb
-    .from('noticias')
-    .select('noticia_id, origen_cobertura')
-    .in('noticia_id', noticiaIds)
-    .neq('origen_cobertura', 'ethos_organico');
+  // Batching: un solo .in() con miles de ids desborda el largo de la URL de
+  // PostgREST y provoca "fetch failed". Consultamos en lotes acotados.
+  const TAM_LOTE = 200;
+  const resultado = new Set<string>();
+  for (let i = 0; i < noticiaIds.length; i += TAM_LOTE) {
+    const lote = noticiaIds.slice(i, i + TAM_LOTE);
+    const { data, error } = await sb
+      .from('noticias')
+      .select('noticia_id, origen_cobertura')
+      .in('noticia_id', lote)
+      .neq('origen_cobertura', 'ethos_organico');
 
-  if (error) {
-    // Columna inexistente (migración 0012 pendiente) → no filtrar nada.
-    if (error.message.includes('origen_cobertura') || error.code === '42703') {
-      logger.warn({}, 'Columna origen_cobertura no existe aún (migración 0012 pendiente). Contando todo como orgánico.');
-      return new Set();
+    if (error) {
+      // Columna inexistente (migración 0012 pendiente) → no filtrar nada.
+      if (error.message.includes('origen_cobertura') || error.code === '42703') {
+        logger.warn({}, 'Columna origen_cobertura no existe aún (migración 0012 pendiente). Contando todo como orgánico.');
+        return new Set();
+      }
+      throw new Error(`Error al cargar origen_cobertura: ${error.message}`);
     }
-    throw new Error(`Error al cargar origen_cobertura: ${error.message}`);
+    for (const r of data ?? []) resultado.add(r.noticia_id as string);
   }
-  return new Set((data ?? []).map(r => r.noticia_id as string));
+  return resultado;
 }
 
 async function cargarPressClipping(

@@ -37,6 +37,7 @@
     "diagnose-gaps": "tsx scripts/diagnose-comparison-gaps.ts",
     "diagnose-url": "tsx scripts/diagnose-url-extraction.ts",
     "audit-media-sources": "tsx scripts/audit-media-sources.ts",
+    "update-media-coverage-results": "tsx scripts/update-media-coverage-results.ts",
     "import-pc-media-catalog": "tsx scripts/import-pressclipping-media-catalog.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
