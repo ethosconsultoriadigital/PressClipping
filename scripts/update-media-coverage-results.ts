@@ -38,7 +38,28 @@ const COLUMNAS_LOTE = [
   'fp_estimado',
   'decision_detect',
   'recomendacion_siguiente',
+  'recomendacion_cron',
 ];
+
+/**
+ * Recomendación de cron por medio tras el dedupe de cobertura (FASE dedupe):
+ *   MANTENER_CRON_EXISTENTE     → ya cubierto por base/nacional B/crisis.
+ *   CANDIDATO_CRON_DIARIO_SHADOW→ net-new validado (Zeta, Revista Espejo).
+ *   EXCLUIR_BOILERPLATE         → MED-0118 El Respetable (extractor a reparar).
+ *   REVISAR_MANUAL              → sin detección estable / fuera de cron por ahora.
+ */
+const RECOMENDACION_CRON: Record<string, string> = {
+  'MED-0148': 'MANTENER_CRON_EXISTENTE', 'MED-0153': 'MANTENER_CRON_EXISTENTE',
+  'MED-0154': 'MANTENER_CRON_EXISTENTE', 'MED-0155': 'MANTENER_CRON_EXISTENTE',
+  'MED-0160': 'MANTENER_CRON_EXISTENTE', 'MED-0166': 'MANTENER_CRON_EXISTENTE',
+  'MED-0167': 'MANTENER_CRON_EXISTENTE',
+  'MED-0083': 'CANDIDATO_CRON_DIARIO_SHADOW', 'MED-0066': 'CANDIDATO_CRON_DIARIO_SHADOW',
+  'MED-0118': 'EXCLUIR_BOILERPLATE',
+  'MED-0014': 'REVISAR_MANUAL', 'MED-0026': 'REVISAR_MANUAL', 'MED-0039': 'REVISAR_MANUAL',
+  'MED-0041': 'REVISAR_MANUAL', 'MED-0086': 'REVISAR_MANUAL', 'MED-0099': 'REVISAR_MANUAL',
+  'MED-0106': 'REVISAR_MANUAL', 'MED-0142': 'REVISAR_MANUAL', 'MED-0146': 'REVISAR_MANUAL',
+  'MED-0149': 'REVISAR_MANUAL',
+};
 
 // ---------------------------------------------------------------------------
 // Lote B — detalle por medio (medido en esta sesión)
@@ -99,6 +120,7 @@ function row(
     fp_estimado: fp,
     decision_detect: decision,
     recomendacion_siguiente: recomendacion,
+    recomendacion_cron: RECOMENDACION_CRON[medio_id] ?? 'REVISAR_MANUAL',
   };
 }
 

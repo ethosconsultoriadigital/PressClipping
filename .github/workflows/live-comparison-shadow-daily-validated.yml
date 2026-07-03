@@ -1,0 +1,91 @@
+# ============================================================================
+# LIVE COMPARISON — TIER DAILY VALIDATED (shadow, diario, desfasado)
+# ----------------------------------------------------------------------------
+# WORKFLOW ACTIVO EN MODO SOMBRA (NO producción), SEPARADO del shadow base, del
+# tier nacional B y del tier crisis.
+#
+# Procesa SOLO medios VALIDADOS NET-NEW (no cubiertos por ningún otro cron) con
+# pipeline AISLADO por medio_id. Hoy: Zeta Tijuana (MED-0083) y Revista Espejo
+# (MED-0066), validados en el Lote B con detección CLI-0003 laboral limpia.
+#
+# Dedupe estructural: run-shadow-daily-validated-tier.ts usa mediosDailyNetNew(),
+# que excluye cualquier medio ya cubierto por base/nacional B/crisis. Si no hay
+# medios net-new, el script ABORTA sin escribir.
+#
+# Por código impide: export-results · generate-xml · classify-ia · export-raw-news
+# · WhatsApp/correos/Twilio/Gmail/SMTP. NO toca 01_Noticias_Raw / 02_Menciones /
+# 04_Logs. NO integra alertas reales. NO cambia clientes.alertas_activas.
+#
+# Gate de detect real: potenciales<=100, sin flood, sin boilerplate; las puertas
+# contextuales CLI-0002/CLI-0003 se aplican dentro del matcher. Si el gate falla,
+# NO hay detect real ni comparativo; se registra decision_detect=SKIP_GATE_FAILED
+# en 08_Cobertura_Medios.
+#
+# CONCURRENCY: comparte grupo con el shadow base, nacional B y crisis
+# (`live-comparison-shadow`) para que NUNCA dos workflows escriban 05/07 a la vez.
+# cancel-in-progress=false → si otro está corriendo, este se ENCOLA. El cron va al
+# minuto ':45' una vez al día para desfasarse del base (':00' cada 2h), del crisis
+# (':15' cada 6h) y del nacional B (':30' cada 6h).
+#
+# Secrets requeridos (Settings → Secrets and variables → Actions):
+#   SUPABASE_URL · SUPABASE_SERVICE_ROLE_KEY · GOOGLE_SERVICE_ACCOUNT_EMAIL ·
+#   GOOGLE_PRIVATE_KEY · GOOGLE_OUTPUT_SHEET_ID (fallback GOOGLE_SHEET_ID)
+# ============================================================================
+name: live-comparison-shadow-daily-validated
+
+on:
+  schedule:
+    - cron: '45 12 * * *'   # diario, 12:45 UTC (mañana en México), desfasado de base/crisis/nacional B
+  workflow_dispatch:
+    inputs:
+      window_hours:
+        description: 'Tamaño de la ventana móvil en horas.'
+        required: false
+        default: '48'
+
+concurrency:
+  group: live-comparison-shadow   # MISMO grupo que base/nacional B/crisis → lock compartido de 05/07
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Shadow daily-validated tier (net-new, aislado por medio, sin envíos)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+      GOOGLE_OUTPUT_SHEET_ID: ${{ secrets.GOOGLE_OUTPUT_SHEET_ID }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      LOG_FORMAT: json
+      RUN_BY: github-actions-shadow-daily-validated
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'   # Node 20: OAuth de Google Sheets funciona; Supabase usa el polyfill ws
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Shadow daily-validated tier (ventana móvil 48h, net-new, sin envíos)
+        # Node 20: inyecta WebSocket global (ws) para Supabase; IPv4 por runners sin IPv6.
+        # El no-envío se garantiza con --no-send --no-whatsapp --no-email + guardas de código.
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+        run: |
+          WINDOW="${{ github.event.inputs.window_hours || '48' }}"
+          npm run shadow-daily-validated-tier -- \
+            --window-hours=$WINDOW \
+            --max-notas=30 \
+            --output=sheet \
+            --append-metrics-history \
+            --no-export-results \
+            --no-generate-xml \
+            --no-send \
+            --no-whatsapp \
+            --no-email

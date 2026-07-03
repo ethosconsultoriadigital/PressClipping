@@ -126,3 +126,75 @@ export const SHADOW_MEDIOS_CRISIS: readonly ShadowMedioCrisis[] = [
 export function mediosCrisisActivos(): ShadowMedioCrisis[] {
   return SHADOW_MEDIOS_CRISIS.filter((m) => m.activo_shadow);
 }
+
+// ============================================================================
+// TIER DAILY VALIDATED — cron sombra diario de medios VALIDADOS net-new.
+// ----------------------------------------------------------------------------
+// Bloque SEPARADO de SHADOW_MEDIOS (base), nacional B y crisis. Solo entran
+// medios que en un lote de extracción tuvieron:
+//   - READY + texto BUENO/EXCELENTE
+//   - detección real limpia (FP estimado aceptable, sin flood, sin boilerplate)
+//   - y que NO están cubiertos por ningún otro cron (net-new).
+//
+// La función `mediosDailyNetNew()` deduplica ESTRUCTURALMENTE contra las tres
+// capas existentes: aunque alguien liste aquí un medio ya cubierto, el tier lo
+// filtra y nunca lo crawlea dos veces por cron.
+//
+// Origen (Lote B, 2026-07-03): Zeta Tijuana (MED-0083) y Revista Espejo
+// (MED-0066) — ambos net-new, EXCELENTE, detección CLI-0003 laboral limpia.
+// ============================================================================
+
+export type FuenteDaily = 'auto' | 'rss' | 'sitemap';
+
+export interface ShadowMedioDaily {
+  medio_id: string;
+  nombre: string;
+  /** Fuente para el crawl del tier. 'auto' = cascada configurada del medio. */
+  fuente: FuenteDaily;
+  /** Tope superior de notas por corrida para este medio (política de tier). */
+  max_notas_shadow: number;
+  activo_shadow: boolean;
+}
+
+export const SHADOW_MEDIOS_DAILY_VALIDATED: readonly ShadowMedioDaily[] = [
+  {
+    medio_id: 'MED-0083',
+    nombre: 'Zeta Tijuana',
+    fuente: 'auto',
+    max_notas_shadow: 30,
+    activo_shadow: true,
+  },
+  {
+    medio_id: 'MED-0066',
+    nombre: 'Revista Espejo',
+    fuente: 'auto',
+    max_notas_shadow: 30,
+    activo_shadow: true,
+  },
+] as const;
+
+/**
+ * Conjunto de medio_id YA cubiertos por algún cron sombra existente
+ * (base + nacional B + crisis). Fuente de verdad para el dedupe.
+ */
+export function mediosYaCubiertosPorCron(): Set<string> {
+  const s = new Set<string>(SHADOW_MEDIOS);
+  for (const m of SHADOW_MEDIOS_NACIONALES_B) s.add(m.medio_id);
+  for (const m of SHADOW_MEDIOS_CRISIS) s.add(m.medio_id);
+  return s;
+}
+
+/** medio_id (config) activos del tier daily-validated. */
+export function mediosDailyValidatedActivos(): ShadowMedioDaily[] {
+  return SHADOW_MEDIOS_DAILY_VALIDATED.filter((m) => m.activo_shadow);
+}
+
+/**
+ * Medios NET-NEW del tier daily-validated: activos y NO cubiertos por ningún
+ * otro cron. Deduplicación estructural: garantiza que el tier nunca crawlee por
+ * cron un medio ya cubierto por base/nacional B/crisis.
+ */
+export function mediosDailyNetNew(): ShadowMedioDaily[] {
+  const cubiertos = mediosYaCubiertosPorCron();
+  return mediosDailyValidatedActivos().filter((m) => !cubiertos.has(m.medio_id));
+}
