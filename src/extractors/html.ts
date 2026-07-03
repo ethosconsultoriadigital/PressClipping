@@ -95,6 +95,27 @@ const MARCADORES_CORTE = [
   'últimas noticias',
   'noticias relacionadas',
   'relacionadas',
+  'lo mas visto',
+  'lo + visto',
+  'lo+visto',
+  'lo mas leido',
+  'mas leidas',
+  'lo mas reciente',
+  'lo + reciente',
+  'lo+reciente',
+  'te recomendamos',
+  'te puede interesar',
+  'no te pierdas',
+  'sigue leyendo',
+  'lee tambien',
+  'lee también',
+  'tambien lee',
+  'también lee',
+  'tambien puedes leer',
+  'también puedes leer',
+  'columnas',
+  'cartones',
+  'newsletter',
   'derechos reservados',
   'aviso de privacidad',
   'aviso legal',
@@ -145,6 +166,9 @@ const PATRONES_PROMO = [
   /wa\.me\//i,
   // CTA de seguir en redes ("Sigue nuestras/también las noticias ... en TikTok")
   /^sigue\s+(nuestras|tambi[eé]n|nuestro|las)\b.*\b(tiktok|facebook|instagram|whatsapp|telegram|x|twitter|google\s*news)\b/i,
+  // CTA de newsletter OEM ("¿Te quedas fuera de la conversación? Mandamos a tu correo…")
+  /te quedas fuera de la conversaci[oó]n/i,
+  /mandamos a tu correo el mejor resumen/i,
 ];
 
 /**
@@ -420,8 +444,29 @@ const CONTENEDORES_ARTICULO = [
   '.content-body',
 ];
 
-/** Elementos de "ruido" que nunca aportan al cuerpo de la nota. */
-const RUIDO = 'script, style, noscript, nav, header, footer, aside, form, iframe, .ad, .ads, .advertisement, .publicidad, .related, .relacionadas, .newsletter, .social, .share, .comments, figure figcaption';
+/**
+ * Elementos de "ruido" que nunca aportan al cuerpo de la nota.
+ *
+ * Incluye selectores por SUBcadena de clase (`[class*="..."]`) para atrapar
+ * módulos de recirculación de CMS modernos (Next.js/CSS-modules con clases
+ * con hash, p. ej. OEM/El Sol: `Teaser_wrapper__x`, `widget-newsletter-...`).
+ * Estos bloques insertan teasers/resúmenes de OTRAS notas dentro del contenedor
+ * del artículo y contaminan el cuerpo.
+ *
+ * IMPORTANTE: los selectores por subcadena deben ser ESPECÍFICos de módulos de
+ * recirculación (teaser/newsletter/recirculation), nunca del sistema de grid
+ * (p. ej. `group-grid-*` envuelve TAMBIÉN el cuerpo real y no debe removerse).
+ */
+const RUIDO = [
+  'script', 'style', 'noscript', 'nav', 'header', 'footer', 'aside', 'form', 'iframe',
+  '.ad', '.ads', '.advertisement', '.publicidad',
+  '.related', '.relacionadas', '.newsletter', '.social', '.share', '.comments',
+  'figure figcaption',
+  // Módulos de recirculación por subcadena de clase (mayúsc./minúsc.).
+  '[class*="teaser"]', '[class*="Teaser"]',
+  '[class*="recircul"]', '[class*="Recircul"]',
+  '[class*="widget-newsletter"]', '[class*="newsletter-widget"]',
+].join(', ');
 
 function limpiarTexto(s: string): string {
   return s.replace(/\s+/g, ' ').trim();

@@ -85,7 +85,7 @@ describe('CLI-0002 comercio DEBE pasar (con contexto bebidas)', () => {
   const casos: [string, Partial<Record<string, string>>][] = [
     ['T-MEC', { titulo: 'T-MEC y la exportación de tequila a EU' }],
     ['aranceles', { titulo: 'Aranceles al tequila preocupan a la industria' }],
-    ['comercio exterior', { titulo: 'Comercio exterior', texto: 'la industria tequilera exporta más' }],
+    ['comercio exterior', { titulo: 'Comercio exterior del tequila mexicano', texto: 'la industria tequilera exporta más' }],
     ['exportaciones', { titulo: 'Exportaciones de mezcal rompen récord' }],
     ['aranceles', { titulo: 'Bacardí y Patrón ante nuevos aranceles' }],
     ['T-MEC', { titulo: 'El agave y el T-MEC: futuro del sector' }],
@@ -95,6 +95,55 @@ describe('CLI-0002 comercio DEBE pasar (con contexto bebidas)', () => {
     it(`pasa "${kw}" en: ${parts.titulo}`, () => {
       const res = matchKeyword(reglaComercio(kw), campos(parts));
       expect(res).not.toBeNull();
+    });
+  }
+});
+
+describe('CLI-0002 comercio proximidad — DEBE bloquear (bebida lejana / boilerplate)', () => {
+  // La keyword comercial y el contexto de bebidas coexisten en el cuerpo pero
+  // NO en el mismo campo/proximidad: es contaminación de relacionadas/otras notas.
+  // Bloque digest: "aranceles" al inicio y "alcohol" al final, separados por
+  // >250 caracteres de relleno sin bebidas (simula teasers de otras notas).
+  const digest =
+    'Empresarios destacan que la continuidad del tratado brinda certidumbre para los contratos de autopartes y esperan avances en la eliminación de aranceles. ' +
+    'El Observatorio Indígena Mesoamericano acusó al Ministerio Público por un terreno en disputa que un juez federal ordenó devolver a familias desalojadas. ' +
+    'La iniciativa del diputado busca actualizar la ley de 2017 y establecer un registro oficial para mejorar la atención de personas con autismo en el estado. ' +
+    'Vecinos denuncian aumentos en la tarifa del agua pese a la falta de suministro regular en varias colonias de la zona metropolitana. ' +
+    'El alcalde solicitará el cierre de establecimientos con venta de alcohol durante los festejos patronales.';
+
+  const casos: [string, Partial<Record<string, string>>][] = [
+    ['aranceles', { titulo: 'Cielo nublado y fuertes lluvias, el clima del fin de semana en SLP', texto: digest }],
+    ['aranceles', { titulo: 'Vecinos denuncian aumento en la tarifa del agua', texto: digest }],
+    ['T-MEC', { titulo: 'Congreso concluye periodo ordinario con contrastes', texto: digest }],
+  ];
+  for (const [kw, parts] of casos) {
+    it(`bloquea "${kw}" (bebida lejana) en: ${parts.titulo}`, () => {
+      expect(matchKeyword(reglaComercio(kw), campos(parts))).toBeNull();
+      const p = pasaPuertaContextualClienteKeyword({
+        cliente_id: 'CLI-0002', keyword: kw,
+        texto: `${parts.titulo}\n${parts.texto}`,
+        titulo: parts.titulo, cuerpo: parts.texto, terminos: [kw],
+      });
+      expect(p.pasa).toBe(false);
+      expect(p.razon).toBe('contexto_bebidas_no_cercano');
+    });
+  }
+});
+
+describe('CLI-0002 comercio proximidad — DEBE pasar (bebida cercana / mismo campo)', () => {
+  const casos: [string, Partial<Record<string, string>>][] = [
+    // proximidad en cuerpo (misma oración)
+    ['aranceles', { titulo: 'Industria potosina en alerta', texto: 'La industria tequilera teme nuevos aranceles al tequila por parte de EU.' }],
+    // frase explícita
+    ['exportaciones', { titulo: 'Sector bebidas', texto: 'Crecen las exportaciones de tequila pese al entorno.' }],
+    // bebida en título + keyword en cuerpo
+    ['aranceles', { titulo: 'El tequila mexicano ante nuevos gravámenes', texto: 'Los aranceles anunciados golpean al sector.' }],
+    // keyword + bebida en título
+    ['T-MEC', { titulo: 'T-MEC y el mezcal: futuro del sector', texto: 'Análisis del tratado.' }],
+  ];
+  for (const [kw, parts] of casos) {
+    it(`pasa "${kw}" (bebida cercana) en: ${parts.titulo}`, () => {
+      expect(matchKeyword(reglaComercio(kw), campos(parts))).not.toBeNull();
     });
   }
 });

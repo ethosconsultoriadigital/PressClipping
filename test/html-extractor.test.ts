@@ -485,6 +485,71 @@ describe('extractFromHtml - teaser de relacionados incrustado (El Otro Enfoque)'
   });
 });
 
+// Estructura tipo OEM/El Sol (Next.js/CSS-modules): el cuerpo real vive en un
+// wrapper de grid (group-grid-*) y los teasers de otras notas viven en módulos
+// Teaser_* con headings "Más Noticias"/"LO+RECIENTE" y un widget de newsletter.
+const HTML_OEM = `<!doctype html><html><head>
+  <meta property="og:title" content="Cielo nublado y fuertes lluvias, el clima del fin de semana en SLP">
+</head><body>
+  <main class="pages_main__dDN5U">
+    <article class="article-index_article__jyKgb">
+      <div>
+        <div class="group-grid-wrapper_wrapper__zwlUo">
+          <div class="group-grid-content_content__WMMF5">
+            <div class="group-grid-article_article__ZsfO">
+              <div class="Summary_summary__gpJTn">
+                <p>Se esperan hasta 75 mm de lluvia acumulada en la Huasteca Potosina y posibilidad de granizo en el centro del país. La capital tendrá temperaturas entre 11 y 25 grados del 3 al 5 de julio.</p>
+              </div>
+            </div>
+          </div>
+          <div class="group-grid-wrapper_title__TH3SO"><h2>Más Noticias</h2></div>
+          <div class="Teaser_teaser-inline__q3siv Teaser_teaser__Lkcni">
+            <div class="Teaser_wrapper__bPTQy Teaser_order-2__tc0VS">
+              <p>Empresarios destacan que la continuidad del tratado brinda certidumbre para los contratos de autopartes y esperan avances en la eliminación de aranceles.</p>
+            </div>
+          </div>
+          <div class="Teaser_teaser-inline__q3siv Teaser_teaser__Lkcni">
+            <div class="Teaser_wrapper__bPTQy Teaser_order-2__tc0VS">
+              <p>El alcalde capitalino aseguró que se solicitará el cierre de establecimientos con venta de alcohol durante los festejos.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="widget-newsletter-default_newsletter__qKuNL">
+        <p>¿Te quedas fuera de la conversación? Mandamos a tu correo el mejor resumen informativo.</p>
+      </div>
+    </article>
+  </main>
+</body></html>`;
+
+describe('extractFromHtml - recirculación OEM/El Sol (teasers de otras notas)', () => {
+  it('remueve los teasers de otras notas (aranceles/alcohol de notas ajenas)', () => {
+    const r = extractFromHtml(HTML_OEM, 'https://oem.com.mx/elsoldesanluis/local/clima-slp-1');
+    const cuerpo = (r.texto_cuerpo_nota ?? '').toLowerCase();
+    const limpio = (r.texto_nota_limpia ?? '').toLowerCase();
+    expect(cuerpo).not.toContain('aranceles');
+    expect(cuerpo).not.toContain('alcohol');
+    expect(limpio).not.toContain('aranceles');
+    expect(limpio).not.toContain('venta de alcohol');
+  });
+
+  it('conserva el cuerpo real de la nota (el lead del clima)', () => {
+    const r = extractFromHtml(HTML_OEM, 'https://oem.com.mx/elsoldesanluis/local/clima-slp-1');
+    expect(r.texto_nota_limpia).toContain('Se esperan hasta 75 mm de lluvia');
+    expect(r.texto_nota_limpia).toContain('temperaturas entre 11 y 25 grados');
+  });
+
+  it('remueve el CTA de newsletter OEM', () => {
+    const r = extractFromHtml(HTML_OEM, 'https://oem.com.mx/elsoldesanluis/local/clima-slp-1');
+    expect(r.texto_nota_limpia).not.toContain('Mandamos a tu correo el mejor resumen');
+  });
+
+  it('NO remueve el contenedor de grid que envuelve el cuerpo real (group-grid-*)', () => {
+    const r = extractFromHtml(HTML_OEM, 'https://oem.com.mx/elsoldesanluis/local/clima-slp-1');
+    expect((r.texto_nota_limpia ?? '').length).toBeGreaterThan(80);
+  });
+});
+
 describe('fetchAndExtract', () => {
   const realFetch = globalThis.fetch;
 

@@ -14,7 +14,7 @@
  * NO afecta a keywords de crisis directa de bebidas (tequila adulterado, metanol,
  * etc.), que llevan su propio contexto de bebidas y por tanto pasan.
  */
-import { foldText, anyWordPresent } from '../matchers/text.js';
+import { foldText, anyWordPresent, escapeRegex } from '../matchers/text.js';
 
 /** Keywords comerciales amplias que, para CLI-0002, exigen contexto de bebidas. */
 export const KEYWORDS_COMERCIO_AMPLIAS: string[] = [
@@ -63,6 +63,99 @@ export function tieneContextoBebidas(texto: string): boolean {
 /** ¿El texto denota una crisis directa de bebidas/alcohol adulterado? */
 export function esCrisisBebidasDirecta(texto: string): boolean {
   return anyWordPresent(CRISIS_BEBIDAS_DIRECTA, foldText(texto));
+}
+
+/** Ventana (en caracteres) para exigir proximidad keyword-comercio ↔ bebidas. */
+export const VENTANA_PROXIMIDAD_BEBIDAS = 250;
+
+/**
+ * Frases que unen explícitamente comercio + bebidas: si aparecen en cualquier
+ * parte (título o cuerpo), la puerta se abre aunque no haya proximidad exacta.
+ */
+export const FRASES_COMERCIO_BEBIDAS: string[] = [
+  'arancel al tequila', 'aranceles al tequila', 'arancel al mezcal', 'aranceles al mezcal',
+  'arancel a bebidas alcoholicas', 'aranceles a bebidas alcoholicas',
+  'arancel a las bebidas alcoholicas', 'aranceles a las bebidas alcoholicas',
+  'exportacion de tequila', 'exportaciones de tequila', 'exportacion de mezcal', 'exportaciones de mezcal',
+  'comercio exterior de bebidas alcoholicas', 'comercio exterior de tequila', 'comercio exterior de mezcal',
+  'industria tequilera ante aranceles', 'industria tequilera ante el t-mec',
+  'industria tequilera ante la revision del t-mec',
+  't-mec y tequila', 'tmec y tequila', 't-mec y el tequila', 't-mec y el mezcal',
+];
+
+/** Posiciones (índices) de todas las apariciones (límite de palabra) de los términos. */
+function posicionesTerminos(foldedTexto: string, terminos: string[]): number[] {
+  const out: number[] = [];
+  for (const raw of terminos) {
+    const term = foldText(raw).trim();
+    if (!term) continue;
+    const pat = escapeRegex(term).replace(/\s+/g, '\\s+');
+    const re = new RegExp(`(?<![\\p{L}\\p{N}])${pat}(?![\\p{L}\\p{N}])`, 'giu');
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(foldedTexto)) !== null) {
+      out.push(m.index);
+      if (m.index === re.lastIndex) re.lastIndex++;
+    }
+  }
+  return out;
+}
+
+/** ¿Hay una aparición de `ctx` a ≤ ventana caracteres de alguna de `clave`? */
+function hayProximidad(
+  foldedTexto: string,
+  clave: string[],
+  ctx: string[],
+  ventana: number,
+): boolean {
+  const posClave = posicionesTerminos(foldedTexto, clave);
+  if (posClave.length === 0) return false;
+  const posCtx = posicionesTerminos(foldedTexto, ctx);
+  if (posCtx.length === 0) return false;
+  for (const k of posClave) {
+    for (const c of posCtx) {
+      if (Math.abs(c - k) <= ventana) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Puerta de proximidad CLI-0002 comercio↔bebidas. La keyword comercial amplia
+ * solo pasa si el contexto de bebidas está semánticamente cerca, no en bloques
+ * de relacionadas/trending/otras notas. Abre si:
+ *   1. El título contiene keyword comercial Y contexto de bebidas.
+ *   2. El título contiene contexto de bebidas Y el cuerpo contiene la keyword.
+ *   3. Dentro del título o del cuerpo, la keyword y una bebida están a ≤ventana.
+ *   4. Aparece una frase explícita que une comercio + bebidas.
+ */
+export function tieneContextoBebidasCercano(
+  titulo: string,
+  cuerpo: string,
+  terminosKeyword: string[],
+  ventana: number = VENTANA_PROXIMIDAD_BEBIDAS,
+): boolean {
+  const fTit = foldText(titulo);
+  const fCue = foldText(cuerpo);
+  const full = `${fTit}\n${fCue}`;
+
+  // 4. Frase explícita comercio+bebidas en cualquier parte.
+  for (const frase of FRASES_COMERCIO_BEBIDAS) {
+    if (full.includes(foldText(frase))) return true;
+  }
+
+  const kwEnTitulo = anyWordPresent(terminosKeyword, fTit);
+  const kwEnCuerpo = anyWordPresent(terminosKeyword, fCue);
+  const bebEnTitulo = anyWordPresent(CONTEXTO_BEBIDAS, fTit);
+
+  // 1. Keyword + bebida en el título.
+  if (kwEnTitulo && bebEnTitulo) return true;
+  // 2. Bebida en el título + keyword en el cuerpo (título ancla el tema).
+  if (bebEnTitulo && kwEnCuerpo) return true;
+  // 3. Proximidad dentro del título o del cuerpo.
+  if (hayProximidad(fTit, terminosKeyword, CONTEXTO_BEBIDAS, ventana)) return true;
+  if (hayProximidad(fCue, terminosKeyword, CONTEXTO_BEBIDAS, ventana)) return true;
+
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,8 +229,14 @@ export function esOffTopicLaboral(texto: string): boolean {
 export interface PuertaContextualInput {
   cliente_id: string | null;
   keyword: string;
-  /** Título + texto limpio (crudo, sin plegar). */
+  /** Título + texto limpio (crudo, sin plegar). Compat: si no se dan titulo/cuerpo. */
   texto: string;
+  /** Título de la nota (para reglas de proximidad/campo). */
+  titulo?: string;
+  /** Cuerpo útil (resumen + texto extraído) para reglas de proximidad. */
+  cuerpo?: string;
+  /** Términos de la keyword (keyword + alias) para localizar el match. */
+  terminos?: string[];
 }
 
 export interface PuertaContextualResultado {
@@ -171,9 +270,16 @@ export function pasaPuertaContextualClienteKeyword(
   input: PuertaContextualInput,
 ): PuertaContextualResultado {
   if (input.cliente_id === 'CLI-0002' && esKeywordComercioAmpliaCli0002(input.keyword)) {
-    if (esCrisisBebidasDirecta(input.texto) || tieneContextoBebidas(input.texto)) {
-      return { pasa: true };
-    }
+    const titulo = input.titulo ?? input.texto;
+    const cuerpo = input.cuerpo ?? input.texto;
+    const terminos = input.terminos ?? [input.keyword];
+    const full = `${titulo}\n${cuerpo}`;
+    // Crisis directa de bebidas (metanol, adulterado…) siempre pasa.
+    if (esCrisisBebidasDirecta(full)) return { pasa: true };
+    // Contexto de bebidas CERCANO (mismo campo/proximidad/frase explícita).
+    if (tieneContextoBebidasCercano(titulo, cuerpo, terminos)) return { pasa: true };
+    // Falla: distinguir si hay bebida lejana (boilerplate) o no hay bebida.
+    if (tieneContextoBebidas(full)) return { pasa: false, razon: 'contexto_bebidas_no_cercano' };
     return { pasa: false, razon: 'contexto_bebidas_ausente' };
   }
   if (input.cliente_id === 'CLI-0003' && esKeywordLaboralAmpliaCli0003(input.keyword)) {

@@ -110,11 +110,19 @@ export function matchKeyword(
     .filter((c) => c.nombre !== 'medio')
     .map((c) => c.texto)
     .join('\n');
+  const tituloContexto = campos.find((c) => c.nombre === 'titulo')?.texto ?? '';
+  const cuerpoContexto = campos
+    .filter((c) => c.nombre === 'subtitulo' || c.nombre === 'resumen' || c.nombre === 'seccion' || c.nombre === 'texto_extraido')
+    .map((c) => c.texto)
+    .join('\n');
   if (
     !pasaPuertaContextualClienteKeyword({
       cliente_id: rule.cliente_id,
       keyword: rule.keyword,
       texto: textoContexto,
+      titulo: tituloContexto,
+      cuerpo: cuerpoContexto,
+      terminos: rule.terminos,
     }).pasa
   ) {
     return null;
