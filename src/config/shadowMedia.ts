@@ -91,11 +91,18 @@ export function mediosNacionalesActivos(tier: 'B' = 'B'): ShadowMedioNacional[] 
 // donde el BACKFILL POR SITEMAP recuperó notas de crisis (tequila/alcohol
 // adulterado) que el RSS ya había rotado, con precisión alta y FP ~0.
 //
-// Inicia SOLO con UNO MAS UNO (MED-0170): el sitemap recuperó crisis real, con
-// 3 P1 y 0 FP. Usa fuente=sitemap (no RSS) porque el RSS pierde las notas antes
-// de crawlear. NO incluye El Otro Enfoque (MED-0171) todavía (su extracción se
-// acaba de limpiar; requiere 1–2 ciclos de validación). NO incluye El Sol de
-// Irapuato (sin sitemap propio). NO integra alertas.
+// Miembros:
+//   - UNO MAS UNO (MED-0170): el sitemap recuperó crisis real, con 3 P1 y 0 FP.
+//     Usa fuente=sitemap (no RSS) porque el RSS pierde las notas antes de crawlear.
+//   - El Sol de Irapuato (MED-0169): red OEM/El Sol; el extractor storyline
+//     recuperó cuerpos completos y el re-detect dirigido validó crisis CLI-0002
+//     real (alcohol/tequila adulterado, +12 menciones, 11 P1 shadow, FP ~8%).
+//     Usa fuente=RSS (OEM público); NO tiene sitemap propio → NUNCA forzar sitemap.
+//
+// Cada medio se crawlea con SU fuente_preferida (loop por medio); no se fuerza
+// una única fuente global. NO incluye El Otro Enfoque (MED-0171) todavía (su
+// extracción se acaba de limpiar; requiere 1–2 ciclos de validación). NO integra
+// alertas reales (solo observación shadow-alerts).
 // ============================================================================
 
 export type FuenteShadow = 'rss' | 'sitemap';
@@ -118,6 +125,14 @@ export const SHADOW_MEDIOS_CRISIS: readonly ShadowMedioCrisis[] = [
     fuente_preferida: 'sitemap',
     frecuencia_shadow: '6h',
     max_notas_shadow: 80,
+    activo_shadow: true,
+  },
+  {
+    medio_id: 'MED-0169',
+    nombre: 'El Sol de Irapuato',
+    fuente_preferida: 'rss',
+    frecuencia_shadow: '6h',
+    max_notas_shadow: 60,
     activo_shadow: true,
   },
 ] as const;

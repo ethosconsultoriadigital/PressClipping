@@ -1,7 +1,8 @@
 /**
  * Tests del TIER CRISIS sombra:
- *   - config contiene solo UNO MAS UNO (MED-0170), fuente=sitemap.
- *   - NO incluye El Otro Enfoque (MED-0171) ni El Sol de Irapuato (MED-0169).
+ *   - config contiene UNO MAS UNO (MED-0170, sitemap) y El Sol de Irapuato (MED-0169, rss).
+ *   - fuente POR MEDIO: MED-0170 usa sitemap, MED-0169 usa rss (nunca forzar sitemap).
+ *   - NO incluye El Otro Enfoque (MED-0171).
  *   - flags prohibidos siguen bloqueados por la guarda sombra.
  *   - notas de trazabilidad incluyen workflow/tier/medios/fuente/frecuencia.
  *   - el workflow crisis existe, comparte concurrency, cron cada 6h al minuto 15 y sin comandos prohibidos.
@@ -12,19 +13,19 @@ import { join } from 'node:path';
 import {
   SHADOW_MEDIOS_CRISIS,
   mediosCrisisActivos,
+  mediosYaCubiertosPorCron,
 } from '../src/config/shadowMedia.js';
 import { verificarFlagsSombra, notasTrazabilidadWorkflow } from '../src/utils/shadowGuard.js';
 
 describe('config Tier Crisis', () => {
-  it('contiene exactamente UNO MAS UNO (MED-0170)', () => {
+  it('contiene exactamente UNO MAS UNO (MED-0170) y El Sol de Irapuato (MED-0169)', () => {
     const ids = SHADOW_MEDIOS_CRISIS.map((m) => m.medio_id).sort();
-    expect(ids).toEqual(['MED-0170']);
+    expect(ids).toEqual(['MED-0169', 'MED-0170']);
   });
 
-  it('NO incluye El Otro Enfoque (MED-0171) ni El Sol de Irapuato (MED-0169)', () => {
+  it('NO incluye El Otro Enfoque (MED-0171)', () => {
     const ids = SHADOW_MEDIOS_CRISIS.map((m) => m.medio_id);
     expect(ids).not.toContain('MED-0171');
-    expect(ids).not.toContain('MED-0169');
   });
 
   it('UNO MAS UNO usa fuente=sitemap, 6h, max 80', () => {
@@ -34,8 +35,39 @@ describe('config Tier Crisis', () => {
     expect(uno.max_notas_shadow).toBe(80);
   });
 
-  it('mediosCrisisActivos() devuelve solo activos (MED-0170)', () => {
-    expect(mediosCrisisActivos().map((m) => m.medio_id)).toEqual(['MED-0170']);
+  it('El Sol de Irapuato usa fuente=rss (nunca sitemap), 6h', () => {
+    const sol = SHADOW_MEDIOS_CRISIS.find((m) => m.medio_id === 'MED-0169')!;
+    expect(sol.fuente_preferida).toBe('rss');
+    expect(sol.fuente_preferida).not.toBe('sitemap');
+    expect(sol.frecuencia_shadow).toBe('6h');
+    expect(sol.activo_shadow).toBe(true);
+  });
+
+  it('soporta fuentes DISTINTAS por medio en el tier (sitemap + rss)', () => {
+    const fuentes = new Set(SHADOW_MEDIOS_CRISIS.map((m) => m.fuente_preferida));
+    expect(fuentes.has('sitemap')).toBe(true);
+    expect(fuentes.has('rss')).toBe(true);
+  });
+
+  it('mediosCrisisActivos() devuelve ambos activos (MED-0169, MED-0170)', () => {
+    expect(mediosCrisisActivos().map((m) => m.medio_id).sort()).toEqual(['MED-0169', 'MED-0170']);
+  });
+
+  it('MED-0169 queda cubierto por cron (dedupe estructural: daily no lo recrawlea)', () => {
+    const cubiertos = mediosYaCubiertosPorCron();
+    expect(cubiertos.has('MED-0169')).toBe(true);
+    expect(cubiertos.has('MED-0170')).toBe(true);
+  });
+});
+
+describe('dedupe de menciones — unique(noticia_id, keyword_id)', () => {
+  const schema = readFileSync(
+    join(process.cwd(), 'supabase/migrations/0001_initial_schema.sql'),
+    'utf-8',
+  );
+
+  it('la migración declara el UNIQUE que garantiza dedupe de MED-0169', () => {
+    expect(schema).toMatch(/unique\s*\(\s*noticia_id\s*,\s*keyword_id\s*\)/i);
   });
 });
 

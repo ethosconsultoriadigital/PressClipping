@@ -4,13 +4,14 @@
 # WORKFLOW ACTIVO EN MODO SOMBRA (NO producción), SEPARADO del shadow base y del
 # tier nacional B.
 #
-# Procesa SOLO el tier crisis (hoy UNO MAS UNO, MED-0170) con pipeline AISLADO
-# por medio_id, usando SITEMAP como fuente (el RSS pierde las notas de crisis
-# antes de crawlear). Por código (run-shadow-crisis-tier.ts) impide:
-#   export-results · generate-xml · classify-ia · WhatsApp/correos ·
-#   export-raw-news. NO toca 01_Noticias_Raw / 02_Menciones / 04_Logs.
+# Procesa SOLO el tier crisis (UNO MAS UNO MED-0170 + El Sol de Irapuato MED-0169)
+# con pipeline AISLADO por medio_id. El crawl es POR MEDIO con su fuente_preferida:
+# MED-0170 usa sitemap (el RSS pierde las notas de crisis antes de crawlear),
+# MED-0169 usa RSS (red OEM público; no tiene sitemap propio). Por código
+# (run-shadow-crisis-tier.ts) impide: export-results · generate-xml · classify-ia ·
+# WhatsApp/correos · export-raw-news. NO toca 01_Noticias_Raw / 02_Menciones / 04_Logs.
 #
-# NO incluye El Otro Enfoque (MED-0171) ni El Sol de Irapuato todavía.
+# NO incluye El Otro Enfoque (MED-0171) todavía.
 #
 # INTEGRA shadow-alerts en MODO OBSERVACIÓN (--run-shadow-alerts): tras el
 # comparativo evalúa reglas P1/P2/P3 con allowlist CLI-0002 y ESCRIBE en
@@ -46,7 +47,7 @@ concurrency:
 
 jobs:
   run:
-    name: Shadow crisis tier (UNO MAS UNO, sitemap, aislado por medio)
+    name: Shadow crisis tier (UNO MAS UNO sitemap + El Sol de Irapuato RSS, aislado por medio)
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:

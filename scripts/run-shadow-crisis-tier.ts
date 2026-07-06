@@ -168,23 +168,30 @@ async function main(): Promise<void> {
   const medios = mediosCrisisActivos();
   if (medios.length === 0) { logger.error('Tier crisis sin medios activos.'); process.exit(2); }
   const medioIds = medios.map((m) => m.medio_id).join(',');
-  const fuente = medios[0]?.fuente_preferida ?? 'sitemap';
+  // Etiqueta de fuente para trazabilidad (07/10): puede ser mixta (por medio).
+  const fuente = [...new Set(medios.map((m) => m.fuente_preferida))].sort().join('+');
   const frecuencia = medios[0]?.frecuencia_shadow ?? '6h';
-  const maxNotas = Math.max(...medios.map((m) => m.max_notas_shadow));
   const { desde, hasta } = ventanaMovil(args.windowHours);
 
   logger.info(
-    { modo: 'shadow_crisis', medios: medios.map((m) => `${m.medio_id}:${m.nombre}`), medioIds,
-      fuente, frecuencia, maxNotas, windowHours: args.windowHours, fechaDesde: desde, fechaHasta: hasta, dryRun: args.dryRun },
+    { modo: 'shadow_crisis', medios: medios.map((m) => `${m.medio_id}:${m.nombre}:${m.fuente_preferida}`), medioIds,
+      fuente, frecuencia, windowHours: args.windowHours, fechaDesde: desde, fechaHasta: hasta, dryRun: args.dryRun },
     '=== Iniciando SHADOW CRISIS TIER (no producción) ===',
   );
 
   if (!args.dryRun) {
-    // 1. Crawl dirigido SOLO por medio_id del tier, forzando SITEMAP.
-    const crawl = await runStep('1. crawl dirigido sitemap (crisis)', 'scripts/crawl.ts',
-      [`--medio-ids=${medioIds}`, `--limit=${medios.length}`, `--source=${fuente}`,
-       `--max-notas=${maxNotas}`, `--sitemap-max-subs=${args.sitemapMaxSubs}`]);
-    if (crawl.code !== 0) logger.warn({ code: crawl.code }, 'Crawl crisis terminó con código no-cero (continuamos).');
+    // 1. Crawl dirigido por medio, cada uno con SU fuente_preferida (sitemap/rss).
+    //    Loop por medio: nunca se fuerza una única fuente global (MED-0170 sitemap,
+    //    MED-0169 rss). Acotado por medio_id y max_notas del tier.
+    for (const m of medios) {
+      const crawl = await runStep(
+        `1. crawl dirigido ${m.medio_id} (${m.fuente_preferida})`,
+        'scripts/crawl.ts',
+        [`--medio-ids=${m.medio_id}`, `--limit=1`, `--source=${m.fuente_preferida}`,
+         `--max-notas=${m.max_notas_shadow}`, `--sitemap-max-subs=${args.sitemapMaxSubs}`],
+      );
+      if (crawl.code !== 0) logger.warn({ medio_id: m.medio_id, code: crawl.code }, 'Crawl crisis (por medio) terminó con código no-cero (continuamos).');
+    }
 
     // 2. Enrich AISLADO por medio (no toca backlog global).
     await runStep('2. enrich aislado', 'scripts/enrich-news.ts',
