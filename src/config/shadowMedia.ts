@@ -98,11 +98,15 @@ export function mediosNacionalesActivos(tier: 'B' = 'B'): ShadowMedioNacional[] 
 //     recuperó cuerpos completos y el re-detect dirigido validó crisis CLI-0002
 //     real (alcohol/tequila adulterado, +12 menciones, 11 P1 shadow, FP ~8%).
 //     Usa fuente=RSS (OEM público); NO tiene sitemap propio → NUNCA forzar sitemap.
+//   - El Otro Enfoque (MED-0171): tras el fix de extractor (contaminación/teasers)
+//     quedó limpio (210 notas, 96% calidad alta, mediana 1677 chars) con señal
+//     crisis real (12 menciones CLI-0002 tequila adulterado Guanajuato + 3 CLI-0003).
+//     Usa fuente=RSS (?feed=rss2, feed de artículos limpio): evita reintroducir
+//     listings/boilerplate que el sitemap_index podría traer dado su historial.
 //
 // Cada medio se crawlea con SU fuente_preferida (loop por medio); no se fuerza
-// una única fuente global. NO incluye El Otro Enfoque (MED-0171) todavía (su
-// extracción se acaba de limpiar; requiere 1–2 ciclos de validación). NO integra
-// alertas reales (solo observación shadow-alerts).
+// una única fuente global. NO integra alertas reales (solo observación
+// shadow-alerts).
 // ============================================================================
 
 export type FuenteShadow = 'rss' | 'sitemap';
@@ -130,6 +134,14 @@ export const SHADOW_MEDIOS_CRISIS: readonly ShadowMedioCrisis[] = [
   {
     medio_id: 'MED-0169',
     nombre: 'El Sol de Irapuato',
+    fuente_preferida: 'rss',
+    frecuencia_shadow: '6h',
+    max_notas_shadow: 60,
+    activo_shadow: true,
+  },
+  {
+    medio_id: 'MED-0171',
+    nombre: 'El Otro Enfoque',
     fuente_preferida: 'rss',
     frecuencia_shadow: '6h',
     max_notas_shadow: 60,
@@ -182,6 +194,24 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED: readonly ShadowMedioDaily[] = [
   {
     medio_id: 'MED-0066',
     nombre: 'Revista Espejo',
+    fuente: 'auto',
+    max_notas_shadow: 30,
+    activo_shadow: true,
+  },
+  {
+    // Lote C (2026-07-06): net-new, calidad alta (mediana ~3499 chars),
+    // detección real limpia (3 CLI-0003 laboral, FP 0). Fuente sitemap propio.
+    medio_id: 'MED-0006',
+    nombre: 'marcomares.com.mx',
+    fuente: 'auto',
+    max_notas_shadow: 30,
+    activo_shadow: true,
+  },
+  {
+    // Lote C (2026-07-06): net-new, calidad alta (128/129), detección real
+    // limpia (1 CLI-0003 laboral). Fuente sitemap propio.
+    medio_id: 'MED-0012',
+    nombre: 'Paralelo 19',
     fuente: 'auto',
     max_notas_shadow: 30,
     activo_shadow: true,

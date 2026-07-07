@@ -1,8 +1,9 @@
 /**
  * Tests del TIER CRISIS sombra:
- *   - config contiene UNO MAS UNO (MED-0170, sitemap) y El Sol de Irapuato (MED-0169, rss).
- *   - fuente POR MEDIO: MED-0170 usa sitemap, MED-0169 usa rss (nunca forzar sitemap).
- *   - NO incluye El Otro Enfoque (MED-0171).
+ *   - config contiene UNO MAS UNO (MED-0170, sitemap), El Sol de Irapuato
+ *     (MED-0169, rss) y El Otro Enfoque (MED-0171, rss).
+ *   - fuente POR MEDIO: MED-0170 usa sitemap, MED-0169/MED-0171 usan rss.
+ *   - NO incluye medios ajenos al tier (base/nacional B/daily).
  *   - flags prohibidos siguen bloqueados por la guarda sombra.
  *   - notas de trazabilidad incluyen workflow/tier/medios/fuente/frecuencia.
  *   - el workflow crisis existe, comparte concurrency, cron cada 6h al minuto 15 y sin comandos prohibidos.
@@ -18,14 +19,25 @@ import {
 import { verificarFlagsSombra, notasTrazabilidadWorkflow } from '../src/utils/shadowGuard.js';
 
 describe('config Tier Crisis', () => {
-  it('contiene exactamente UNO MAS UNO (MED-0170) y El Sol de Irapuato (MED-0169)', () => {
+  it('contiene exactamente MED-0170, MED-0169 y MED-0171', () => {
     const ids = SHADOW_MEDIOS_CRISIS.map((m) => m.medio_id).sort();
-    expect(ids).toEqual(['MED-0169', 'MED-0170']);
+    expect(ids).toEqual(['MED-0169', 'MED-0170', 'MED-0171']);
   });
 
-  it('NO incluye El Otro Enfoque (MED-0171)', () => {
+  it('NO incluye medios ajenos al tier (base/nacional B/daily)', () => {
     const ids = SHADOW_MEDIOS_CRISIS.map((m) => m.medio_id);
-    expect(ids).not.toContain('MED-0171');
+    // Medios de otros crons NO deben colarse al tier crisis.
+    expect(ids).not.toContain('MED-0001'); // base
+    expect(ids).not.toContain('MED-0025'); // nacional B
+    expect(ids).not.toContain('MED-0083'); // daily validated
+  });
+
+  it('El Otro Enfoque (MED-0171) usa fuente=rss (feed limpio, no listings), 6h, activo', () => {
+    const otro = SHADOW_MEDIOS_CRISIS.find((m) => m.medio_id === 'MED-0171')!;
+    expect(otro.fuente_preferida).toBe('rss');
+    expect(otro.fuente_preferida).not.toBe('sitemap');
+    expect(otro.frecuencia_shadow).toBe('6h');
+    expect(otro.activo_shadow).toBe(true);
   });
 
   it('UNO MAS UNO usa fuente=sitemap, 6h, max 80', () => {
@@ -49,14 +61,15 @@ describe('config Tier Crisis', () => {
     expect(fuentes.has('rss')).toBe(true);
   });
 
-  it('mediosCrisisActivos() devuelve ambos activos (MED-0169, MED-0170)', () => {
-    expect(mediosCrisisActivos().map((m) => m.medio_id).sort()).toEqual(['MED-0169', 'MED-0170']);
+  it('mediosCrisisActivos() devuelve los tres activos (MED-0169, MED-0170, MED-0171)', () => {
+    expect(mediosCrisisActivos().map((m) => m.medio_id).sort()).toEqual(['MED-0169', 'MED-0170', 'MED-0171']);
   });
 
-  it('MED-0169 queda cubierto por cron (dedupe estructural: daily no lo recrawlea)', () => {
+  it('MED-0169/MED-0170/MED-0171 quedan cubiertos por cron (dedupe estructural: daily no los recrawlea)', () => {
     const cubiertos = mediosYaCubiertosPorCron();
     expect(cubiertos.has('MED-0169')).toBe(true);
     expect(cubiertos.has('MED-0170')).toBe(true);
+    expect(cubiertos.has('MED-0171')).toBe(true);
   });
 });
 

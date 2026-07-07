@@ -20,9 +20,9 @@ import {
 import { evaluarGateDaily } from '../src/matching/shadowDailyGate.js';
 
 describe('config Tier Daily Validated — dedupe', () => {
-  it('la lista contiene Zeta (MED-0083) y Revista Espejo (MED-0066)', () => {
+  it('la lista contiene Zeta, Revista Espejo, marcomares (MED-0006) y Paralelo 19 (MED-0012)', () => {
     const ids = SHADOW_MEDIOS_DAILY_VALIDATED.map((m) => m.medio_id).sort();
-    expect(ids).toEqual(['MED-0066', 'MED-0083']);
+    expect(ids).toEqual(['MED-0006', 'MED-0012', 'MED-0066', 'MED-0083']);
   });
 
   it('NO incluye boilerplate MED-0118 (El Respetable)', () => {
@@ -44,8 +44,8 @@ describe('config Tier Daily Validated — dedupe', () => {
     }
   });
 
-  it('net-new actual = Zeta + Revista Espejo (ambos net-new)', () => {
-    expect(mediosDailyNetNew().map((m) => m.medio_id).sort()).toEqual(['MED-0066', 'MED-0083']);
+  it('net-new actual = Zeta + Revista Espejo + marcomares + Paralelo 19 (todos net-new)', () => {
+    expect(mediosDailyNetNew().map((m) => m.medio_id).sort()).toEqual(['MED-0006', 'MED-0012', 'MED-0066', 'MED-0083']);
   });
 
   it('respeta max_notas por medio (<=30) y fuente auto', () => {
