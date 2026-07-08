@@ -6,6 +6,7 @@
  * secretos ni destinatarios.
  */
 import type { InternalAlert } from './types.js';
+import type { DigestCluster } from './grouping.js';
 
 const NA = (v: string | undefined | null): string => {
   const s = String(v ?? '').trim();
@@ -48,6 +49,56 @@ export function renderWhatsappMessage(alert: InternalAlert): string {
     `*Keyword:* ${NA(alert.keyword)}`,
     `*Razón:* ${NA(alert.razon)}`,
     `*URL:* ${NA(alert.url)}`,
+    '_No enviado a cliente._',
+  ].join('\n');
+}
+
+/** Etiqueta legible de la crisis a partir de la familia del cluster. */
+function etiquetaCrisis(cluster: DigestCluster): string {
+  if (cluster.familia.startsWith('otro:')) return cluster.familia.slice('otro:'.length) || 'mención relevante';
+  return 'alcohol/tequila adulterado';
+}
+
+/** Preview de email DIGEST: agrupa N alertas de una misma crisis en un mensaje. */
+export function renderEmailDigestPreview(cluster: DigestCluster): { subject: string; body: string } {
+  const zona = cluster.zonas.length ? cluster.zonas.join(' / ') : cluster.region;
+  const subject = `[PILOTO INTERNO][${cluster.cliente_id}][${cluster.severidad}] Crisis: ${etiquetaCrisis(cluster)} — ${zona} (${cluster.count} notas)`;
+  const fuentes = cluster.alerts.map((a, i) => `  ${i + 1}. ${NA(a.medio)} — ${NA(a.titulo)} — ${NA(a.url)}`);
+  const body = [
+    '🚨 PILOTO INTERNO — ' + cluster.cliente_id,
+    `Crisis: ${etiquetaCrisis(cluster)}`,
+    `Ubicación: ${zona}`,
+    `Alertas agrupadas: ${cluster.count}`,
+    `Nivel: ${cluster.severidad}`,
+    cluster.familias_detectadas.length ? `Señales: ${cluster.familias_detectadas.join(', ')}` : '',
+    '',
+    'Fuentes:',
+    ...fuentes,
+    '',
+    'Por qué importa: múltiples medios reportan la misma crisis; concentra el',
+    'seguimiento en un solo aviso para evitar fatiga por volumen. Requiere revisión',
+    'humana antes de cualquier acción o contacto con el cliente.',
+    '',
+    'Estado: PILOTO INTERNO / NO CLIENTE. Este mensaje NO fue enviado al cliente.',
+  ]
+    .filter((l) => l !== '')
+    .join('\n');
+  return { subject, body };
+}
+
+/** Preview de WhatsApp DIGEST: compacto, máx. 3 fuentes principales. */
+export function renderWhatsAppDigestPreview(cluster: DigestCluster): string {
+  const zona = cluster.zonas.length ? cluster.zonas.join('/') : cluster.region;
+  const top = cluster.alerts.slice(0, 3).map((a, i) => `${i + 1}. ${NA(a.medio)}: ${NA(a.titulo)}`);
+  const resto = cluster.count > 3 ? [`_(+${cluster.count - 3} notas más)_`] : [];
+  return [
+    `🚨 *PILOTO INTERNO — ${cluster.cliente_id}*`,
+    `*Crisis:* ${etiquetaCrisis(cluster)}`,
+    `*Zona:* ${zona}`,
+    `*Notas agrupadas:* ${cluster.count}`,
+    '*Fuentes principales:*',
+    ...top,
+    ...resto,
     '_No enviado a cliente._',
   ].join('\n');
 }

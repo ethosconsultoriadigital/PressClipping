@@ -18,7 +18,8 @@ import { getOutputTab } from '../src/sheets/client.js';
 import { normalizeHeader } from '../src/utils/parse.js';
 import { loadNotificationConfig } from '../src/notifications/guards.js';
 import { NotificationService } from '../src/notifications/notificationService.js';
-import { renderEmailSubject, renderWhatsappMessage } from '../src/notifications/templates.js';
+import { renderEmailSubject, renderWhatsappMessage, renderEmailDigestPreview, renderWhatsAppDigestPreview } from '../src/notifications/templates.js';
+import { groupAlertsForDigest } from '../src/notifications/grouping.js';
 import type { InternalAlert, Severidad } from '../src/notifications/types.js';
 
 const ALERTAS_TAB = '10_Alertas_Sombra';
@@ -30,10 +31,11 @@ interface Args {
   severity: Severidad;
   limit: number;
   token: string;
+  digest: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
-  const out: Args = { dryRun: true, sendReal: false, client: 'CLI-0002', severity: 'P1', limit: 5, token: '' };
+  const out: Args = { dryRun: true, sendReal: false, client: 'CLI-0002', severity: 'P1', limit: 5, token: '', digest: false };
   for (const arg of argv) {
     if (!arg.startsWith('--')) continue;
     const body = arg.slice(2);
@@ -47,6 +49,7 @@ function parseArgs(argv: string[]): Args {
       case 'severity': out.severity = (val as Severidad) || out.severity; break;
       case 'limit': out.limit = Number(val) || out.limit; break;
       case 'token': out.token = val; break;
+      case 'digest': out.digest = true; break;
     }
   }
   return out;
@@ -128,12 +131,51 @@ async function main(): Promise<void> {
 
   logger.info({ leidas: rows.length, cliente: args.client, p1_filtradas: filtradas.length, seleccionadas: alertas.length }, 'Alertas P1 seleccionadas');
 
-  // PREVIEW de plantillas (contenido que se generaría). No implica envío.
-  for (const a of alertas) {
+  // En modo digest, agrupamos y evaluamos a nivel cluster; si no, individual.
+  let alertasParaEnviar = alertas;
+  if (args.digest) {
+    const grouping = groupAlertsForDigest(alertas);
     logger.info(
-      { alert_id: a.alert_id, medio: a.medio, subject: renderEmailSubject(a), whatsapp_preview: renderWhatsappMessage(a).replace(/\n/g, ' | ') },
-      '[preview] alerta interna (NO enviada)',
+      {
+        clusters: grouping.clusters.length,
+        alertas_individuales: grouping.total,
+        agrupadas: grouping.agrupadas,
+        singletons: grouping.singletons,
+        reduccion: `${grouping.reduccion.antes} -> ${grouping.reduccion.despues}`,
+      },
+      'Agrupación digest generada',
     );
+    for (const c of grouping.clusters) {
+      const email = renderEmailDigestPreview(c);
+      logger.info(
+        {
+          cluster_id: c.cluster_id,
+          count: c.count,
+          familia: c.familia,
+          region: c.region,
+          zonas: c.zonas.join('/') || '—',
+          subject: email.subject,
+          whatsapp_preview: renderWhatsAppDigestPreview(c).replace(/\n/g, ' | '),
+        },
+        '[preview-digest] cluster (NO enviado)',
+      );
+    }
+    // Representante por cluster (una notificación por digest, no por nota).
+    alertasParaEnviar = grouping.clusters.map((c) => ({
+      ...c.alerts[0]!,
+      alert_id: `digest:${c.cluster_id}`,
+      titulo: `[DIGEST ${c.count}] ${c.familia} — ${c.zonas.join('/') || c.region}`,
+      dedupe_key: c.cluster_id,
+      sin_envio: true,
+    }));
+  } else {
+    // PREVIEW individual de plantillas. No implica envío.
+    for (const a of alertas) {
+      logger.info(
+        { alert_id: a.alert_id, medio: a.medio, subject: renderEmailSubject(a), whatsapp_preview: renderWhatsappMessage(a).replace(/\n/g, ' | ') },
+        '[preview] alerta interna (NO enviada)',
+      );
+    }
   }
 
   // Rechazo temprano de envío real sin flag explícito.
@@ -142,7 +184,7 @@ async function main(): Promise<void> {
   }
 
   const service = new NotificationService(config);
-  const report = await service.run(alertas, { dryRun: args.dryRun || !args.sendReal, sendReal: args.sendReal });
+  const report = await service.run(alertasParaEnviar, { dryRun: args.dryRun || !args.sendReal, sendReal: args.sendReal });
 
   for (const r of report.resultados) {
     logger.info(
