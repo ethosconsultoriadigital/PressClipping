@@ -406,6 +406,195 @@ export function pasaPuertaContextualTequilaCli0002(
   return { pasa: false, razon: 'tequila_contexto_insuficiente' };
 }
 
+// ---------------------------------------------------------------------------
+// CLI-0001 Jumex — puerta contextual de tres niveles
+// ---------------------------------------------------------------------------
+//
+// Las keywords amplias de CLI-0001 (`Jumex`, `bebidas azucaradas`, y —de existir—
+// `jugos`/`néctares`/`IEPS bebidas azucaradas`) capturan mucho ruido de PROMOCIÓN
+// RETAIL (Soriana, Julio Regalado, folletos 3x2, Temporada Naranja), gastronomía
+// (recetas/loncheras/cócteles) y contenido genérico donde Jumex aparece como
+// producto en oferta o patrocinador, sin valor reputacional/regulatorio. A la vez
+// se debe conservar la señal REAL: crisis/regulatorio (COFEPRIS, Profeco, retiro
+// de producto, IEPS/etiquetado con categoría) y corporativo/sectorial (Grupo
+// Jumex, inversión, planta, exportación).
+//
+//   Nivel A (crisis/regulatorio con marca o categoría) → PASA (posible alerta)
+//   Nivel B (corporativo/sectorial real)               → PASA (mención/P2)
+//   Nivel C (promo retail/supermercado/receta/genérico) → BLOQUEA
+//   Sin contexto suficiente → BLOQUEA
+//
+// Solo aplica a CLI-0001 + keyword amplia; el resto de clientes no se toca.
+// La keyword `Museo Jumex` (marca específica del museo de arte) NO se gatea.
+
+/** Keywords amplias de CLI-0001 que exigen puerta contextual. */
+export const KEYWORDS_JUMEX_AMPLIAS: string[] = [
+  'jumex', 'bebidas azucaradas', 'bebida azucarada', 'jugos', 'jugo',
+  'nectares', 'nectar', 'ieps bebidas azucaradas', 'ieps jugos', 'ieps refrescos',
+];
+
+const KEYWORDS_JUMEX_AMPLIAS_SET = new Set(KEYWORDS_JUMEX_AMPLIAS);
+
+/** Términos que anclan la marca/categoría del cliente para la proximidad. */
+export const TERMINOS_JUMEX: string[] = [
+  'jumex', 'grupo jumex', 'bebidas azucaradas', 'bebida azucarada',
+  'jugos', 'jugo', 'nectares', 'nectar', 'refresco', 'refrescos',
+];
+
+/** Nivel A — crisis reputacional / regulatorio-fiscal / salud con marca o categoría. */
+export const CONTEXTO_CRISIS_JUMEX: string[] = [
+  'contaminado', 'contaminada', 'contaminacion', 'adulterado', 'adulterada',
+  'retiro de producto', 'retiro de lote', 'retira lote', 'recall', 'retirado del mercado',
+  'cofepris', 'profeco', 'alerta sanitaria', 'riesgo sanitario', 'sanitaria',
+  'sancion', 'sancionado', 'sanciona', 'multa', 'multado', 'demanda', 'demandado',
+  'amparo', 'litigio', 'boicot', 'denuncia', 'clausura', 'clausurado',
+  'huelga', 'paro', 'paro de labores', 'emplazamiento', 'sindicato',
+  'accidente', 'incendio', 'explosion', 'derrame', 'intoxicacion', 'brote',
+  'crisis', 'reputacion', 'etiquetado frontal', 'etiquetado', 'sello', 'octagono',
+  'octagonos', 'exceso de azucar', 'exceso de calorias', 'comida chatarra',
+  'ieps', 'impuesto', 'impuestos', 'reforma fiscal', 'obesidad', 'diabetes', 'salud publica',
+];
+
+/** Nivel B — corporativo / sectorial / comercio-industria real. */
+export const CONTEXTO_CORPORATIVO_JUMEX: string[] = [
+  'grupo jumex', 'planta', 'fabrica', 'inversion', 'invertira', 'inaugura',
+  'exportacion', 'exportaciones', 'exporta', 'ventas', 'facturacion', 'ingresos',
+  'adquisicion', 'adquiere', 'expansion', 'nuevo producto', 'lanzamiento', 'lanza',
+  'campana', 'patrocinio', 'patrocinador', 'alianza', 'acuerdo comercial',
+  'camara empresarial', 'anpec', 'concamin', 'canacintra', 'coparmex',
+  'industria de jugos', 'industria de bebidas', 'bebidas no alcoholicas',
+  'participacion de mercado', 'directivo', 'director general', 'ceo',
+  'presidente de jumex', 'empleos', 'planta de produccion', 'produccion',
+];
+
+/** Nivel C — promoción retail / supermercado / gastronomía / genérico de bajo valor. */
+export const CONTEXTO_JUMEX_BAJO_VALOR: string[] = [
+  'soriana', 'julio regalado', 'temporada naranja', 'walmart', 'chedraui', 'oxxo',
+  'la comer', 'bodega aurrera', 'aurrera', 'sams club', 'sam s club', 'costco',
+  'heb', 'supermercado', 'supermercados', 'autoservicio', 'tienda', 'tiendas',
+  'folleto', 'folletos', 'catalogo', 'catalogos', 'volante', '2x1', '3x2', '4x3',
+  'oferta', 'ofertas', 'descuento', 'descuentos', 'promocion', 'promociones',
+  'promo', 'cupon', 'cupones', 'buen fin', 'hot sale', 'rebaja', 'rebajas',
+  'precio', 'precios', 'ahorra', 'ahorro', 'ahorrar', 'barato', 'baratos',
+  'receta', 'recetas', 'lonchera', 'loncheras', 'coctel', 'cocteles', 'smoothie',
+  'licuado', 'licuados', 'gastronomia', 'menu', 'desayuno', 'merienda', 'postre',
+];
+
+/** Marcadores FUERTES de promo retail que, si están en el TÍTULO, dominan la nota. */
+export const MARCADORES_JUMEX_BAJO_VALOR_TITULO: string[] = [
+  'soriana', 'julio regalado', 'temporada naranja', 'walmart', 'chedraui',
+  'bodega aurrera', 'folleto', 'catalogo', 'oferta', 'ofertas', 'descuento',
+  'descuentos', 'promocion', 'promociones', '2x1', '3x2', '4x3', 'buen fin',
+  'hot sale', 'rebaja', 'receta', 'recetas', 'lonchera',
+];
+
+/** Ventana amplia para crisis/regulatorio (prioriza recall). */
+export const VENTANA_CRISIS_JUMEX = VENTANA_PROXIMIDAD_BEBIDAS; // 250
+/** Ventana estrecha para corporativo (prioriza precisión). */
+export const VENTANA_CORPORATIVO_JUMEX = 150;
+
+/** ¿La keyword es una amplia de CLI-0001 (para la regla Jumex)? */
+export function esKeywordJumexAmpliaCli0001(keyword: string): boolean {
+  return KEYWORDS_JUMEX_AMPLIAS_SET.has(foldText(keyword).trim());
+}
+
+/**
+ * ¿Alguno de los `ctx` aparece CERCA de un término de marca/categoría Jumex?
+ * Mismo patrón que tequila: coocurrencia en título ancla, o proximidad ≤ ventana.
+ */
+function contextoJumexCercano(
+  titulo: string,
+  cuerpo: string,
+  ctx: string[],
+  ventana: number,
+  terminos: string[],
+  tituloAncla: boolean,
+): boolean {
+  const anclas = terminos.length > 0 ? terminos : TERMINOS_JUMEX;
+  const fTit = foldText(titulo);
+  const fCue = foldText(cuerpo);
+  const marcaEnTitulo = anyWordPresent(anclas, fTit);
+  const ctxEnTitulo = anyWordPresent(ctx, fTit);
+  if (marcaEnTitulo && ctxEnTitulo) return true;
+  if (tituloAncla && marcaEnTitulo && anyWordPresent(ctx, fCue)) return true;
+  if (hayProximidad(fTit, anclas, ctx, ventana)) return true;
+  if (hayProximidad(fCue, anclas, ctx, ventana)) return true;
+  return false;
+}
+
+/** Nivel A: crisis/regulatorio/salud cercano a marca o categoría (recall alto). */
+export function tieneContextoCrisisJumex(
+  titulo: string, cuerpo: string, terminos: string[] = TERMINOS_JUMEX,
+): boolean {
+  return contextoJumexCercano(titulo, cuerpo, CONTEXTO_CRISIS_JUMEX, VENTANA_CRISIS_JUMEX, terminos, true);
+}
+
+/** Nivel A (regulatorio explícito): IEPS/impuesto/etiquetado cerca de categoría/marca. */
+export function tieneContextoRegulatorioJumex(
+  titulo: string, cuerpo: string, terminos: string[] = TERMINOS_JUMEX,
+): boolean {
+  const reg = ['ieps', 'impuesto', 'impuestos', 'reforma fiscal', 'etiquetado frontal',
+    'etiquetado', 'sello', 'octagono', 'octagonos', 'cofepris', 'profeco', 'exceso de azucar'];
+  return contextoJumexCercano(titulo, cuerpo, reg, VENTANA_CRISIS_JUMEX, terminos, true);
+}
+
+/** Nivel B: corporativo/sectorial cercano a marca o categoría (precisión alta). */
+export function tieneContextoCorporativoJumex(
+  titulo: string, cuerpo: string, terminos: string[] = TERMINOS_JUMEX,
+): boolean {
+  return contextoJumexCercano(titulo, cuerpo, CONTEXTO_CORPORATIVO_JUMEX, VENTANA_CORPORATIVO_JUMEX, terminos, false);
+}
+
+/** Nivel C: contexto de promo retail/supermercado/gastronomía/genérico. */
+export function esContextoJumexBajoValor(texto: string): boolean {
+  return anyWordPresent(CONTEXTO_JUMEX_BAJO_VALOR, foldText(texto));
+}
+
+/** ¿El TÍTULO está dominado por un marcador fuerte de promo retail? */
+export function esTituloJumexBajoValor(titulo: string): boolean {
+  return anyWordPresent(MARCADORES_JUMEX_BAJO_VALOR_TITULO, foldText(titulo));
+}
+
+export interface JumexGateResultado {
+  pasa: boolean;
+  nivel?: 'A' | 'B';
+  razon?: string;
+}
+
+/**
+ * Puerta contextual de tres niveles para keywords amplias de CLI-0001 (Jumex).
+ * Evalúa título + cuerpo por proximidad, no por mera presencia.
+ */
+export function pasaPuertaContextualJumexCli0001(
+  input: PuertaContextualInput,
+): JumexGateResultado {
+  const titulo = input.titulo ?? input.texto;
+  const cuerpo = input.cuerpo ?? input.texto;
+  const terminos = input.terminos && input.terminos.length > 0 ? input.terminos : TERMINOS_JUMEX;
+
+  // Nivel A — crisis/regulatorio (prioridad sobre bajo valor: "Profeco sanciona a
+  // Jumex por promoción engañosa" es crisis, no promo).
+  if (tieneContextoCrisisJumex(titulo, cuerpo, terminos) ||
+      tieneContextoRegulatorioJumex(titulo, cuerpo, terminos)) {
+    return { pasa: true, nivel: 'A', razon: 'jumex_contexto_crisis' };
+  }
+  // Override: título de promo retail domina (no es crisis) → bloquea.
+  if (esTituloJumexBajoValor(titulo)) {
+    return { pasa: false, razon: 'jumex_contexto_promocion_retail' };
+  }
+  // Nivel B — corporativo/sectorial real.
+  if (tieneContextoCorporativoJumex(titulo, cuerpo, terminos)) {
+    return { pasa: true, nivel: 'B', razon: 'jumex_contexto_corporativo' };
+  }
+  // Nivel C — bajo valor explícito (promo/supermercado/gastronomía).
+  const full = `${titulo}\n${cuerpo}`;
+  if (esContextoJumexBajoValor(full)) {
+    return { pasa: false, razon: 'jumex_contexto_promocion_retail' };
+  }
+  // Sin señal suficiente.
+  return { pasa: false, razon: 'jumex_contexto_insuficiente' };
+}
+
 export interface PuertaContextualInput {
   cliente_id: string | null;
   keyword: string;
@@ -464,6 +653,10 @@ export function pasaPuertaContextualClienteKeyword(
   }
   if (input.cliente_id === 'CLI-0002' && esKeywordTequilaAmpliaCli0002(input.keyword)) {
     const { pasa, razon } = pasaPuertaContextualTequilaCli0002(input);
+    return { pasa, razon };
+  }
+  if (input.cliente_id === 'CLI-0001' && esKeywordJumexAmpliaCli0001(input.keyword)) {
+    const { pasa, razon } = pasaPuertaContextualJumexCli0001(input);
     return { pasa, razon };
   }
   if (input.cliente_id === 'CLI-0003' && esKeywordLaboralAmpliaCli0003(input.keyword)) {

@@ -438,6 +438,99 @@ crawl-limit bajo y gate), no seguir tocando medios ya cubiertos.
 
 ---
 
+## 0.5 Auditoría CLI-0001 Jumex — puerta contextual (2026-07-08)
+
+Objetivo: separar menciones reales de Jumex del ruido promocional/retail para
+decidir si CLI-0001 puede pasar de `NO_LISTO`. Se implementó una puerta contextual
+de 3 niveles análoga a la de Tequila (CLI-0002).
+
+### Auditoría (05 CLI-0001/Jumex)
+
+| Dato | Valor |
+|---|---|
+| filas 05 CLI-0001/Jumex | 21 (todas SOLO_PRESSCLIPPING) |
+| match / solo_ethos | 0 / 0 |
+| keywords Ethos CLI-0001 | KEY-0001 Jumex, KEY-0002 Museo Jumex, KEY-0009 bebidas azucaradas |
+| menciones CLI-0001 en DB | 6 (bebidas azucaradas x4, Museo Jumex x2) |
+| razones PC | ETHOS_SOURCE_WINDOW_LIMITED (12), PC_FALSE_POSITIVE (9) |
+
+**Clasificación determinística de las 21 filas:**
+
+| Categoría | Cantidad | % | Ejemplo | Decisión |
+|---|---|---|---|---|
+| RETAIL_PROMO_LOW_VALUE | 9 | 43% | "Julio Regalado en Soriana: ofertas de Jumex 3x2" | bloquear |
+| PC_FALSE_POSITIVE / sindicación | ~7 | 33% | "Se acabó el Mundial ¿qué sigue?", "subsidios a combustibles" | bloquear |
+| JUMEX_CORPORATIVO/REPUTACION_REAL | 4 | 19% | "Rechaza Jumex mango tabasqueño y productor lo regala" | permitir |
+| JUMEX_COMERCIO/BEBIDAS_AZUCARADAS | 1 | 5% | "Boing llama a producir en México (IEPS)" | permitir/sector |
+
+**≈76% del gap CLI-0001 es promo retail + falso positivo.** Confirma la hipótesis:
+CLI-0001 necesitaba puerta contextual propia.
+
+### Política contextual implementada (`contextualKeywordRules.ts`)
+
+Aplica a keywords amplias CLI-0001 (`Jumex`, `bebidas azucaradas`, `jugos`,
+`néctares`, `IEPS bebidas azucaradas/jugos/refrescos`). `Museo Jumex` NO se gatea.
+
+- **Nivel A (permitir, posible alerta)** — crisis/regulatorio con marca o categoría:
+  COFEPRIS, Profeco, retiro de producto, contaminación, sanción, demanda, huelga,
+  accidente, etiquetado frontal/sello/octágono, **IEPS/impuesto cerca de
+  jugos/néctares/bebidas azucaradas/Jumex**. Proximidad ≤250, título ancla.
+- **Nivel B (permitir, sin urgencia)** — corporativo/sectorial: Grupo Jumex,
+  inversión, planta, exportación, ventas, lanzamiento, cámaras empresariales,
+  industria de jugos. Proximidad estrecha ≤150.
+- **Nivel C (bloquear)** — promo retail/supermercado/gastronomía: Soriana, Julio
+  Regalado, Temporada Naranja, Walmart/Chedraui/Bodega Aurrera, folleto/catálogo,
+  2x1/3x2/4x3, oferta/descuento/promoción, Buen Fin/Hot Sale, receta/lonchera/cóctel.
+  Override de título: si el titular está dominado por promo, bloquea aunque el
+  cuerpo tenga términos corporativos sueltos.
+- Razones nuevas: `jumex_contexto_crisis`, `jumex_contexto_corporativo`,
+  `jumex_contexto_promocion_retail`, `jumex_contexto_insuficiente`.
+- **Bypass BD**: para las keywords amplias de CLI-0001, el gate de código es
+  autoritativo (no los `contexto_incluir/excluir` de la BD), igual que Tequila.
+
+### Tests
+
++29 tests nuevos (`test/jumex-context-rules.test.ts`): permite COFEPRIS/Profeco/
+retiro/huelga/inversión/exportación/IEPS-con-categoría; bloquea Soriana/Julio
+Regalado/3x2/receta/lonchera/genérico sin marca. No regresión: CLI-0002 tequila
+(crisis pasa, turismo bloquea) y CLI-0003 laboral intactos. **760 tests passing.**
+
+### Dry-run del gate (read-only, sobre las 21 filas reales de 05)
+
+| Métrica | Valor |
+|---|---|
+| analizadas | 21 |
+| permitidas Nivel A / B | 0 / 0 |
+| bloqueadas promo retail | 9 |
+| bloqueadas insuficiente | 12 |
+| FP estimado (entre permitidas) | 0% |
+
+Gate ✅ (FP ≤15%, promos retail bloqueadas, sin flood, potenciales ≤80). El gate
+bloquea el 100% del ruido actual. Los corporativos/regulatorios reales pasan cuando
+hay cuerpo (validado en tests); en 05 sólo hay título, por eso quedan "insuficiente".
+
+### Detect real / comparativo
+
+- **Detect real: N/A / no ejecutado.** Ethos tiene **cobertura casi nula de Jumex**
+  (1 de 1000 notas recientes toca términos Jumex; 0 pendientes), `detect-mentions`
+  no tiene flag por-cliente, y el gate permite 0 del contenido actual → 0 inserciones.
+- **Comparativo: N/A** (sin menciones nuevas; sin delta).
+
+### Readiness CLI-0001
+
+**`NECESITA_MAS_COBERTURA`** (antes `NO_LISTO`). El bloqueador real **no es precisión**
+—la puerta ya evita la inundación de promos Soriana/Julio Regalado— **sino cobertura**:
+el contenido corporativo/regulatorio de Jumex vive en medios que Ethos casi no crawlea.
+
+### Siguiente brecha
+
+Para avanzar CLI-0001 hacia piloto se necesita **cobertura de fuentes con contenido
+corporativo/regulatorio de Jumex** (no promo retail): p.ej. medios de negocios/economía
+y regulatorios (IEPS/etiquetado, COFEPRIS/Profeco). La puerta contextual ya garantiza
+que ese contenido entre limpio y que la promo quede fuera.
+
+---
+
 ## 1. Estado general
 
 | Dimensión | Valor | Lectura |

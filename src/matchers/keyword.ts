@@ -13,6 +13,7 @@ import { evalBoolean, operandsOf } from './boolean.js';
 import {
   pasaPuertaContextualClienteKeyword,
   esKeywordTequilaAmpliaCli0002,
+  esKeywordJumexAmpliaCli0001,
 } from '../matching/contextualKeywordRules.js';
 
 export type TipoKeyword =
@@ -101,8 +102,13 @@ export function matchKeyword(
   // exigir términos industriales. El resto de keywords mantiene sus puertas BD.
   const usarGateTequilaCli0002 =
     rule.cliente_id === 'CLI-0002' && esKeywordTequilaAmpliaCli0002(rule.keyword);
+  // Ídem para CLI-0001: las keywords amplias de Jumex (Jumex/bebidas azucaradas/
+  // jugos/néctares) se rigen por la puerta contextual de 3 niveles (crisis/
+  // regulatorio → corporativo → bloquea promo retail), no por contexto BD.
+  const usarGateJumexCli0001 =
+    rule.cliente_id === 'CLI-0001' && esKeywordJumexAmpliaCli0001(rule.keyword);
 
-  if (!usarGateTequilaCli0002) {
+  if (!usarGateTequilaCli0002 && !usarGateJumexCli0001) {
     // Puerta de exclusión: si aparece algún contexto a excluir, no hay match.
     if (rule.contextoExcluir.length > 0 && anyWordPresent(rule.contextoExcluir, foldedFull)) {
       return null;
