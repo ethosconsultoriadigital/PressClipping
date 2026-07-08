@@ -277,6 +277,86 @@ Ventana 48h (07-06→08): sin cambio de match (1) porque las 2 exportaciones son
 
 ---
 
+## 0.3 Re-enrich MED-0164 Periódico Correo / Tequila Crisis (2026-07-08)
+
+Cierre parcial del gap remanente de la fase 0.2: la crisis "Caen ventas de tequila
+Centenario tras intoxicaciones en Guanajuato" era recuperable pero estaba en un medio
+(**MED-0164 Periódico Correo**, regional, no-cron) con ~216 notas crawleadas sin enriquecer.
+
+### Diagnóstico
+
+| Dato | Valor |
+|---|---|
+| Medio | MED-0164 Periódico Correo (Regional) |
+| Fuente | SITEMAP (`googlenews.xml`), `requiere_javascript=false` |
+| En cron | No (crisis ni daily) |
+| Notas (7d / 30d / total) | 592 / 1003 / ~1003 |
+| Cuerpo vacío antes | 216 / 1000 = **22%** |
+| Menciones antes | 28 (CLI-0002=15, tequila=0) |
+
+**Causa raíz: `CRAWLED_BUT_NOT_ENRICHED`.** El HTML público sí contiene el cuerpo; el
+extractor `html_article` lo recupera con calidad **alta** (probado en vivo sobre las notas
+de crisis, sin Playwright/proxy/paywall: cuerpo 1982–3222 chars). No se tocó el extractor.
+
+### Re-enrich acotado (solo MED-0164, `--limit=250 --only-missing-clean-text`)
+
+| Métrica | Antes | Después |
+|---|---|---|
+| Leídas / actualizadas / fallidas | — | 216 / 216 / 0 |
+| Cuerpo vacío | 22% | **0%** |
+| pct ≥600 chars | 76% | **96%** |
+| pct ≥1200 chars | 72% | **91%** |
+| mediana chars (con texto) | 2479 | 2444 |
+| promedio chars | 2751 | 2758 |
+
+Clasificación: **EXTRACCION_REPARADA**.
+
+### Detect (dry-run → real, gate PASA)
+
+Dry-run acotado a MED-0164 `--only-with-text`: 216 analizadas, **9 potenciales**, 0 sin texto,
+0 turismo/evento/bajo valor colado, sin flood (≤2/keyword), FP estimado **~0%**. Gate ✅
+(FP≤15%, crisis Centenario/Guanajuato no bloqueada, turismo bloqueado, sin boilerplate,
+potenciales≤80). Detect real: **9 menciones insertadas, 0 duplicadas**.
+
+Menciones nuevas (MED-0164: 28→**37**, CLI-0002: 15→**23**, tequila: 0→**2**):
+- "Caen ventas de tequila Centenario…": tequila (P2, score 1) + bebidas adulteradas (P1) + COFEPRIS.
+- "Muertes por alcohol adulterado…": alcohol adulterado (P1, título score 1) + tequila adulterado (P1) + intoxicación por alcohol (P1) + bebidas adulteradas (P1) + tequila (P2).
+
+### Impacto en comparativo
+
+| Ventana | Métrica | Antes | Después | Δ |
+|---|---|---|---|---|
+| 48h (07-06→08) | menciones_ethos | 71 | **80** | +9 |
+| 48h | match | 1 | **4** | +3 |
+| 48h | cobertura_ajustada | 0.01 | **0.04** | +0.03 |
+| 48h | clusters_matched | 1 | **2** | +1 |
+| Backtest (07-05→07) | menciones_ethos | 101 | **112** | +11 |
+| Backtest | match | 8 | 8 | 0 |
+| Backtest | cobertura_ajustada | 0.08 | 0.08 | 0 |
+
+`sheets_write_mismatch=false` en ambas. La crisis **"Caen ventas de tequila Centenario…"
+ahora es `MATCH_REAL`** en la ventana 48h (matcheada contra las réplicas de PressClipping).
+En backtest sube el volumen de Ethos (+11) pero el match no cambia porque la nota Centenario
+cae en la ventana 48h y "Muertes por alcohol adulterado" queda como `SOLO_ETHOS_BORDERLINE`
+(PressClipping no la trae en esa ventana / borde de cluster).
+
+### Qué parte del gap Tequila queda cerrada
+
+- ✅ Crisis tequila Centenario / intoxicaciones Guanajuato: **cubierta y matcheada** (48h).
+- ✅ Crisis alcohol/bebidas adulteradas Salamanca/Irapuato: **cubierta** (P1 shadow), aún
+  `SOLO_ETHOS` porque falta el equivalente PressClipping en ventana.
+- ⚠️ Sigue abierto: la misma crisis publicada por medios **no-cron sin enriquecer**
+  (`ETHOS_KEYWORD_GAP` / `ETHOS_SOURCE_WINDOW_LIMITED` observados en el comparativo:
+  "Alcohol adulterado en Guanajuato…", "Alcohol adulterado: Guanajuato bajo vigilancia…").
+
+### Siguiente brecha prioritaria
+
+Los clusters `FUENTE_NO_CUBIERTA` / `ETHOS_SOURCE_WINDOW_LIMITED` siguen dominando el
+`solo_pressclipping` (≈42 clusters accionables). Cerrar el top de esas fuentes tiene mayor
+retorno que seguir re-enriqueciendo medios ya presentes.
+
+---
+
 ## 1. Estado general
 
 | Dimensión | Valor | Lectura |

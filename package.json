@@ -40,6 +40,7 @@
     "update-media-coverage-results": "tsx scripts/update-media-coverage-results.ts",
     "update-media-coverage-cron-criticos": "tsx scripts/update-media-coverage-cron-criticos.ts",
     "update-media-coverage-tequila": "tsx scripts/update-media-coverage-tequila.ts",
+    "update-media-coverage-med164": "tsx scripts/update-media-coverage-med164.ts",
     "shadow-daily-validated-tier": "tsx scripts/run-shadow-daily-validated-tier.ts",
     "send-internal-alerts": "tsx scripts/send-internal-alerts.ts",
     "import-pc-media-catalog": "tsx scripts/import-pressclipping-media-catalog.ts",
