@@ -136,7 +136,35 @@ Toda corrección de tier requiere `npm run typecheck && npm test` + commit.
 
 ---
 
-## 9. No hacer
+## 9. Módulo de envío interno (preparado / disabled by default)
+
+> **PREPARADO, APAGADO.** No envía nada por defecto. No corre en GitHub Actions
+> (no hay workflow). El piloto interno se ejecuta **manualmente** tras autorización.
+> Protocolo completo: `docs/ALERTAS_REALES_ACTIVACION.md` §8.
+
+- **Archivos**: `src/notifications/*` + `scripts/send-internal-alerts.ts`.
+- **Variables**: ver `.env.example` (bloque "Módulo de envío interno"). Todas
+  apagadas por defecto (`SEND_ALERTS=false`, `ALLOW_REAL_ALERTS=false`).
+- **Guardas**: `assertCanSendRealAlerts` — 9 condiciones AND. Normal:
+  `can_send=false, reason=real_alerts_disabled`.
+- **Dry-run (seguro, NO envía)**:
+
+```bash
+npm run send-internal-alerts -- --dry-run --client=CLI-0002 --severity=P1 --limit=5
+```
+
+- **Futuro send-real (requiere GO + credenciales + env habilitado)**:
+
+```bash
+npm run send-internal-alerts -- --send-real --client=CLI-0002 --severity=P1 --limit=5 --token=<TOKEN>
+```
+
+- **Rollback**: `SEND_ALERTS=false` (o vaciar destinatarios) → guardas bloquean.
+- **Seguridad**: nunca loggea password/token/número; destinatarios sólo por hash.
+
+---
+
+## 10. No hacer
 
 - No `export-results`, `generate-xml`, `classify-ia`, `export-raw-news`.
 - No activar clientes (`clientes.alertas_activas`).

@@ -11,19 +11,23 @@
 
 Antes de cualquier fase con envío real, hay un **prerequisito de ingeniería**:
 
-- **No existe código de envío real** implementado. Las alertas se **simulan**
-  (`canal_simulado` en `10_Alertas_Sombra`). No hay integración Twilio ni
-  Gmail/SMTP en el repo.
-- Las guardas anti-envío operan en 3 capas y deben permanecer:
-  1. CLI: `run-shadow-alerts.ts` aborta con exit 2 ante `--send/--whatsapp/--email`.
-  2. Entorno: `verificarEnvObservacion` aborta si `SEND_ALERTS` / `WHATSAPP_ENABLED`
-     / `EMAIL_ENABLED` = `true`.
+- Existe un **módulo de envío interno preparado pero DISABLED BY DEFAULT**
+  (`src/notifications/*`, `scripts/send-internal-alerts.ts`). Ver sección 8. No
+  envía nada con la configuración por defecto: las guardas bloquean el envío real.
+- Las alertas de producción siguen **simuladas** (`canal_simulado` en
+  `10_Alertas_Sombra`). **No hay credenciales** Twilio ni Gmail/SMTP en el repo, y
+  el transport real de email/WhatsApp **no está cableado** (seam inyectable vacío).
+- Las guardas anti-envío operan en varias capas y deben permanecer:
+  1. CLI shadow: `run-shadow-alerts.ts` aborta con exit 2 ante `--send/--whatsapp/--email`.
+  2. Entorno shadow: `verificarEnvObservacion` aborta si `SEND_ALERTS` /
+     `WHATSAPP_ENABLED` / `EMAIL_ENABLED` = `true`.
   3. Código: el tier crisis fuerza `send=false whatsapp=false email=false`.
+  4. Módulo interno: `assertCanSendRealAlerts` exige 9 condiciones AND (sección 8).
 
-**Conclusión**: la activación real requiere (a) implementar un módulo de envío,
-(b) credenciales, (c) plantillas y (d) destinatarios — todo ausente hoy. Hasta
-entonces, la máxima madurez alcanzable es "listo para piloto INTERNO tras
-implementar el canal".
+**Conclusión**: el módulo ya está listo en modo apagado. La activación real aún
+requiere (a) autorización explícita, (b) credenciales, (c) cablear el transport y
+(d) destinatarios internos — todo ausente/apagado hoy. Máxima madurez alcanzable:
+"piloto INTERNO en dry-run", sin envío real.
 
 ---
 
@@ -137,3 +141,57 @@ Marcar TODO antes de subir de fase:
 - [ ] Log de envío disponible (auditable).
 
 Si algún ítem falla → **NO-GO**, permanecer en la fase actual.
+
+---
+
+## 8. Módulo de envío interno (preparado / disabled by default)
+
+> Estado: **PREPARADO, APAGADO**. El módulo existe pero **no envía nada** con la
+> configuración por defecto. No documentar como activo.
+
+### Archivos
+
+- `src/notifications/types.ts` — tipos (`InternalAlert`, `NotificationConfig`, `SendResult`).
+- `src/notifications/guards.ts` — `loadNotificationConfig`, `assertCanSendRealAlerts`, `hashRecipient`.
+- `src/notifications/templates.ts` — plantillas email/WhatsApp (marcadas PILOTO INTERNO).
+- `src/notifications/emailProvider.ts` — SMTP vía transport inyectable (sin `nodemailer`).
+- `src/notifications/whatsappProvider.ts` — Twilio vía sender inyectable (`not_configured`).
+- `src/notifications/notificationService.ts` — orquesta guardas + providers.
+- `scripts/send-internal-alerts.ts` — CLI dry-run por defecto.
+
+### Variables requeridas (todas apagadas por defecto)
+
+`SEND_ALERTS`, `ALLOW_REAL_ALERTS`, `ALERTS_INTERNAL_ONLY`, `ALERTS_ALLOWED_CLIENTS`,
+`ALERTS_ALLOWED_SEVERITIES`, `ALERTS_MAX_PER_RUN`, `ALERTS_MAX_PER_DAY`,
+`REAL_ALERTS_CONFIRMATION_TOKEN`, `EMAIL_ALERTS_ENABLED`, `SMTP_*`,
+`INTERNAL_ALERT_EMAILS`, `WHATSAPP_ALERTS_ENABLED`, `TWILIO_*`,
+`INTERNAL_ALERT_WHATSAPP_NUMBERS`. Ver `.env.example`.
+
+### Guardas (`assertCanSendRealAlerts`) — 9 capas AND
+
+1. `SEND_ALERTS=true` · 2. `ALLOW_REAL_ALERTS=true` · 3. token presente y coincide ·
+4. `ALERTS_INTERNAL_ONLY=true` · 5. cliente ∈ allowlist · 6. severidad ∈ allowlist ·
+7. hay destinatarios internos · 8. canal habilitado · 9. `sin_envio=false` explícito.
+En ejecución normal: `can_send=false`, `reason=real_alerts_disabled`.
+
+### Comando dry-run (seguro, NO envía)
+
+```bash
+npm run send-internal-alerts -- --dry-run --client=CLI-0002 --severity=P1 --limit=5
+```
+
+Muestra preview de plantillas y resultados `blocked`/`dry_run`; nunca envía.
+
+### Comando futuro send-real (requiere autorización)
+
+```bash
+# Solo tras GO firmado, credenciales cableadas y env habilitado:
+npm run send-internal-alerts -- --send-real --client=CLI-0002 --severity=P1 --limit=5 --token=<TOKEN>
+```
+
+Aun con `--send-real`, si el entorno no autoriza (9 capas) NO envía.
+
+### Rollback
+
+Poner `SEND_ALERTS=false` (o `ALLOW_REAL_ALERTS=false`, o vaciar destinatarios) →
+todas las guardas vuelven a bloquear. No requiere revertir código.
