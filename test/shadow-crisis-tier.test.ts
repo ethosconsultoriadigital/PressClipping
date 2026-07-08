@@ -1,7 +1,8 @@
 /**
  * Tests del TIER CRISIS sombra:
  *   - config contiene UNO MAS UNO (MED-0170, sitemap), El Sol de Irapuato
- *     (MED-0169, rss) y El Otro Enfoque (MED-0171, rss).
+ *     (MED-0169, rss), El Otro Enfoque (MED-0171, rss) y Periódico Correo
+ *     (MED-0164, sitemap).
  *   - fuente POR MEDIO: MED-0170 usa sitemap, MED-0169/MED-0171 usan rss.
  *   - NO incluye medios ajenos al tier (base/nacional B/daily).
  *   - flags prohibidos siguen bloqueados por la guarda sombra.
@@ -19,9 +20,17 @@ import {
 import { verificarFlagsSombra, notasTrazabilidadWorkflow } from '../src/utils/shadowGuard.js';
 
 describe('config Tier Crisis', () => {
-  it('contiene exactamente MED-0170, MED-0169 y MED-0171', () => {
+  it('contiene exactamente MED-0164, MED-0169, MED-0170 y MED-0171', () => {
     const ids = SHADOW_MEDIOS_CRISIS.map((m) => m.medio_id).sort();
-    expect(ids).toEqual(['MED-0169', 'MED-0170', 'MED-0171']);
+    expect(ids).toEqual(['MED-0164', 'MED-0169', 'MED-0170', 'MED-0171']);
+  });
+
+  it('Periódico Correo (MED-0164) usa fuente=sitemap (metodo SITEMAP, sin RSS), 6h, activo', () => {
+    const correo = SHADOW_MEDIOS_CRISIS.find((m) => m.medio_id === 'MED-0164')!;
+    expect(correo.fuente_preferida).toBe('sitemap');
+    expect(correo.frecuencia_shadow).toBe('6h');
+    expect(correo.max_notas_shadow).toBe(60);
+    expect(correo.activo_shadow).toBe(true);
   });
 
   it('NO incluye medios ajenos al tier (base/nacional B/daily)', () => {
@@ -61,12 +70,13 @@ describe('config Tier Crisis', () => {
     expect(fuentes.has('rss')).toBe(true);
   });
 
-  it('mediosCrisisActivos() devuelve los tres activos (MED-0169, MED-0170, MED-0171)', () => {
-    expect(mediosCrisisActivos().map((m) => m.medio_id).sort()).toEqual(['MED-0169', 'MED-0170', 'MED-0171']);
+  it('mediosCrisisActivos() devuelve los cuatro activos (MED-0164, MED-0169, MED-0170, MED-0171)', () => {
+    expect(mediosCrisisActivos().map((m) => m.medio_id).sort()).toEqual(['MED-0164', 'MED-0169', 'MED-0170', 'MED-0171']);
   });
 
-  it('MED-0169/MED-0170/MED-0171 quedan cubiertos por cron (dedupe estructural: daily no los recrawlea)', () => {
+  it('MED-0164/MED-0169/MED-0170/MED-0171 quedan cubiertos por cron (dedupe estructural: daily no los recrawlea)', () => {
     const cubiertos = mediosYaCubiertosPorCron();
+    expect(cubiertos.has('MED-0164')).toBe(true);
     expect(cubiertos.has('MED-0169')).toBe(true);
     expect(cubiertos.has('MED-0170')).toBe(true);
     expect(cubiertos.has('MED-0171')).toBe(true);

@@ -357,6 +357,87 @@ retorno que seguir re-enriqueciendo medios ya presentes.
 
 ---
 
+## 0.4 Cierre FUENTE_NO_CUBIERTA / Window Limited (2026-07-08)
+
+Auditoría del top de `SOLO_PRESSCLIPPING` accionable para decidir qué fuentes reparar,
+enriquecer, agregar a cron o descartar. **Hallazgo central: el "gap accionable" está
+inflado por el default conservador del clasificador.** Al leer los títulos reales, la
+mayoría del gap `Tequila` (53 filas, la keyword dominante) es contenido que la puerta
+contextual **bloquea a propósito**: turismo (Tequila pueblo/Guachimontones), deporte
+("futbol tequila", México-Inglaterra), homónimo del municipio (notas de crimen en Tequila,
+Jal.) y promos (Soriana/Julio Regalado para Jumex). No es cobertura ausente: es
+precision-tradeoff correcto.
+
+### Totales (05 actual, backtest 07-05→07)
+
+| Métrica | Valor |
+|---|---|
+| solo_pressclipping | 117 |
+| accionable (clasificador) | 108 |
+| sindicado/bajo valor | 9 |
+| PC falso positivo | 0 |
+| keyword dominante | Tequila (53) → mayormente turismo/deporte/homónimo |
+
+### Ranking top fuentes (gap accionable) y estado real
+
+| Medio | medio_id | en cron | notasDB | texto_ok | naturaleza del gap | decisión |
+|---|---|---|---|---|---|---|
+| lado.mx | MED-0005 | no | 101 | 100% | 0 vacías, 0 señal crisis; exports/turismo | NO_TOCAR |
+| La Crónica de Hoy | MED-0154 | **sí** | 1487 | 99% | promos Soriana/cultura (Jumex) | NO_TOCAR |
+| Momento Diario | (no en DB) | — | — | — | vago/deporte | DESCARTAR_BAJO_VALOR |
+| Milenio | MED-0030 | no | 230 | 100% | ya procesado (7 menciones); crimen/FIFA | NO_TOCAR |
+| Marca México | (no en DB) | — | — | — | deporte/promo | DESCARTAR_BAJO_VALOR |
+| El Heraldo de México | MED-0157 | **sí** | 2663 | 99% | promos/Uber | NO_TOCAR |
+| Xeu | (no en DB) | — | — | — | perfume/pensiones | DESCARTAR_BAJO_VALOR |
+| Talajalisco | (no en DB) | — | — | — | crimen (homónimo Tequila) | DESCARTAR_BLOQUEADO |
+| Telediario | (no en DB) | — | — | — | crimen/promo | DESCARTAR_BAJO_VALOR |
+| NTR Guadalajara | MED-0038 | no | 9 | 89% | footprint mínimo; turismo | DESCARTAR_BAJO_VALOR |
+| Tráfico ZMG | MED-0116 | no | 75 | 96% | 3 vacías sin señal; nota CRT no crawleada | AUDITAR_MANUAL |
+| AM | (no en DB) | — | — | — | **"Alcohol adulterado en Guanajuato" (crisis real)** | AUDITAR_MANUAL (alta futura) |
+| Hoy Tamaulipas | (no en DB) | — | — | — | **laboral CLI-0003 real** | AUDITAR_MANUAL (alta futura) |
+| Uno TV | MED-0025 | **sí** | 1443 | 100% | festival taco; "Política contra alcohol" (B) | NO_TOCAR |
+| Municipios | (no en DB) | — | — | — | exports (B) + deporte | AUDITAR_MANUAL |
+
+### Decisiones
+
+- **MED-0164 Periódico Correo → `AGREGAR_A_CRON_CRISIS_SHADOW`** (única alta de esta fase).
+  Gate ✅ (EXTRACCION_REPARADA, FP ~0%, Centenario MATCH_REAL, 9 menciones, no requiere JS).
+  Ya estaba en el cron base *daily*; el alta lo sube al **tier crisis (6h, sitemap)** para
+  capturar la crisis regional de GTO antes de que rote el sitemap. Cambio **config-only**
+  en `src/config/shadowMedia.ts` (`SHADOW_MEDIOS_CRISIS`), **shadow-only, sin envíos, sin
+  tocar workflows `.yml`** (el workflow crisis ya lee la config vía `run-shadow-crisis-tier.ts`).
+- **Medios ya en cron** (La Crónica, El Heraldo, Uno TV): `NO_TOCAR`. Su gap es
+  precision-tradeoff (promos/cultura), no cobertura ausente.
+- **Medios in-DB no-cron** (lado.mx, Milenio, NTR): `NO_TOCAR`. **0 brecha de extracción**
+  (texto_ok 89–100%, ~0 vacías, o ya procesados). El gap son artículos no crawleados y/o
+  contenido bloqueado por política; re-enrich no aplica.
+- **Fuera de catálogo bajo valor** (Momento Diario, Marca México, Xeu, Telediario,
+  Talajalisco): `DESCARTAR` (deporte/turismo/homónimo/promo).
+- **Fuera de catálogo con señal real** (AM, Hoy Tamaulipas, Municipios) y Tráfico ZMG:
+  `AUDITAR_MANUAL` — alta futura de fuente, fuera del alcance de esta fase (no altas masivas).
+
+### Reparación / re-enrich / detect
+
+- **FASE 6 re-enrich: N/A.** Ningún candidato in-DB del top gap tiene cuerpo vacío con señal
+  (lado.mx 0 vacías, Milenio 0, Tráfico ZMG 3 sin señal crisis, NTR 1). No se justifica.
+- **FASE 7/8 detect: N/A** (no hay medios re-enriquecidos nuevos). No se ejecutó detect real.
+
+### Impacto en comparativo
+
+Sin menciones nuevas esta fase (el alta es config, efectiva en la próxima corrida crisis
+programada). 48h actual: Ethos 80, PC 121, **match 4**, cobertura_ajustada **0.04**,
+`sheets_write_mismatch=false`. El impacto de MED-0164 (48h match 1→4, Centenario MATCH_REAL)
+ya fue medido en §0.3 y se re-validará en la próxima corrida 6h.
+
+### Siguiente brecha
+
+El gap accionable "real" restante es pequeño y disperso en fuentes fuera de catálogo con
+señal crisis/laboral genuina (**AM**, **Hoy Tamaulipas**). El siguiente lote de mayor
+retorno es un **alta acotada de 1–2 de esas fuentes** (con discovery de RSS/sitemap,
+crawl-limit bajo y gate), no seguir tocando medios ya cubiertos.
+
+---
+
 ## 1. Estado general
 
 | Dimensión | Valor | Lectura |

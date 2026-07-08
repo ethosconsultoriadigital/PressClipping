@@ -103,6 +103,13 @@ export function mediosNacionalesActivos(tier: 'B' = 'B'): ShadowMedioNacional[] 
 //     crisis real (12 menciones CLI-0002 tequila adulterado Guanajuato + 3 CLI-0003).
 //     Usa fuente=RSS (?feed=rss2, feed de artículos limpio): evita reintroducir
 //     listings/boilerplate que el sitemap_index podría traer dado su historial.
+//   - Periódico Correo (MED-0164): re-enrich acotado (2026-07-08) reparó 216 notas
+//     CRAWLED_BUT_NOT_ENRICHED (cuerpo 22%->0%, calidad alta, html_article, sin JS).
+//     Detect real acotado insertó 9 menciones CLI-0002 (tequila x2, alcohol/tequila
+//     adulterado P1, FP ~0%) y la crisis "tequila Centenario / intoxicaciones
+//     Guanajuato" quedó como MATCH_REAL en 48h. Usa fuente=sitemap (metodo=SITEMAP,
+//     sin RSS). YA está en SHADOW_MEDIOS (base daily); el alta al tier crisis lo
+//     sube a 6h para capturar crisis regional de GTO antes de que rote el sitemap.
 //
 // Cada medio se crawlea con SU fuente_preferida (loop por medio); no se fuerza
 // una única fuente global. NO integra alertas reales (solo observación
@@ -143,6 +150,14 @@ export const SHADOW_MEDIOS_CRISIS: readonly ShadowMedioCrisis[] = [
     medio_id: 'MED-0171',
     nombre: 'El Otro Enfoque',
     fuente_preferida: 'rss',
+    frecuencia_shadow: '6h',
+    max_notas_shadow: 60,
+    activo_shadow: true,
+  },
+  {
+    medio_id: 'MED-0164',
+    nombre: 'Periódico Correo',
+    fuente_preferida: 'sitemap',
     frecuencia_shadow: '6h',
     max_notas_shadow: 60,
     activo_shadow: true,
