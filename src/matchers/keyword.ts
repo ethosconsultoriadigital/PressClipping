@@ -10,7 +10,10 @@
  */
 import { foldText, indexOfWord, indexOfSubstring, anyWordPresent } from './text.js';
 import { evalBoolean, operandsOf } from './boolean.js';
-import { pasaPuertaContextualClienteKeyword } from '../matching/contextualKeywordRules.js';
+import {
+  pasaPuertaContextualClienteKeyword,
+  esKeywordTequilaAmpliaCli0002,
+} from '../matching/contextualKeywordRules.js';
 
 export type TipoKeyword =
   | 'exacta'
@@ -92,16 +95,25 @@ export function matchKeyword(
 ): MatchResultado | null {
   const foldedFull = campos.map((c) => foldText(c.texto)).join('\n');
 
-  // Puerta de exclusión: si aparece algún contexto a excluir, no hay match.
-  if (rule.contextoExcluir.length > 0 && anyWordPresent(rule.contextoExcluir, foldedFull)) {
-    return null;
+  // La keyword amplia de tequila (CLI-0002) se rige EXCLUSIVAMENTE por la puerta
+  // contextual de código (política de 3 niveles), no por los contexto_incluir/
+  // excluir rígidos de la BD, que hoy pierden crisis (adulterado/metanol) por
+  // exigir términos industriales. El resto de keywords mantiene sus puertas BD.
+  const usarGateTequilaCli0002 =
+    rule.cliente_id === 'CLI-0002' && esKeywordTequilaAmpliaCli0002(rule.keyword);
+
+  if (!usarGateTequilaCli0002) {
+    // Puerta de exclusión: si aparece algún contexto a excluir, no hay match.
+    if (rule.contextoExcluir.length > 0 && anyWordPresent(rule.contextoExcluir, foldedFull)) {
+      return null;
+    }
+    // Puerta de inclusión: si se exige contexto, al menos uno debe aparecer.
+    const exigeContexto = rule.contextoIncluir.length > 0;
+    if (exigeContexto && !anyWordPresent(rule.contextoIncluir, foldedFull)) {
+      return null;
+    }
+    // exacta_contextual sin contexto definido degrada a exacta (no bloquea).
   }
-  // Puerta de inclusión: si se exige contexto, al menos uno debe aparecer.
-  const exigeContexto = rule.contextoIncluir.length > 0;
-  if (exigeContexto && !anyWordPresent(rule.contextoIncluir, foldedFull)) {
-    return null;
-  }
-  // exacta_contextual sin contexto definido degrada a exacta (no bloquea).
 
   // Puerta contextual cliente/keyword (código): p.ej. keywords comerciales
   // amplias de CLI-0002 exigen contexto de bebidas. Se evalúa sobre el

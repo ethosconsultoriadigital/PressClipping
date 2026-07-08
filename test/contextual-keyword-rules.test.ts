@@ -168,10 +168,12 @@ describe('no regresión: otros clientes/keywords', () => {
       expect(p.pasa).toBe(true);
     }
   });
-  it('CLI-0002 con keyword NO comercial (tequila) no requiere puerta extra', () => {
+  it('CLI-0002 tequila ahora sí tiene puerta contextual propia (ver tequila-context-rules)', () => {
     const r: KeywordRule = { keyword_id: 'k', cliente_id: 'CLI-0002', keyword: 'tequila',
       terminos: ['tequila'], tipo: 'exacta', regla: null, contextoIncluir: [], contextoExcluir: [] };
-    expect(matchKeyword(r, campos({ titulo: 'Nuevo tequila premium en el mercado' }))).not.toBeNull();
+    // Bajo valor / sin contexto → bloqueado; crisis/industria → permitido.
+    expect(matchKeyword(r, campos({ titulo: 'Festival del tequila con conciertos' }))).toBeNull();
+    expect(matchKeyword(r, campos({ titulo: 'Tequila adulterado deja intoxicados' }))).not.toBeNull();
   });
   it('otro cliente con keyword comercial no se bloquea', () => {
     const r = reglaComercio('aranceles', 'CLI-0009');

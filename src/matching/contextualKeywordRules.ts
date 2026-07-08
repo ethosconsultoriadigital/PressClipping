@@ -226,6 +226,186 @@ export function esOffTopicLaboral(texto: string): boolean {
   return anyWordPresent(OFFTOPIC_LABORAL, foldText(texto)) && !tieneContextoLaboralAccionable(texto);
 }
 
+// ---------------------------------------------------------------------------
+// CLI-0002 Tequila — puerta contextual de tres niveles
+// ---------------------------------------------------------------------------
+//
+// La keyword amplia `tequila` (KEY-0003) captura mucho ruido turístico/cultural
+// /entretenimiento/homónimo del municipio de Tequila, y a la vez su config rígida
+// (contexto_incluir industrial) hace que se PIERDA la crisis real de salud
+// (tequila adulterado / metanol / intoxicación / decomiso). Esta puerta resuelve
+// ambos problemas con una política determinística de proximidad:
+//
+//   Nivel A (crisis/salud)  → PASA (posible P1 vía keywords de alerta dedicadas)
+//   Nivel B (industria/comercio/regulación) → PASA (mención/P2)
+//   Nivel C (turismo/evento/gastronomía/cultura/homónimo) → BLOQUEA
+//   Sin contexto suficiente → BLOQUEA
+//
+// Solo aplica a CLI-0002 + keyword amplia de tequila; el resto no se toca.
+
+/** Términos que anclan el tema "tequila/agave" para las reglas de proximidad. */
+export const TERMINOS_TEQUILA: string[] = [
+  'tequila', 'tequilas', 'agave', 'agave azul', 'industria tequilera',
+  'tequilera', 'tequilero',
+];
+
+/** Nivel A — contexto de crisis/salud/seguridad sanitaria de la bebida. */
+export const CONTEXTO_CRISIS_TEQUILA: string[] = [
+  'adulterado', 'adulterada', 'adulterados', 'adulteradas', 'adulteracion',
+  'falsificado', 'falsificada', 'falsificacion', 'apocrifo', 'apocrifa', 'pirata',
+  'contaminado', 'contaminada', 'metanol', 'alcohol metilico', 'metilico',
+  'intoxicacion', 'intoxicaciones', 'intoxicado', 'intoxicados', 'intoxicada',
+  'envenenamiento', 'envenenado', 'envenenados',
+  'muere', 'muerte', 'muertes', 'muertos', 'fallece', 'fallecen', 'fallecido',
+  'fallecidos', 'hospitalizado', 'hospitalizados', 'hospital', 'coma',
+  'alerta sanitaria', 'riesgo sanitario', 'sanitaria', 'cofepris',
+  'decomiso', 'decomisan', 'cateo', 'catean', 'aseguramiento', 'aseguran',
+  'clandestino', 'clandestina', 'clandestinas', 'vinateria', 'vinaterias',
+  'ilicito', 'ilicita', 'ilegal', 'bebida adulterada', 'alcohol adulterado',
+  'tequila adulterado',
+];
+
+/**
+ * Nivel B — industria/comercio/regulación real de la bebida. Exige proximidad
+ * ESTRECHA con un término de tequila (VENTANA_B) para no colar notas genéricas
+ * de exportación/producción donde el tequila aparece de pasada.
+ */
+export const CONTEXTO_INDUSTRIA_TEQUILA: string[] = [
+  'exportacion', 'exportaciones', 'arancel', 'aranceles', 't-mec', 'tmec',
+  'comercio exterior', 'crt', 'consejo regulador del tequila',
+  'consejo regulador del mezcal', 'industria tequilera', 'tequilera',
+  'denominacion de origen', 'ieps', 'produccion de tequila', 'agave azul',
+  'nom-006', 'nom-070', 'comercam',
+];
+
+/** Nivel C — contexto turístico/entretenimiento/gastronómico/cultural/homónimo. */
+export const CONTEXTO_TEQUILA_BAJO_VALOR: string[] = [
+  'pueblo magico', 'turismo', 'turistico', 'turistica', 'turisticos', 'turista',
+  'turistas', 'destino', 'destinos', 'viaje', 'viajes', 'hotel', 'hospedaje',
+  'ruta del tequila', 'festival', 'feria', 'concierto', 'conciertos', 'evento',
+  'eventos', 'fan zone', 'fanzone', 'gastronomia', 'gastronomico', 'culinaria',
+  'receta', 'recetas', 'coctel', 'cocteles', 'cocteleria', 'maridaje', 'cata',
+  'catas', 'degustacion', 'promocion', 'promociones', 'oferta', 'ofertas',
+  'descuento', 'descuentos', 'amazon', 'ranking', 'cultura', 'cultural',
+  'culturales', 'deporte', 'deportivo', 'deportes', 'futbol', 'seleccion',
+  'mundial', 'orgullo', 'cantina', 'antro', 'bar', 'bares', 'restaurante',
+  'restaurantes', 'show', 'espectaculo', 'espectaculos', 'musica', 'concurso',
+  'celebra', 'celebrar', 'celebracion', 'fiesta', 'fiestas',
+  'dia nacional del tequila', 'dia del tequila', 'famoso', 'famosos',
+  'celebridad', 'influencer', 'pelicula', 'serie', 'robo', 'robos', 'detenido',
+  'detenidos', 'captura', 'capturado', 'homicidio', 'asesinato', 'droga',
+  'drogas', 'marihuana', 'reclusorio', 'armado', 'abuso',
+];
+
+/** Ventana amplia para crisis (prioriza recall de salud). */
+export const VENTANA_CRISIS_TEQUILA = VENTANA_PROXIMIDAD_BEBIDAS; // 250
+/** Ventana estrecha para industria (prioriza precisión: mismo párrafo/frase). */
+export const VENTANA_INDUSTRIA_TEQUILA = 120;
+
+/** ¿La keyword es la amplia de tequila (para la regla CLI-0002)? */
+export function esKeywordTequilaAmpliaCli0002(keyword: string): boolean {
+  const k = foldText(keyword).trim();
+  return k === 'tequila' || k === 'industria tequilera' || k === 'agave';
+}
+
+/**
+ * ¿Alguno de los `ctx` aparece semánticamente CERCA de un término de tequila?
+ * - `tituloAncla=true` (crisis): si tequila está en el título, basta que el ctx
+ *   aparezca en el cuerpo (el título fija el tema → alta recall de crisis).
+ * - `tituloAncla=false` (industria): exige coocurrencia en el título o
+ *   proximidad ≤ ventana; evita colar exportaciones/producción genéricas.
+ */
+function contextoTequilaCercano(
+  titulo: string,
+  cuerpo: string,
+  ctx: string[],
+  ventana: number,
+  tituloAncla: boolean,
+): boolean {
+  const fTit = foldText(titulo);
+  const fCue = foldText(cuerpo);
+  const teqEnTitulo = anyWordPresent(TERMINOS_TEQUILA, fTit);
+  const ctxEnTitulo = anyWordPresent(ctx, fTit);
+  if (teqEnTitulo && ctxEnTitulo) return true;
+  if (tituloAncla && teqEnTitulo && anyWordPresent(ctx, fCue)) return true;
+  if (hayProximidad(fTit, TERMINOS_TEQUILA, ctx, ventana)) return true;
+  if (hayProximidad(fCue, TERMINOS_TEQUILA, ctx, ventana)) return true;
+  return false;
+}
+
+/** Nivel A: crisis/salud de la bebida cercana a tequila (recall alto). */
+export function tieneContextoCrisisTequila(titulo: string, cuerpo: string): boolean {
+  return contextoTequilaCercano(titulo, cuerpo, CONTEXTO_CRISIS_TEQUILA, VENTANA_CRISIS_TEQUILA, true);
+}
+
+/** Nivel B: industria/comercio/regulación cercana a tequila (precisión alta). */
+export function tieneContextoIndustriaTequila(titulo: string, cuerpo: string): boolean {
+  return contextoTequilaCercano(titulo, cuerpo, CONTEXTO_INDUSTRIA_TEQUILA, VENTANA_INDUSTRIA_TEQUILA, false);
+}
+
+/**
+ * Marcadores FUERTES de bajo valor que, si aparecen en el TÍTULO, dominan la
+ * nota (evento/turismo/gastronomía/homónimo). Si el título es de este tipo y no
+ * hay crisis, se bloquea aunque el cuerpo tenga proximidad industrial suelta
+ * (p.ej. "Fiesta de la Cerveza" que menciona agave, o "Fonatur en Michoacán").
+ */
+export const MARCADORES_BAJO_VALOR_TITULO: string[] = [
+  'festival', 'feria', 'fiesta', 'concierto', 'conciertos', 'evento', 'eventos',
+  'pueblo magico', 'turismo', 'turistico', 'turistica', 'turisticos', 'turistas',
+  'fonatur', 'gastronomia', 'gastronomico', 'receta', 'recetas', 'coctel',
+  'cocteles', 'maridaje', 'cata', 'degustacion', 'ranking', 'cartelera',
+  'fan zone', 'concurso', 'show', 'espectaculo', 'espectaculos',
+  'dia nacional del tequila', 'dia del tequila',
+];
+
+/** Nivel C: contexto turístico/entretenimiento/homónimo de bajo valor. */
+export function esContextoTequilaBajoValor(texto: string): boolean {
+  return anyWordPresent(CONTEXTO_TEQUILA_BAJO_VALOR, foldText(texto));
+}
+
+/** ¿El TÍTULO está dominado por un marcador fuerte de bajo valor? */
+export function esTituloTequilaBajoValor(titulo: string): boolean {
+  return anyWordPresent(MARCADORES_BAJO_VALOR_TITULO, foldText(titulo));
+}
+
+export interface TequilaGateResultado {
+  pasa: boolean;
+  /** Nivel de la política que abrió la puerta (A crisis / B industria). */
+  nivel?: 'A' | 'B';
+  razon?: string;
+}
+
+/**
+ * Puerta contextual de tres niveles para `tequila` (CLI-0002). Evalúa título +
+ * cuerpo (resumen + texto limpio) y decide por proximidad, no por mera presencia.
+ */
+export function pasaPuertaContextualTequilaCli0002(
+  input: PuertaContextualInput,
+): TequilaGateResultado {
+  const titulo = input.titulo ?? input.texto;
+  const cuerpo = input.cuerpo ?? input.texto;
+  // Nivel A — crisis/salud (prioridad sobre bajo valor: "muertes por tequila
+  // adulterado en festival" es crisis, no evento).
+  if (tieneContextoCrisisTequila(titulo, cuerpo)) {
+    return { pasa: true, nivel: 'A', razon: 'tequila_contexto_crisis' };
+  }
+  // Override: título de evento/turismo domina (no es crisis) → bloquea.
+  if (esTituloTequilaBajoValor(titulo)) {
+    return { pasa: false, razon: 'tequila_contexto_bajo_valor' };
+  }
+  // Nivel B — industria/comercio/regulación real.
+  if (tieneContextoIndustriaTequila(titulo, cuerpo)) {
+    return { pasa: true, nivel: 'B', razon: 'tequila_contexto_industria' };
+  }
+  // Nivel C — bajo valor explícito.
+  const full = `${titulo}\n${cuerpo}`;
+  if (esContextoTequilaBajoValor(full)) {
+    return { pasa: false, razon: 'tequila_contexto_bajo_valor' };
+  }
+  // Sin señal suficiente.
+  return { pasa: false, razon: 'tequila_contexto_insuficiente' };
+}
+
 export interface PuertaContextualInput {
   cliente_id: string | null;
   keyword: string;
@@ -281,6 +461,10 @@ export function pasaPuertaContextualClienteKeyword(
     // Falla: distinguir si hay bebida lejana (boilerplate) o no hay bebida.
     if (tieneContextoBebidas(full)) return { pasa: false, razon: 'contexto_bebidas_no_cercano' };
     return { pasa: false, razon: 'contexto_bebidas_ausente' };
+  }
+  if (input.cliente_id === 'CLI-0002' && esKeywordTequilaAmpliaCli0002(input.keyword)) {
+    const { pasa, razon } = pasaPuertaContextualTequilaCli0002(input);
+    return { pasa, razon };
   }
   if (input.cliente_id === 'CLI-0003' && esKeywordLaboralAmpliaCli0003(input.keyword)) {
     return pasaPuertaContextualLaboralCli0003(input);

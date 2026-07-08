@@ -175,6 +175,108 @@ filtra por precisión (trade-off por diseño), y (c) sindicación de bajo valor 
 
 ---
 
+## 0.2 Afinación Tequila CLI-0002 (2026-07-08)
+
+Objetivo: recuperar cobertura útil de PressClipping asociada a `tequila` (≈47% del
+volumen PC del cliente) **sin** abrir falsos positivos turísticos, culturales, de
+entretenimiento o de bajo valor.
+
+**Auditoría del gap (universo PC `keyword ~ tequila`, ~2 semanas, 277 registros):**
+
+| categoría | cant | % | destino en la política |
+|---|---|---|---|
+| SALUD_ADULTERACION_METANOL | 73 | 26% | Nivel A — permitir (crisis) |
+| REVISAR_HUMANO (columnas/primeras planas) | 90 | 32% | ruido / no accionable |
+| EVENTO_ENTRETENIMIENTO | 35 | 13% | Nivel C — bloquear |
+| COMERCIO_TEQUILA_REAL | 15 | 5% | Nivel B — permitir (industria) |
+| PC_FALSE_POSITIVE | 15 | 5% | bloquear |
+| HOMONIMO_RUIDO (municipio Tequila) | 13 | 5% | Nivel C — bloquear |
+| GASTRONOMIA_PROMOCION | 11 | 4% | Nivel C — bloquear |
+| TURISMO / CULTURA / DECOMISO / REPUT / CRISIS | ~25 | ~10% | mixto (A/C) |
+
+Conclusión: el gap accionable real de tequila es la **crisis de salud/adulteración**
+(≈26–36%), no el turismo/entretenimiento (≈30–35%, ruido por diseño). La config
+previa de `KEY-0003 tequila` era **rígida al revés**: exigía contexto industrial
+(`Jalisco`, `tequilero`, `industria tequilera`) y por eso **perdía** la crisis de
+salud fuera de Jalisco (Guanajuato/Centenario), a la vez que dejaba pasar ruido.
+
+**Política contextual de 3 niveles** (código puro, `src/matching/contextualKeywordRules.ts`):
+
+- **Nivel A (crisis/salud → permite, posible P1 vía keywords de alerta dedicadas):**
+  `adulterado, falsificado, contaminado, metanol, intoxicación, muerte/fallece,
+  hospitalizado, alerta/riesgo sanitario, COFEPRIS, decomiso, cateo, vinatería,
+  clandestino, ilícito` cerca de un término de tequila (ventana ±250, el título
+  ancla el tema para alta recall).
+- **Nivel B (industria/comercio/regulación → permite, P2):** `exportación,
+  aranceles, T-MEC, CRT, Consejo Regulador del Tequila, industria tequilera,
+  denominación de origen, IEPS, NOM-006/070, COMERCAM, agave azul` en proximidad
+  **estrecha** (±120) con tequila. Se descartan exportaciones/producción genéricas.
+- **Nivel C (bloquea):** pueblo mágico, turismo, festival, concierto, evento,
+  gastronomía, receta, coctel, promoción, ranking, cultura, deporte, mundial,
+  bar/cantina, homónimo del municipio (robo/detenido/homicidio). Además, un
+  **override de título**: si el titular está dominado por evento/turismo/fonatur
+  y no hay crisis, se bloquea aunque el cuerpo tenga industria suelta.
+
+La keyword amplia `tequila` (CLI-0002) pasa a regirse **exclusivamente** por esta
+puerta de código (se omiten sus `contexto_incluir/excluir` rígidos de la BD). El
+resto de keywords/clientes no cambia. Cobertura de tests: `test/tequila-context-rules.test.ts`
+(bloqueo, crisis, industria, homónimo, override de título, no-regresión).
+
+**Dry-run acotado (read-only, antes → después):**
+
+| ventana | analizadas | potenciales antes | potenciales después | crisis (A) | industria (B) | bloqueadas bajo valor | insuficiente | FP est. |
+|---|---|---|---|---|---|---|---|---|
+| backtest 07-05→07 | 7 | 1 | 1 | 1 | 0 | 5 | 1 | ~0% |
+| 48h 07-06→08 | 5 | 1 | 1 | 1 | 0 | 3 | 1 | ~0% |
+
+- Permitidas: *"Caen ventas de tequila Centenario tras intoxicaciones en Guanajuato"* (crisis A).
+- Bloqueadas correctamente: *"Exportaciones de México… récord"* (genérica), *"Paisaje
+  Agavero Patrimonio Mundial"* (cultura), *"Fiesta de la Cerveza"* y *"Fonatur en
+  Michoacán"* (evento/turismo), *"Muere Lauren Bennett…"* (homónimo/entretenimiento).
+
+**Gate:** PASA (FP ≤ 15%, crisis no bloqueada, turismo/entretenimiento bloqueado,
+sin boilerplate, sin flood, potenciales ≤ 80).
+
+**Detect real (condicionado al gate):** se recuperaron **2 menciones reales de
+industria/comercio** (Nivel B), insertadas con reset reversible acotado a 2 notas:
+
+| noticia | medio | keyword | nivel | requiere_alerta |
+|---|---|---|---|---|
+| Tequila y salsas, los productos más exportados de México al Reino Unido (184 mdd) | El Sol de México | tequila | B | no (P2) |
+| Exportaciones de alimentos al Reino Unido récord 184 mdp | La Crónica de Hoy | tequila | B | no (P2) |
+
+0 duplicadas, 0 FP. La nota de **crisis** *"Caen ventas de tequila Centenario…"*
+(Periódico Correo, MED-0164) quedó recuperable pero **pendiente**: su medio tiene
+209 notas crawleadas sin enriquecer y enriquecerlas sería masivo (fuera de esta
+fase); hoy aparece como `ETHOS_PRECISION_TRADEOFF`. Se recuperará cuando MED-0164
+se enriquezca en una fase autorizada.
+
+**Impacto en el comparativo (backtest 07-05→07):**
+
+| métrica | antes (extracción reparada) | después (tequila tuning) | Δ |
+|---|---|---|---|
+| menciones_ethos | 99 | **101** | +2 |
+| menciones_pressclipping | 121 | 121 | 0 |
+| match | 6 | **8** | +2 |
+| cobertura_bruta | 0.05 | **0.07** | +0.02 |
+| cobertura_ajustada | 0.06 | **0.08** | +0.02 |
+| clusters_matched | 2 | **4** | +2 |
+| sheets_write_mismatch | false | false | — |
+
+Ventana 48h (07-06→08): sin cambio de match (1) porque las 2 exportaciones son del
+07-05 (fuera de ventana); `sheets_write_mismatch=false`.
+
+**Qué se permitió / qué se bloqueó / riesgo remanente:**
+- Permitido: crisis de salud de la bebida (recall) + industria/comercio tequila-céntrico.
+- Bloqueado: turismo/pueblo mágico, festivales/eventos, gastronomía/promoción,
+  cultura, homónimo del municipio, exportaciones genéricas.
+- Riesgo remanente: la crisis Centenario en medios no-cron sin enriquecer sigue como
+  gap; y el override de título es heurístico (podría bloquear un titular de evento que
+  realmente sea crisis si la crisis no está en el título — mitigado porque Nivel A se
+  evalúa primero).
+
+---
+
 ## 1. Estado general
 
 | Dimensión | Valor | Lectura |
