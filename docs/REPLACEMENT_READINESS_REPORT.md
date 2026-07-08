@@ -5,7 +5,91 @@
 > reporte hace auditable esa afirmación con datos reales de la última corrida.
 >
 > Generado por: `npm run audit-replacement-readiness` + `npm run audit-extraction-quality`
-> (ambos SOLO LECTURA, sin envíos, sin IA, sin tocar producción).
+> + `npm run debug-live-comparison-zero-match`
+> (todos SOLO LECTURA, sin envíos, sin IA, sin tocar producción).
+
+---
+
+## 0. Diagnóstico MATCH=0 (actualización)
+
+**Causa raíz: `REAL_COVERAGE_GAP` (121/121). NO es bug del comparador.**
+
+Se creó `scripts/debug-live-comparison-zero-match.ts` (read-only) que reproduce
+la carga exacta de `compare-mentions` (misma ventana `noticias.fecha_publicacion`
+con `!inner`, `estado_revision != descartada`, PC por `fecha`) y busca candidatos
+de match en **5 niveles**: URL exacta → url_norm → título ≥75% en ventana →
+título ≥75% fuera de ventana → dominio + título ≥65%.
+
+Ventana auditada `2026-07-05T23:00-06:00 → 2026-07-07T23:00-06:00`:
+
+| métrica | valor |
+|---|---|
+| total_pc | 121 |
+| total_ethos | **8** |
+| posibles_matches_por_url_exacta | 0 |
+| posibles_matches_por_url_norm | 0 |
+| posibles_matches_por_titulo (≥75%, ±3d) | 0 |
+| posibles_matches_fuera_de_ventana | 0 |
+| dominio+título (≥65%) | 0 |
+| **pc_sin_ningún_candidato** | **121** |
+
+**Evidencia de descarte de bugs:**
+- `NORMALIZE_URL_BUG`: descartado — 0 URLs exactas iguales y 0 url_norm iguales
+  entre PC y Ethos (no hay match oculto por normalización).
+- `WINDOW_MISMATCH` / `TIMEZONE_BUG`: descartado — 0 títulos ≥75% fuera de ventana;
+  la ventana `!inner` filtra bien (verificado). La única "fecha 2026-07-08" en
+  Ethos es artefacto UTC↔MX de display, dentro de ventana real.
+- `CLIENT_MAPPING_BUG` / `KEYWORD_MAPPING_BUG`: descartado como causa del 0-match
+  (no había candidatos que fallaran por cliente/keyword; simplemente no hay
+  artículos comunes).
+- `TITLE_SIMILARITY_TOO_STRICT`: descartado — ni siquiera con umbral 0.65 y mismo
+  dominio aparece un candidato.
+
+**Por qué Ethos solo tiene 8 menciones (raíz del gap):**
+- **Ethos cubrió 3 medios** (Publimetro 5, Uno TV 2, Revista Espejo 1); **PC cubrió
+  ~40 medios** (lado.mx, La Crónica, MSN, Milenio, Momento Diario, Marca, El Heraldo,
+  Xeu, Talajalisco, NTR Guadalajara, El Sol de México, El Economista…). Casi sin
+  solape de medios y **cero solape de artículos**.
+- **Extracción vacía (83.8%)**: medios que SÍ están en el cron (La Crónica, El
+  Economista, El Heraldo, El Sol de México) tienen 100% cuerpo vacío → la keyword
+  no puede dispararse → no generan mención.
+- **Keyword amplia vs precisión**: `Tequila` es el 47% de PC (57/121), pero en Ethos
+  `tequila` está en el set de precisión endurecida (anti-FP) → bloqueo por diseño.
+
+**Conclusión:** el `MATCH=0` es **brecha real de cobertura + extracción + trade-off
+de precisión**, no un defecto del cruce. **No se modificó el comparador** (regla:
+no fixes especulativos). Se agregaron tests de regresión (`test/zero-match-diagnosis.test.ts`)
+para que ningún cambio futuro "invente" matches y oculte la brecha real.
+
+**Antes/después:** sin fix de código, no hay re-run de comparativo (FASE 7 omitida
+por regla). El porcentaje real de gap se recategoriza abajo (§4): el "112 accionable"
+previo era cota superior; con el diagnóstico, buena parte es **extracción** (medios
+en cron sin cuerpo) y **fuente no cubierta**, no puro descubrimiento.
+
+### Top gaps accionables (post-diagnóstico)
+
+| # | medio | en cron | keyword/cliente | causa | acción exacta |
+|---|---|---|---|---|---|
+| 1 | La Crónica de Hoy | **sí** (MED-0154) | Tequila/Reforma (CLI-0002/3) | EXTRACCION_FALLIDA (100% cuerpo vacío) | reparar extractor de cuerpo del medio |
+| 2 | El Economista | **sí** (MED-0001) | Bebidas/Empresas | EXTRACCION_FALLIDA (100% vacío) | reparar extractor de cuerpo |
+| 3 | El Heraldo de México | **sí** (MED-0157) | Bebidas/Jumex | EXTRACCION_FALLIDA (100% vacío) | reparar extractor de cuerpo |
+| 4 | El Sol de México | **sí** (MED-0158) | Bebidas | EXTRACCION_FALLIDA (100% vacío) | reparar extractor de cuerpo |
+| 5 | Uno TV | **sí** (MED-0025) | intoxicación/bebidas | DISCOVERY_GAP (extrae bien, otro artículo) | ampliar descubrimiento/ventana del medio |
+| 6 | lado.mx | no | Tequila (CLI-0002) | FUENTE_NO_CUBIERTA (5 notas) | evaluar alta de fuente |
+| 7 | Momento Diario | no | Tequila | FUENTE_NO_CUBIERTA (3) | evaluar alta de fuente |
+| 8 | Marca México | no | Tequila | FUENTE_NO_CUBIERTA (3) | evaluar alta de fuente |
+| 9 | Talajalisco | no | Tequila | FUENTE_NO_CUBIERTA (2) | evaluar alta de fuente |
+| 10 | NTR Guadalajara | no | mezcal/tequila | FUENTE_NO_CUBIERTA (2) | evaluar alta de fuente |
+| 11 | Telediario | no | Bebidas | FUENTE_NO_CUBIERTA (2) | evaluar alta de fuente |
+| 12 | Xeu | no | Bebidas | FUENTE_NO_CUBIERTA (2) | evaluar alta de fuente |
+| 13 | Hoy Tamaulipas | no | Reforma laboral | FUENTE_NO_CUBIERTA (2) | evaluar alta de fuente |
+| 14 | AM | no | Bebidas/GTO | FUENTE_NO_CUBIERTA (2) | evaluar alta de fuente |
+| 15 | Tráfico ZMG | no | Bebidas | FUENTE_NO_CUBIERTA (2) | evaluar alta de fuente |
+| 16 | MSN México | no | Bebidas | SINDICADA (agregador, bajo valor) | descartar / no accionable |
+| 17 | Promodescuentos | no | IEPS/Refrescos | SINDICADA / no editorial | descartar |
+| 18 | (keyword) Tequila×57 | — | CLI-0002 | PRECISION_TRADEOFF | afinar regla `tequila` (contexto crisis) sin abrir FP |
+| 19 | (keyword) Reforma laboral×21 | — | CLI-0003 | KEYWORD/COBERTURA | verificar keywords activas + fuentes laborales |
+| 20 | (keyword) Jumex×16 | — | CLI-0001 | COBERTURA/EXTRACCION | auditar fuentes Jumex + extracción |
 
 ---
 
@@ -20,12 +104,13 @@
 | Alertas sombra (10) | trazables por columna | P1/P2/BLOQUEADA/DUPLICADA + cluster_id explícitos |
 | Envío real | **desactivado** | módulo interno disabled by default |
 
-**Dictamen:** shadow estable y ahora medible. El bloqueador #1 para *medir*
-sustitución no es cobertura sino que **la última comparación da 0 MATCH** con
-121 registros PC y 8 menciones Ethos: eso apunta a un problema de
-comparación/atribución (ventana, normalización de URL o import PC), no a que
-existan 112 gaps de descubrimiento reales. Hasta resolver el 0-match, los
-porcentajes de cobertura no son confiables como evidencia de reemplazo.
+**Dictamen (actualizado tras diagnóstico MATCH=0 — ver §0):** shadow estable y
+medible. El `MATCH=0` **quedó diagnosticado**: NO es bug del comparador, es
+**brecha real de cobertura + extracción** (Ethos capturó 8 menciones en 3 medios;
+PC 121 en ~40 medios, sin solape de artículos). El bloqueador real para sustituir
+es doble: (1) **extracción de cuerpo vacía** en medios que sí están en el cron, y
+(2) **fuentes no cubiertas** que PC sí monitorea. La cobertura ajustada (0%) es
+real para esta ventana, no un artefacto.
 
 ---
 
@@ -42,11 +127,10 @@ cobertura_bruta         = 0
 cobertura_ajustada      = 0
 ```
 
-`match = 0` es la señal más importante: con 121 vs 8 y cero cruces, lo probable
-es **desalineación de la comparación** (ventana temporal distinta entre import
-PC y menciones Ethos, o normalización de URL/título), no 112 descubrimientos
-perdidos. Prioridad: reproducir el cruce con la misma ventana y revisar
-`normalizeUrl`/`diferencia_dias`.
+`match = 0` **ya reproducido y diagnosticado** (ver §0): con 8 menciones Ethos en
+3 medios vs 121 PC en ~40 medios, y **0 candidatos en los 5 niveles de matching**,
+la causa es brecha real (cobertura/extracción), no desalineación del cruce. La
+cota máxima teórica de cobertura en esta ventana era 8/121 ≈ 6.6%.
 
 ---
 

@@ -43,6 +43,7 @@
     "import-pc-media-catalog": "tsx scripts/import-pressclipping-media-catalog.ts",
     "audit-extraction-quality": "tsx scripts/audit-extraction-quality.ts",
     "audit-replacement-readiness": "tsx scripts/audit-replacement-readiness.ts",
+    "debug-live-comparison-zero-match": "tsx scripts/debug-live-comparison-zero-match.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "worker:typecheck": "tsc --noEmit -p worker/tsconfig.json",
