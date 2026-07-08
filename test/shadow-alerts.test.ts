@@ -381,14 +381,22 @@ describe('normalizarValoracion', () => {
 });
 
 describe('contrato 10_Alertas_Sombra', () => {
-  it('headers correctos y en orden (25)', () => {
-    expect(ALERTAS_SOMBRA_HEADERS).toEqual([
+  it('preserva las 25 columnas originales en orden', () => {
+    expect(ALERTAS_SOMBRA_HEADERS.slice(0, 25)).toEqual([
       'run_id', 'fecha_ejecucion', 'modo', 'cliente_id', 'cliente', 'mencion_id',
       'noticia_id', 'fecha_publicacion', 'medio', 'titulo', 'url', 'keyword',
       'grupo_tema', 'sentimiento', 'valoracion', 'prioridad_medio',
       'tipo_alerta_simulada', 'canal_simulado', 'habria_alerta', 'motivo_alerta',
       'motivo_bloqueo', 'regla_disparo', 'dedupe_key', 'estado_shadow', 'notas',
     ]);
-    expect(ALERTAS_SOMBRA_HEADERS).toHaveLength(25);
+  });
+  it('agrega columnas de observabilidad al final (P1/P2/cluster/no-envío/traza)', () => {
+    expect(ALERTAS_SOMBRA_HEADERS.slice(25)).toEqual([
+      'prioridad_alerta', 'es_p1', 'es_p2', 'estado_alerta', 'es_duplicada',
+      'cluster_id', 'cluster_key', 'cluster_tema', 'cluster_region', 'cluster_count',
+      'sin_envio', 'canal', 'workflow', 'tier', 'fuente', 'shadow_client_allowlist',
+      'send_enabled', 'whatsapp_enabled', 'email_enabled',
+    ]);
+    expect(ALERTAS_SOMBRA_HEADERS).toHaveLength(44);
   });
 });

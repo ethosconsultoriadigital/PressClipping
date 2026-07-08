@@ -14,14 +14,62 @@
  */
 import { normalizeUrl } from '../comparators/mentionMatcher.js';
 
-/** Cabeceras canónicas de la pestaña de salida `10_Alertas_Sombra` (solo-append). */
+/**
+ * Cabeceras canónicas de la pestaña de salida `10_Alertas_Sombra` (solo-append).
+ *
+ * Las 25 primeras columnas son las ORIGINALES (no se reordenan ni se borran). A
+ * partir de `prioridad_alerta` son columnas EXPLÍCITAS de observabilidad añadidas
+ * para medir readiness (P1/P2/BLOQUEADA/DUPLICADA, cluster, no-envío, trazabilidad).
+ * Se agregan al final; el writer las crea solo si faltan (ver `ensureOutputHeaders`).
+ */
 export const ALERTAS_SOMBRA_HEADERS = [
+  // ── Originales (no tocar orden) ──
   'run_id', 'fecha_ejecucion', 'modo', 'cliente_id', 'cliente', 'mencion_id',
   'noticia_id', 'fecha_publicacion', 'medio', 'titulo', 'url', 'keyword',
   'grupo_tema', 'sentimiento', 'valoracion', 'prioridad_medio',
   'tipo_alerta_simulada', 'canal_simulado', 'habria_alerta', 'motivo_alerta',
   'motivo_bloqueo', 'regla_disparo', 'dedupe_key', 'estado_shadow', 'notas',
+  // ── Observabilidad explícita (nuevas) ──
+  'prioridad_alerta', 'es_p1', 'es_p2', 'estado_alerta', 'es_duplicada',
+  'cluster_id', 'cluster_key', 'cluster_tema', 'cluster_region', 'cluster_count',
+  'sin_envio', 'canal', 'workflow', 'tier', 'fuente', 'shadow_client_allowlist',
+  'send_enabled', 'whatsapp_enabled', 'email_enabled',
 ] as const;
+
+/** Columnas nuevas de observabilidad (para migración incremental del header). */
+export const ALERTAS_SOMBRA_HEADERS_OBSERVABILIDAD = [
+  'prioridad_alerta', 'es_p1', 'es_p2', 'estado_alerta', 'es_duplicada',
+  'cluster_id', 'cluster_key', 'cluster_tema', 'cluster_region', 'cluster_count',
+  'sin_envio', 'canal', 'workflow', 'tier', 'fuente', 'shadow_client_allowlist',
+  'send_enabled', 'whatsapp_enabled', 'email_enabled',
+] as const;
+
+/**
+ * Deriva los campos EXPLÍCITOS de observabilidad a partir del `estado_shadow`.
+ * P1_INMEDIATA→P1, P2_RESUMEN→P2, P3_DASHBOARD→P3, BLOQUEADA/DUPLICADA aparte.
+ */
+export function camposObservabilidad(estadoShadow: EstadoShadow): {
+  prioridad_alerta: string;
+  es_p1: boolean;
+  es_p2: boolean;
+  es_duplicada: boolean;
+  estado_alerta: string;
+} {
+  switch (estadoShadow) {
+    case 'P1_INMEDIATA':
+      return { prioridad_alerta: 'P1', es_p1: true, es_p2: false, es_duplicada: false, estado_alerta: 'P1' };
+    case 'P2_RESUMEN':
+      return { prioridad_alerta: 'P2', es_p1: false, es_p2: true, es_duplicada: false, estado_alerta: 'P2' };
+    case 'P3_DASHBOARD':
+      return { prioridad_alerta: 'P3', es_p1: false, es_p2: false, es_duplicada: false, estado_alerta: 'P3' };
+    case 'DUPLICADA':
+      return { prioridad_alerta: '', es_p1: false, es_p2: false, es_duplicada: true, estado_alerta: 'DUPLICADA' };
+    case 'BLOQUEADA':
+      return { prioridad_alerta: '', es_p1: false, es_p2: false, es_duplicada: false, estado_alerta: 'BLOQUEADA' };
+    default:
+      return { prioridad_alerta: '', es_p1: false, es_p2: false, es_duplicada: false, estado_alerta: String(estadoShadow) };
+  }
+}
 
 export type TipoAlertaSimulada = 'inmediata' | 'resumen' | 'monitoreo' | 'bloqueada';
 export type CanalSimulado = 'whatsapp' | 'email' | 'dashboard' | 'ninguno';

@@ -12,6 +12,7 @@
  *   - Crisis distintas (familia distinta) o regiones distintas → clusters aparte.
  *   - Un cluster puede ser de tamaño 1 (alerta sin pares) — no se pierde nada.
  */
+import { createHash } from 'node:crypto';
 import type { InternalAlert, Severidad } from './types.js';
 
 /** Familias de keyword de la crisis de bebidas (sinónimos que unifican cluster). */
@@ -106,6 +107,56 @@ const REGION_LABEL: Record<string, string> = {
   jalisco: 'Jalisco',
   nacional: 'Nacional',
 };
+
+/** Entrada mínima para calcular el cluster de una alerta/mención cualquiera. */
+export interface ClusterInput {
+  cliente_id?: string | null;
+  keyword?: string | null;
+  titulo?: string | null;
+  razon?: string | null;
+  fecha_publicacion?: string | null;
+}
+
+/** Campos de cluster estables y auditables para 10_Alertas_Sombra. */
+export interface ClusterFields {
+  /** tema canónico: familia crisis unificada u 'otro:<keyword>'. */
+  cluster_tema: string;
+  /** región legible (Guanajuato / Jalisco / Nacional). */
+  cluster_region: string;
+  /** clave legible: cliente|tema|region|fecha_cluster. */
+  cluster_key: string;
+  /** id corto y estable (hash de cluster_key). */
+  cluster_id: string;
+}
+
+/** Fecha_cluster (YYYY-MM-DD) a partir de una fecha ISO/`YYYY-MM-DD...`. */
+function fechaCluster(fecha?: string | null): string {
+  const s = String(fecha ?? '').trim();
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1]! : '';
+}
+
+/**
+ * Calcula el cluster de una alerta/mención de forma DETERMINÍSTICA.
+ *
+ * cluster_key = cliente_id | familia_keyword | region | fecha_cluster.
+ * Para CLI-0002 crisis de bebidas unifica sinónimos (una sola familia); para el
+ * resto usa `otro:<keyword>` (conservador: no mezcla clientes ni temas distintos).
+ */
+export function computeClusterFields(inp: ClusterInput): ClusterFields {
+  const cliente = String(inp.cliente_id ?? '').trim() || 'SIN_CLIENTE';
+  const blob = `${inp.keyword ?? ''} ${inp.titulo ?? ''} ${inp.razon ?? ''}`;
+  const esCrisis = detectCrisisFamilies(blob).length > 0 || /crisis_bebidas/i.test(String(inp.razon ?? ''));
+  const tema = esCrisis
+    ? FAMILIA_CRISIS_BEBIDAS
+    : `otro:${String(inp.keyword ?? '').trim().toLowerCase() || 'sin_keyword'}`;
+  const regionKey = esCrisis ? regionBucket(blob) : 'nacional';
+  const region = REGION_LABEL[regionKey] ?? regionKey;
+  const fecha = fechaCluster(inp.fecha_publicacion);
+  const cluster_key = `${cliente}|${tema}|${regionKey}|${fecha}`;
+  const cluster_id = 'CL-' + createHash('sha1').update(cluster_key).digest('hex').slice(0, 10);
+  return { cluster_tema: tema, cluster_region: region, cluster_key, cluster_id };
+}
 
 /**
  * Agrupa alertas en clusters para digest. Clave de cluster:

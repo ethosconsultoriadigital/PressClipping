@@ -24,14 +24,16 @@ import {
 } from '../src/utils/shadowGuard.js';
 import { ventanaMovil } from '../src/utils/dateWindow.js';
 import { OUTPUT_TABS, getOutputTab, withSheetsRetry } from '../src/sheets/client.js';
-import { appendHistoryRows, type OutRow } from '../src/sheets/write.js';
+import { appendHistoryRows, ensureOutputHeaders, type OutRow } from '../src/sheets/write.js';
 import {
   evaluarLote,
   normalizarValoracion,
+  camposObservabilidad,
   ALERTAS_SOMBRA_HEADERS,
   type MencionAlertaInput,
   type CandidatoAlertaSombra,
 } from '../src/alerts/shadowAlertRules.js';
+import { computeClusterFields } from '../src/notifications/grouping.js';
 
 /** Pestaña de salida (solo-append) para alertas sombra. */
 const ALERTAS_TAB = '10_Alertas_Sombra';
@@ -178,11 +180,23 @@ interface TrazaObservacion {
   allowlist?: string[];
 }
 
+/** Campos de cluster para un candidato (estables y auditables). */
+function clusterDe(c: CandidatoAlertaSombra) {
+  return computeClusterFields({
+    cliente_id: c.cliente_id ?? '',
+    keyword: c.keywords_detectadas || c.keyword || '',
+    titulo: c.titulo ?? '',
+    razon: `${c.regla_disparo ?? ''} ${c.grupo_tema ?? ''}`,
+    fecha_publicacion: c.fecha_publicacion ?? '',
+  });
+}
+
 function aFilaSheet(
   c: CandidatoAlertaSombra,
   runId: string,
   fecha: string,
   traza: TrazaObservacion = {},
+  clusterCountById: Map<string, number> = new Map(),
 ): OutRow {
   // Trazabilidad y no-envío se preservan en `notas` como tokens clave=valor
   // (sin cambiar el esquema de headers de 10_Alertas_Sombra).
@@ -200,6 +214,10 @@ function aFilaSheet(
   if (traza.tier) notas.push(`tier=${traza.tier}`);
   if (traza.fuente) notas.push(`fuente=${traza.fuente}`);
   if (c.keywords_detectadas) notas.push(`keywords_detectadas=${c.keywords_detectadas}`);
+
+  const obs = camposObservabilidad(c.estado_shadow);
+  const cl = clusterDe(c);
+  const clusterCount = clusterCountById.get(cl.cluster_id) ?? 1;
 
   return {
     run_id: runId,
@@ -227,6 +245,26 @@ function aFilaSheet(
     dedupe_key: c.dedupe_key,
     estado_shadow: c.estado_shadow,
     notas: notas.join('; '),
+    // ── Observabilidad explícita ──
+    prioridad_alerta: obs.prioridad_alerta,
+    es_p1: obs.es_p1,
+    es_p2: obs.es_p2,
+    estado_alerta: obs.estado_alerta,
+    es_duplicada: obs.es_duplicada,
+    cluster_id: cl.cluster_id,
+    cluster_key: cl.cluster_key,
+    cluster_tema: cl.cluster_tema,
+    cluster_region: cl.cluster_region,
+    cluster_count: clusterCount,
+    sin_envio: true,
+    canal: c.canal_simulado,
+    workflow: traza.workflow ?? '',
+    tier: traza.tier ?? '',
+    fuente: traza.fuente ?? '',
+    shadow_client_allowlist: (traza.allowlist ?? []).join(','),
+    send_enabled: false,
+    whatsapp_enabled: false,
+    email_enabled: false,
   };
 }
 
@@ -375,6 +413,12 @@ async function main(): Promise<void> {
       fuente: args.fuente,
       allowlist: args.shadowClientAllowlist,
     };
+    // cluster_count por run: nº de candidatos que comparten cluster_id.
+    const clusterCountById = new Map<string, number>();
+    for (const c of candidatos) {
+      const { cluster_id } = clusterDe(c);
+      clusterCountById.set(cluster_id, (clusterCountById.get(cluster_id) ?? 0) + 1);
+    }
     const existentes = await leerLlavesExistentes();
     const preexistentesDelRun = await contarFilasDeRun(args.runId);
     const filas: OutRow[] = [];
@@ -382,8 +426,17 @@ async function main(): Promise<void> {
       const llave = llaveFila(args.runId, c.mencion_id, c.dedupe_key, idx);
       if (existentes.has(llave)) return; // ya escrita en un reintento del mismo run
       existentes.add(llave);
-      filas.push(aFilaSheet(c, args.runId, fecha, traza));
+      filas.push(aFilaSheet(c, args.runId, fecha, traza, clusterCountById));
     });
+    // Migración incremental de cabeceras: agrega columnas de observabilidad si
+    // faltan (no borra ni reordena las existentes). Readback de header incluido.
+    const ensure = await ensureOutputHeaders(ALERTAS_TAB, [...ALERTAS_SOMBRA_HEADERS]);
+    if (ensure.columnas_agregadas.length > 0) {
+      logger.info(
+        { tab: ALERTAS_TAB, columnas_agregadas: ensure.columnas_agregadas },
+        'Alertas sombra: columnas de observabilidad agregadas a 10_Alertas_Sombra.',
+      );
+    }
     const escritas = await appendHistoryRows(ALERTAS_TAB, [...ALERTAS_SOMBRA_HEADERS], filas);
     // Readback obligatorio: releer 10 y contar filas de este run.
     const filas10Readback = await contarFilasDeRun(args.runId);

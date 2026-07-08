@@ -41,6 +41,8 @@
     "shadow-daily-validated-tier": "tsx scripts/run-shadow-daily-validated-tier.ts",
     "send-internal-alerts": "tsx scripts/send-internal-alerts.ts",
     "import-pc-media-catalog": "tsx scripts/import-pressclipping-media-catalog.ts",
+    "audit-extraction-quality": "tsx scripts/audit-extraction-quality.ts",
+    "audit-replacement-readiness": "tsx scripts/audit-replacement-readiness.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "worker:typecheck": "tsc --noEmit -p worker/tsconfig.json",

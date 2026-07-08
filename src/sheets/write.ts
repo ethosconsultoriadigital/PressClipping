@@ -194,6 +194,52 @@ export async function mergeOutputRowsByKey(
   };
 }
 
+/** Resultado de asegurar columnas en una pestaña de salida. */
+export interface EnsureHeadersResumen {
+  headers_antes: string[];
+  headers_despues: string[];
+  columnas_agregadas: string[];
+}
+
+/**
+ * Asegura que una pestaña de salida EXISTENTE contenga TODAS las `headers`
+ * requeridas, agregando al FINAL solo las que faltan (por cabecera normalizada).
+ * NO borra, NO reordena ni cambia las existentes. Si la pestaña no existe, la
+ * crea con `headers`. Pensada para migrar `10_Alertas_Sombra` a columnas nuevas
+ * de observabilidad sin romper filas históricas.
+ */
+export async function ensureOutputHeaders(
+  title: string,
+  headers: string[],
+): Promise<EnsureHeadersResumen> {
+  const doc = await getOutputSpreadsheet();
+  let sheet = doc.sheetsByTitle[title];
+  if (!sheet) {
+    sheet = await withSheetsRetry(() => doc.addSheet({ title, headerValues: headers }), `addSheet ${title}`);
+    return { headers_antes: [], headers_despues: [...headers], columnas_agregadas: [...headers] };
+  }
+  await withSheetsRetry(() => sheet!.loadHeaderRow(), `loadHeaderRow ${title}`).catch(() => undefined);
+  const headersAntes = sheet.headerValues && sheet.headerValues.length > 0 ? [...sheet.headerValues] : [];
+  if (headersAntes.length === 0) {
+    await withSheetsRetry(() => sheet!.setHeaderRow(headers), `setHeaderRow ${title}`);
+    return { headers_antes: [], headers_despues: [...headers], columnas_agregadas: [...headers] };
+  }
+  const existentesNorm = new Set(headersAntes.map((h) => normalizeHeader(h)));
+  const faltantes = headers.filter((h) => !existentesNorm.has(normalizeHeader(h)));
+  if (faltantes.length === 0) {
+    return { headers_antes: headersAntes, headers_despues: headersAntes, columnas_agregadas: [] };
+  }
+  const headersDespues = [...headersAntes, ...faltantes];
+  if (sheet.columnCount < headersDespues.length) {
+    await withSheetsRetry(
+      () => sheet!.resize({ rowCount: sheet!.rowCount, columnCount: headersDespues.length }),
+      `resize ${title}`,
+    );
+  }
+  await withSheetsRetry(() => sheet!.setHeaderRow(headersDespues), `setHeaderRow ${title}`);
+  return { headers_antes: headersAntes, headers_despues: headersDespues, columnas_agregadas: faltantes };
+}
+
 /**
  * Append histórico ACUMULATIVO a una pestaña de la Sheet de salida.
  *
