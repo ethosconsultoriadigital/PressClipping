@@ -68,9 +68,12 @@ Estados posibles: `NO_LISTO`, `LISTO_SHADOW`, `CANDIDATO_ALERTAS_REALES`, `SOLO_
 - Dedupe OK (`unique(noticia_id, keyword_id)`).
 - Sin boilerplate; sin aranceles/T-MEC off-topic como P1.
 
-> Estado hoy: MED-0169 tiene 5 schedules limpios; MED-0171 se agregó al tier y
-> aún **no** tiene schedules automáticos post-`e2fc9ea`. El conteo de "3
-> consecutivos con el tier ampliado" arranca desde el primer schedule post-commit.
+> Estado hoy (post-`ab32bcb`): **1 schedule crisis post-commit limpio** (run
+> `28915825440`, sha `ab32bcb`, MED-0170/0169/0171, 0 errores, `mismatch=false`,
+> `send=false`). Faltan 2 schedules crisis más y el primer daily post-commit para
+> cerrar "3 consecutivos con el tier ampliado". Revisión de P1 CLI-0002 y veredicto
+> en `docs/PILOTO_INTERNO_CLI0002_PREVIEW.md` y `docs/PILOTO_INTERNO_CLI0002_GO_NO_GO.md`
+> (veredicto actual: **GO_SOLO_DRY_RUN**, FP P1 = 0 %).
 
 ### CLI-0003 laboral
 

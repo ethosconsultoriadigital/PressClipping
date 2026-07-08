@@ -43,8 +43,8 @@ Todos comparten `concurrency: group: live-comparison-shadow` con
 | medio_id | medio | fuente | frecuencia | estado |
 |---|---|---|---|---|
 | MED-0170 | UNO MAS UNO | sitemap | 6h | estable (RSS rota crisis) |
-| MED-0169 | El Sol de Irapuato | rss | 6h | ESTABLE (5 schedules limpios) |
-| MED-0171 | El Otro Enfoque | rss | 6h | nuevo (solo evidencia manual) |
+| MED-0169 | El Sol de Irapuato | rss | 6h | ESTABLE (5+ schedules limpios) |
+| MED-0171 | El Otro Enfoque | rss | 6h | 1er schedule automático limpio (run `28915825440`) |
 
 ### Daily validated (fuente `auto` = cascada del medio)
 
@@ -161,6 +161,8 @@ npm run send-internal-alerts -- --send-real --client=CLI-0002 --severity=P1 --li
 
 - **Rollback**: `SEND_ALERTS=false` (o vaciar destinatarios) → guardas bloquean.
 - **Seguridad**: nunca loggea password/token/número; destinatarios sólo por hash.
+- **Piloto CLI-0002**: revisión y veredicto en `docs/PILOTO_INTERNO_CLI0002_PREVIEW.md`
+  y `docs/PILOTO_INTERNO_CLI0002_GO_NO_GO.md` (actual: **GO_SOLO_DRY_RUN**).
 
 ---
 
