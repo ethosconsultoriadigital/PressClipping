@@ -66,6 +66,88 @@ por regla). El porcentaje real de gap se recategoriza abajo (§4): el "112 accio
 previo era cota superior; con el diagnóstico, buena parte es **extracción** (medios
 en cron sin cuerpo) y **fuente no cubierta**, no puro descubrimiento.
 
+---
+
+## 0.1 Reparación de extracción en cron críticos (2026-07-08)
+
+Fase ejecutada tras el diagnóstico MATCH=0. Objetivo: recuperar el cuerpo de los
+4 medios que ya estaban en cron pero aparecían con ~100% cuerpo vacío en la ventana
+del comparativo.
+
+**Hallazgo de causa raíz (revisa la hipótesis previa de "extractor roto"):**
+el extractor **no está roto**. Al descargar el HTML público en vivo de muestras de
+los 4 medios, el extractor recupera el cuerpo completo por las rutas ya existentes:
+
+| medio | id | fuente | método que funciona | cuerpo recuperado (muestra) |
+|---|---|---|---|---|
+| El Economista | MED-0001 | RSS | `html_article` (+ JSON-LD disponible) | 2.1k–5.3k chars |
+| La Crónica de Hoy | MED-0154 | SITEMAP | `html_article` | 1.3k–4.6k chars |
+| El Heraldo de México | MED-0157 | SITEMAP | `html_article` | 1.8k–3.8k chars |
+| El Sol de México | MED-0158 | RSS | `oem_storyline` (RSC) | 1.4k–2.5k chars |
+
+La verdadera causa: esas notas fueron **crawleadas desde RSS/sitemap pero nunca
+enriquecidas** (`texto_extraido=NULL`, `fuente_extraccion=rss/sitemap`,
+`estado_extraccion=ok`). El cuerpo estaba disponible en el HTML estático; solo
+faltó correr `enrich-news` sobre ellas. **No se tocó código de extractor** (regla:
+no modificar extractores que ya funcionan). Clasificación por medio:
+`EXTRACTOR_FIXABLE_STATIC` (los 4) → reparables por re-enrich, sin JS/Playwright/bypass.
+
+**Re-enrich acotado por medio (`--only-missing-clean-text`):**
+
+| medio | leídas | recuperadas | fallidas (404) | cuerpo vacío antes→después | mediana chars antes→después |
+|---|---|---|---|---|---|
+| El Economista | 420 | 419 | 1 | 42% → **0%** | 1550 → **2969** |
+| La Crónica | 368 | 365 | 2 | 37% → **0%** | 1691 → **2331** |
+| El Heraldo | 628 | 627 | 1 | 68% → **0%** | 0 → **3180** |
+| El Sol de México | 221 | 221 | 0 | 25% → **0%** | 2304 → **2876** |
+| **Total** | **1637** | **1632** | **4** | — | — |
+
+> Nota: se usó `--only-missing-clean-text` (no `--force-refresh-clean-text`), porque
+> las notas vacías tienen `texto_nota_limpia IS NULL` y force-refresh solo re-limpia
+> notas que ya tienen texto.
+
+**Detección (dry-run → gate → real):** todas las notas re-enriquecidas estaban
+`menciones_procesado=false`, así que se detectaron sin reset. Todos los medios
+pasaron el gate (`potenciales ≤ 50`, `FP ≤ 25%`, sin tequila/turismo como crisis,
+sin listings como cuerpo).
+
+| medio | analizadas | potenciales | FP est. | menciones reales | duplicadas |
+|---|---|---|---|---|---|
+| El Economista | 419 | 29 | ~18% | 29 | 0 |
+| La Crónica | 365 | 12 | ~20% | 12 | 0 |
+| El Heraldo | 627 | 4 | ~25% | 4 | 0 |
+| El Sol de México | 221 | 12 | ~10% | 12 | 0 |
+| **Total** | **1632** | **57** | — | **57** | **0** |
+
+Ejemplos reales recuperados: *"Sindicatos agilizan organización por vías digitales"*
+(El Economista, `MATCH_REAL` score 1.00), *"Huelga en el Monte de Piedad"* (La Crónica),
+*"STPS concluye investigaciones en el marco del MLRR del T-MEC"* (El Sol).
+
+**Impacto en el comparativo (backtest ventana MATCH=0, 2026-07-05→07):**
+
+| métrica | antes (MATCH=0) | después | Δ |
+|---|---|---|---|
+| menciones_ethos | 8 | **99** | +91 |
+| menciones_pressclipping | 121 | 121 | 0 |
+| **match** | **0** | **6** | **+6** |
+| cobertura_bruta | ~0.00 | 0.05 | +0.05 |
+| cobertura_ajustada | ~0.00 | 0.06 | +0.06 |
+| clusters_matched | 0 | 2 | +2 |
+| filas_05 / readback | — | 218 / 6 | mismatch=false |
+
+Ventana 48h actual (2026-07-06→08): Ethos 71 menciones, match=1
+(`MATCH_REAL` El Economista "Inspección de jornada laboral…", score 1.00),
+sheets_write_mismatch=false.
+
+**Medios reparados:** los 4 (`EXTRACCION_REPARADA`). **Medios no reparables:** ninguno
+en este lote (las ~4 fallas son URLs viejas con HTTP 404, no bloqueo estructural).
+
+**Siguiente brecha (post-reparación):** el gap remanente contra PC ya **no es de estos
+4 medios**, sino (a) `FUENTE_NO_CUBIERTA` (lado.mx, Momento Diario, Marca, etc. — medios
+regionales fuera del cron), (b) `Tequila` como keyword amplia que PC cuenta y Ethos
+filtra por precisión (trade-off por diseño), y (c) sindicación de bajo valor en PC
+(`Se acabó el Mundial…`/Jumex replicado) que son PC_FALSE_POSITIVE.
+
 ### Top gaps accionables (post-diagnóstico)
 
 | # | medio | en cron | keyword/cliente | causa | acción exacta |
