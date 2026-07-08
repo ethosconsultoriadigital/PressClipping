@@ -203,3 +203,23 @@ _No enviado a cliente._
 - **FP estimado**: 0 % (igual que la revisión individual; el digest no introduce FP).
 - **Riesgo de fatiga**: **mitigado** — de 20 mensajes a 2. El humano ve el evento
   completo con sus fuentes en un solo aviso por región.
+
+---
+
+## 6. Actualización post-daily
+
+- **Fecha**: 2026-07-08 (UTC-6).
+- **Run daily auditado**: **NO** — aún no existe schedule daily post-`ab32bcb`.
+  Último daily `28878547298` (`2026-07-07T15:33Z`, sha `0dcbb9c`, **pre-commit**);
+  próximo ~`2026-07-08 12:45Z` (MED-0083/0066/0006/0012).
+- **run_id daily**: pendiente.
+- **Dry-run digest ejecutado**: sí (re-run de verificación).
+- **Clusters generados**: 2 (GTO 14 notas / Nacional 6) — estable respecto a la §5.
+- **Preview email/WhatsApp digest**: sin cambios respecto a §5 (mismos clusters).
+- **FP estimado**: 0 %.
+- **Reducción de volumen**: 20 → 2 (–90 %).
+- **Resultado módulo**: `would_send=0`, `bloqueadas=4`, `enviadas=0`,
+  `reason=real_alerts_disabled`, `envio_real_confirmado=false`.
+- **Observación humana**: la señal y el digest se mantienen limpios entre corridas.
+  El **único bloqueante** para subir a `GO_CREDENCIALES_INTERNAS` es auditar el
+  primer daily post-`ab32bcb`. Sin él, el estado permanece `GO_SOLO_DRY_RUN`.

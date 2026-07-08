@@ -162,7 +162,9 @@ npm run send-internal-alerts -- --send-real --client=CLI-0002 --severity=P1 --li
 - **Rollback**: `SEND_ALERTS=false` (o vaciar destinatarios) → guardas bloquean.
 - **Seguridad**: nunca loggea password/token/número; destinatarios sólo por hash.
 - **Piloto CLI-0002**: revisión y veredicto en `docs/PILOTO_INTERNO_CLI0002_PREVIEW.md`
-  y `docs/PILOTO_INTERNO_CLI0002_GO_NO_GO.md` (actual: **GO_SOLO_DRY_RUN**).
+  y `docs/PILOTO_INTERNO_CLI0002_GO_NO_GO.md` (actual: **GO_SOLO_DRY_RUN**; bloqueante
+  único = daily post-`ab32bcb`). Carga de credenciales: `docs/CREDENCIALES_INTERNAS_CHECKLIST.md`.
+- **Digest anti-fatiga**: `--digest` agrupa P1 de la misma crisis (20 → 2 clusters).
 
 ---
 

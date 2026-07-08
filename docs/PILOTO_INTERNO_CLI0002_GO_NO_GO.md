@@ -2,7 +2,13 @@
 
 > Decisión de madurez del piloto interno de alertas para CLI-0002 (crisis_bebidas
 > P1). Este documento **no activa nada**. Estado del módulo: **disabled by default**.
-> Última actualización: 2026-07-08 (post-commit `ab32bcb`; digest P1 implementado).
+> Última actualización: 2026-07-08 (digest re-verificado; daily post-`ab32bcb` aún pendiente).
+>
+> **Re-verificación (cierre GO_CREDENCIALES_INTERNAS)**: dry-run digest repetido
+> (limit=20 → 2 clusters; limit=5 → 1 cluster), `would_send=0`, `enviadas=0`,
+> `reason=real_alerts_disabled`. El daily post-`ab32bcb` **no ha corrido todavía**,
+> por lo que **no** se sube el estado (regla de la fase). Checklist de credenciales
+> preparado en `docs/CREDENCIALES_INTERNAS_CHECKLIST.md`.
 
 ---
 

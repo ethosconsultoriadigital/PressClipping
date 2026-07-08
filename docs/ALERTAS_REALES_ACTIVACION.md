@@ -198,3 +198,9 @@ Aun con `--send-real`, si el entorno no autoriza (9 capas) NO envía.
 
 Poner `SEND_ALERTS=false` (o `ALLOW_REAL_ALERTS=false`, o vaciar destinatarios) →
 todas las guardas vuelven a bloquear. No requiere revertir código.
+
+### Carga de credenciales internas
+
+El procedimiento para preparar/cargar credenciales internas **sin enviar** (con
+`SEND_ALERTS=false`) está en `docs/CREDENCIALES_INTERNAS_CHECKLIST.md`. Solo aplica
+cuando el GO/NO-GO llegue a `GO_CREDENCIALES_INTERNAS`.
