@@ -531,6 +531,84 @@ que ese contenido entre limpio y que la promo quede fuera.
 
 ---
 
+## 0.6 Cobertura corporativo-regulatoria CLI-0001 Jumex (2026-07-08)
+
+Objetivo: alimentar la puerta contextual Jumex (fase 0.5) con fuentes reales de
+negocio/regulación, evitando promo retail. Fase de auditoría + reparación acotada
+(sin altas masivas, sin producción).
+
+### Brecha CLI-0001 (05, SOLO_PRESSCLIPPING)
+
+| Dato | Valor |
+|---|---|
+| total SOLO_PC | 23 |
+| accionable real | 4 (**un solo evento**: "Jumex rechaza mango tabasqueño / productor lo regala", sindicado x4) |
+| retail/promo low-value | 10 (Soriana/Julio Regalado 3x2) |
+| PC false positive / off-topic | 7 ("Se acabó el Mundial", subsidios combustibles) |
+| revisar humano | 2 |
+| top keywords | Jumex (18), IEPS Refrescos (2), IEPS Bebidas Azucaradas (1) |
+
+El gap accionable es **1 evento local de baja severidad**; no hay volumen corporativo/
+regulatorio de Jumex en la brecha.
+
+### Ranking de fuentes candidatas (auditoría técnica, `audit-media-sources`)
+
+| Fuente | medio_id | estado audit | cron | señal CLI-0001 | decisión |
+|---|---|---|---|---|---|
+| La Jornada | MED-0029 | REPAIRABLE_SITEMAP_HIGH_CONFIDENCE (conf 1.0, gap 9) | no | evento mango (baja sev.) | **reparada, pero 403 en crawl → DESCARTAR_BLOQUEADO** |
+| Líderes Mexicanos | MED-0149 | READY_KEEP_CURRENT (conf 1.0) | no | 0 (lujo/lifestyle) | **DESCARTAR_BAJO_VALOR** |
+| Reporte Índigo | MED-0054 | BLOCKED (conf 0.1) | no | — | descartar |
+| Fortuna y Poder | MED-0007 | DO_NOT_TOUCH (conf 0.5) | no | — | descartar |
+| El Economista / Forbes / El Financiero / Expansión / Líder Empresarial | MED-0001/0145/0156/0159/0163 | ya en cron (322–1846 notas/30d) | **sí** | **0 menciones Jumex** | ya cubiertos; sin señal |
+
+### Auditoría técnica / re-enrich
+
+- **La Jornada (MED-0029)**: fuente reparada vía `--update-db` (sitemap validado).
+  El crawl dirigido acotado (max 40, sitemap) devolvió **HTTP 403** (bloqueo bot).
+  Sin proxy/bypass permitido → **no ingerible**. Es la mejor fuente del gap pero
+  queda fuera de alcance.
+- **Líderes Mexicanos (MED-0149)**: crawl RSS acotado (10 notas) + enrich 10/10
+  (cuerpos 1.4k–10k ch, extracción EXCELENTE). Contenido: relojes/autos/lujo/
+  negocios-lifestyle. **0 notas con señal CLI-0001**; 3 hits espurios de "néctar"
+  (autos) → **bloqueados por el gate (FP 0%)**.
+
+### Detect dry-run / real / comparativo
+
+- **Dry-run gate (MED-0149)**: 3 potenciales espurios, **permitidas 0**, bloqueadas
+  3 (2 promo, 1 insuficiente), **FP 0%**. Gate ✅ pero sin señal que capturar.
+- **Detect real: N/A** (0 señal CLI-0001; no se ejecutó para no insertar menciones
+  off-scope de un medio fuera de cron).
+- **Comparativo: N/A** (sin menciones nuevas).
+
+### Alta shadow
+
+**No se agregó ninguna fuente a cron.** Ningún candidato cumple los criterios
+(señal CLI-0001 real + fuente viable): La Jornada 403, Líderes sin señal, resto
+bloqueado/DO_NOT_TOUCH. `shadowMedia.ts` sin cambios.
+
+### 08_Cobertura_Medios
+
+Actualizados **solo los 2 medios tocados** (MED-0029, MED-0149) con
+`update-media-coverage-jumex-cov`. Readback: 162→162 filas, mismatch=false.
+
+### Readiness CLI-0001
+
+**`NECESITA_MAS_COBERTURA`** (sin cambio). El bloqueador es **estructural**: el
+contenido corporativo/regulatorio de Jumex es escaso en el corpus crawlable, su
+mejor fuente de gap (La Jornada) está 403-bloqueada, y los medios de negocios ya
+en cron (alto volumen) no producen menciones Jumex por falta de cobertura del tema.
+La puerta contextual ya garantiza que, cuando aparezca señal real, entre limpia.
+
+### Siguiente brecha
+
+- Evaluar acceso público/alternativo a La Jornada (RSS por sección, sin proxy) o
+  esperar a que el tema Jumex/IEPS gane volumen en los medios ya en cron.
+- CLI-0001 no depende de precisión (gate resuelto) sino de aparición de eventos
+  reales; conviene monitorear vía las corridas shadow existentes en lugar de forzar
+  altas de bajo rendimiento.
+
+---
+
 ## 1. Estado general
 
 | Dimensión | Valor | Lectura |
