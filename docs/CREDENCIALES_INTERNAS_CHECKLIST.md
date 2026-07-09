@@ -93,3 +93,68 @@
 - Poner `SEND_ALERTS=false` (o vaciar destinatarios / `ALLOW_REAL_ALERTS=false`)
   → las guardas vuelven a bloquear. No requiere revertir código.
 - Para desmontar por completo: quitar las variables del entorno del runner.
+
+---
+
+## 7. GO_CREDENCIALES_INTERNAS — SMTP cargado pero apagado
+
+> Estado objetivo de esta fase: **credenciales SMTP internas preparadas/cargadas
+> fuera del repo, con el módulo APAGADO**. No implica ningún envío. Terminar aquí;
+> **no** avanzar a `GO_ENVIO_INTERNO_LIMITADO` sin autorización explícita.
+
+### 7.1 Qué variables se cargan
+
+`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`,
+`INTERNAL_ALERT_EMAILS` (destinatarios internos del equipo) y, opcionalmente,
+`REAL_ALERTS_CONFIRMATION_TOKEN`.
+
+### 7.2 Dónde se cargan (nunca en el repo)
+
+- **GitHub Secrets** del repo/entorno (para runs en Actions), **o**
+- **archivo `.env` local ignorado por git** (ya está en `.gitignore`), **o**
+- un **secret manager** / variables de entorno del runner seguro.
+
+**Prohibido:** escribir valores reales en `.env.example`, commitear `.env`, imprimir
+password o destinatarios completos.
+
+### 7.3 Qué sigue apagado (obligatorio en esta fase)
+
+`SEND_ALERTS=false`, `ALLOW_REAL_ALERTS=false`, `EMAIL_ALERTS_ENABLED=false`.
+Con esto, `createSmtpTransport` devuelve `null` (no construye transporte) y las
+guardas bloquean con `real_alerts_disabled`.
+
+### 7.4 Cómo validar (dry-run, no envía)
+
+```bash
+npm run send-internal-alerts -- --dry-run --client=CLI-0002 --severity=P1 --limit=20 --digest
+```
+
+### 7.5 Cómo confirmar que NO hubo envío
+
+En el log del dry-run debe verse:
+
+- `smtp_host_domain` = dominio del SMTP (config **detectada**), `email_recipients` ≥ 1.
+- `smtp_transport: "null"`, `transport_reason: "send_alerts_disabled"` (o
+  `email_channel_disabled`) → **transporte no creado**, **sin llamada SMTP externa**.
+- `bloqueadas > 0`, `reason=real_alerts_disabled`, `would_send=0`, `enviadas=0`,
+  `envio_real_confirmado=false`.
+- El password y los destinatarios completos **no aparecen** en ningún log.
+
+> Validado 2026-07-09 con credenciales ficticias en entorno local: config detectada
+> (`smtp_host_domain` presente, `email_recipients=1`) pero `smtp_transport=null`,
+> `blocked=4`, `enviadas=0`. Sin fuga de `SMTP_PASS` ni de destinatarios.
+
+### 7.6 Rollback
+
+- `SEND_ALERTS=false`, `ALLOW_REAL_ALERTS=false`, `EMAIL_ALERTS_ENABLED=false`.
+- Vaciar `INTERNAL_ALERT_EMAILS`.
+- Si `SMTP_PASS` se expuso por accidente: **rotar la credencial** de inmediato.
+- Quitar las variables del entorno del runner para desmontar por completo.
+
+### 7.7 Qué falta para `GO_ENVIO_INTERNO_LIMITADO` (fuera de alcance)
+
+- **Autorización explícita** del usuario para enviar interno.
+- Activar kill-switches (`SEND_ALERTS`/`ALLOW_REAL_ALERTS`/`EMAIL_ALERTS_ENABLED=true`)
+  con `REAL_ALERTS_CONFIRMATION_TOKEN` definido y pasado por `--token`.
+- Ejecutar con `--send-real` (rechazado por las guardas hasta cumplir las 9 capas).
+- Ventana horaria, tope diario y destinatarios internos confirmados.

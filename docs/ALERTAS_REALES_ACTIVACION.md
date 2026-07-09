@@ -191,6 +191,25 @@ Estado tras 2026-07-09:
   `REAL_ALERTS_CONFIRMATION_TOKEN` como secrets (NO en `.env`), y recién entonces
   activar los kill-switches. Ver `docs/CREDENCIALES_INTERNAS_CHECKLIST.md`.
 
+### GO_CREDENCIALES_INTERNAS — SMTP cargado pero apagado (2026-07-09)
+
+Estado objetivo: credenciales SMTP internas **cargables fuera del repo con el módulo
+apagado**. Cargar credenciales **no envía nada**.
+
+- **Se cargan** (fuera del repo: GitHub Secrets / `.env` local ignorado / secret manager):
+  `SMTP_HOST/PORT/USER/PASS/FROM`, `INTERNAL_ALERT_EMAILS`, `REAL_ALERTS_CONFIRMATION_TOKEN`.
+- **Sigue apagado:** `SEND_ALERTS=false`, `ALLOW_REAL_ALERTS=false`, `EMAIL_ALERTS_ENABLED=false`.
+- **Comportamiento garantizado:** con switches apagados, `createSmtpTransport` **no**
+  construye transporte real (aunque haya credenciales) → **sin llamada SMTP externa**;
+  las guardas devuelven `real_alerts_disabled`.
+- **Validación (2026-07-09)** con credenciales ficticias locales: `smtp_host_domain`
+  detectado, `email_recipients=1`, pero `smtp_transport=null`
+  (`transport_reason=send_alerts_disabled`), `blocked=4`, `enviadas=0`,
+  `envio_real_confirmado=false`, sin fuga de `SMTP_PASS`/destinatarios.
+- **Rollback:** switches en `false` + vaciar `INTERNAL_ALERT_EMAILS` + rotar `SMTP_PASS`
+  si se expuso. Detalle y transición a `GO_ENVIO_INTERNO_LIMITADO` (requiere autorización
+  explícita) en `docs/CREDENCIALES_INTERNAS_CHECKLIST.md` §7.
+
 ### Variables requeridas (todas apagadas por defecto)
 
 `SEND_ALERTS`, `ALLOW_REAL_ALERTS`, `ALERTS_INTERNAL_ONLY`, `ALERTS_ALLOWED_CLIENTS`,

@@ -76,6 +76,18 @@ describe('createSmtpTransport — disabled by default', () => {
     expect(reason).toBe('no_internal_recipients');
   });
 
+  it('credenciales completas pero SEND_ALERTS+EMAIL_ALERTS_ENABLED off => null (sin SMTP)', async () => {
+    // Escenario GO_CREDENCIALES_INTERNAS: SMTP cargado, módulo apagado.
+    const env = { ...envFull(), SEND_ALERTS: 'false', ALLOW_REAL_ALERTS: 'false', EMAIL_ALERTS_ENABLED: 'false' };
+    const cfg = loadNotificationConfig(env);
+    // La config detecta el SMTP (dominio) pero el factory no debe construir transporte.
+    expect(cfg.email.smtpConfigured).toBe(true);
+    expect(cfg.email.recipientsCount).toBe(1);
+    const { transport, reason } = await createSmtpTransport(cfg, env);
+    expect(transport).toBeNull();
+    expect(reason).toBe('send_alerts_disabled');
+  });
+
   it('con TODO habilitado construye transporte (sin abrir conexión)', async () => {
     const env = envFull();
     const { transport, reason } = await createSmtpTransport(loadNotificationConfig(env), env);

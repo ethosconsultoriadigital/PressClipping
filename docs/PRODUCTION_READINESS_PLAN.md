@@ -143,6 +143,20 @@ Fase de "Piloto Interno CLI-0002 + Lote P1 de Medios". Sin producción, sin env�
 - Solo se deja el ranking P1 y la readiness. Próxima ventana de alta: tras observar
   el primer cron post-`bde7d23` limpio + Noroeste re-enriquecido / Excelsior reparado.
 
+### Pre-activación SMTP interna — GO_CREDENCIALES_INTERNAS (2026-07-09)
+
+- **Cron post-`bde7d23`:** sigue **pendiente** (último run programado `29030756545`
+  sobre `397f38f`). Sin cron nuevo → sin altas.
+- **SMTP interno preparado, apagado:** `.env.example` con los 15 placeholders (switches
+  off, SMTP vacíos). Validado que con credenciales presentes pero
+  `SEND_ALERTS=false`/`EMAIL_ALERTS_ENABLED=false`, `createSmtpTransport` **no** crea
+  transporte (`smtp_transport=null`), **sin llamada SMTP externa**; dry-run digest =
+  2 clusters, `blocked=4`, `enviadas=0`, `would_send=0`. Sin fuga de secretos.
+- **Estado GO/NO-GO:** máximo alcanzable esta fase = **`GO_CREDENCIALES_INTERNAS`**
+  (SMTP cargable fuera del repo, módulo apagado). **No** se avanza a
+  `GO_ENVIO_INTERNO_LIMITADO` sin autorización explícita. Detalle en
+  `docs/CREDENCIALES_INTERNAS_CHECKLIST.md` §7.
+
 ---
 
 ## Estado actual y siguiente fase permitida
