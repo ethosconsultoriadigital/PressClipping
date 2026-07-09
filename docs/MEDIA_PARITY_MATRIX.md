@@ -85,6 +85,19 @@ aportan cobertura regional de crisis que PressClipping no rastrea → **valor a�
 3. **Descartar:** MSN/OEM replicadores, Marca (deportes), Mural (paywall Reforma),
    la cola larga de 182 one-offs (bajo ROI).
 
+## 7.b Seguimiento — Aceleración Controlada (2026-07-09)
+
+- **Cron post-`bde7d23` (MED-0005 / MED-0049):** aún **pendiente**. El último run
+  programado corrió sobre `397f38f` (anterior al push). Sin cron limpio confirmado,
+  **no se agregan más medios** este lote (regla de gate). Detalle en
+  `docs/PRODUCTION_READINESS_PLAN.md` (Carril A).
+- **Re-auditoría lote P1** (read-only): Noroeste (MED-0055) = `P1_REENRICH_PRIMERO`
+  (texto 58%); Excelsior (MED-0028) = `P1_REPARAR_FUENTE` (estado error, 0 notas);
+  La Silla Rota / Jalisco Hoy / Noticias México 24 / Hoy Tamaulipas = fuera de catálogo
+  Ethos → `P2_AUDITAR_MANUAL` (alta de fuente nueva). Ninguno `P1_LISTO_CRON` inmediato.
+- **Piloto interno email CLI-0002:** preparado y **apagado** (nodemailer cableado vía
+  `createSmtpTransport`, kill-switches off; dry-run digest = 2 clusters, `enviadas=0`).
+
 ## 8. Conclusión de cobertura
 
 - Ethos **no cubre aún tantos medios como PressClipping** en número bruto (34 cron vs

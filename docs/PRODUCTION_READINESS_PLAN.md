@@ -92,9 +92,65 @@ tiene criterio de entrada/salida, riesgos, rollback y qué se activa / qué NO._
 
 ---
 
+## Progreso — Aceleración Controlada (2026-07-09)
+
+Fase de "Piloto Interno CLI-0002 + Lote P1 de Medios". Sin producción, sin envíos.
+
+### Carril A — Cron post-`bde7d23`
+
+- **Pendiente.** Último run programado de `live-comparison-shadow-daily-validated`:
+  `29030756545` (event=schedule, 2026-07-09T15:45:04Z, conclusion=success) corrió
+  sobre `headSha=397f38f` — **anterior a `bde7d23`** (push ~19:50Z del 9-jul).
+- No hay run `schedule` con `bde7d23` o posterior todavía. El próximo programado
+  (~10-jul) será el primero en incluir **MED-0005 lado.mx** y **MED-0049 Telediario
+  Monterrey**. Hasta confirmarlo limpio, **no se agregan más medios** (Carril D gate).
+
+### Carril B — Lote P1 `EN_CATALOGO_NO_CRON` (auditoría read-only)
+
+| medio | id | en catálogo | estado_08 | texto_ok | PC | clasificación |
+|---|---|---|---|---|---|---|
+| Noroeste | MED-0055 | sí | ok | 58% (20/48 vacías) | 6 | **P1_REENRICH_PRIMERO** |
+| Excelsior | MED-0028 | sí | error | 0% (0 notas) | 11 | **P1_REPARAR_FUENTE** |
+| La Silla Rota | — | no | — | — | 11 | **P2_AUDITAR_MANUAL** (fuente nueva) |
+| Jalisco Hoy | — | no | — | — | 9 | **P2_AUDITAR_MANUAL** (fuente nueva) |
+| Noticias México 24 | — | no | — | — | 10 | **P2_AUDITAR_MANUAL** (fuente nueva) |
+| Hoy Tamaulipas | — | no | — | — | 9 | **P2_AUDITAR_MANUAL** (fuente nueva) |
+| AM (Guanajuato) | ambiguo | — | — | — | ~7 | **P2_AUDITAR_MANUAL** (no hay match claro) |
+
+- **Ninguno es `P1_LISTO_CRON` inmediato.** Noroeste necesita re-enrich (texto 58%);
+  Excelsior necesita reparar fuente (estado error, 0 notas); el resto no está en el
+  catálogo Ethos (serían altas de fuente nueva, fuera del alcance `EN_CATALOGO_NO_CRON`).
+- **Riesgos:** los 4 candidatos "fuente nueva" concentran señal PC de cola media
+  (Bebidas alcohólicas / Empresas / Reforma laboral); requieren alta de catálogo +
+  auditoría técnica (RSS/sitemap, bloqueo, FP) antes de considerar cron.
+
+### Carril C — Fase 1 piloto email CLI-0002 (preparado, disabled)
+
+- **Provider email cableado**: `nodemailer` instalado; `createSmtpTransport`
+  (`src/notifications/smtpTransport.ts`) construye transporte real **solo** con todas
+  las capas activas; hoy devuelve `null` (`send_alerts_disabled`).
+- **Kill-switches** (`.env.example`) apagados/acotados: `SEND_ALERTS=false`,
+  `ALLOW_REAL_ALERTS=false`, `EMAIL_ALERTS_ENABLED=false`, `ALERTS_INTERNAL_ONLY=true`,
+  `ALERTS_ALLOWED_CLIENTS=CLI-0002`, `ALERTS_ALLOWED_SEVERITIES=P1`, `MAX_PER_RUN/DAY=5`.
+- **Dry-run digest CLI-0002**: 196 P1 → 2 clusters (Guanajuato 14 + Nacional 6);
+  `blocked=4`, `would_send=0`, `enviadas=0`, `envio_real_confirmado=false`.
+- **Falta para cargar credenciales:** GO explícito + destinatarios internos + secrets
+  SMTP fuera del repo. Ver `docs/CREDENCIALES_INTERNAS_CHECKLIST.md`.
+
+### Carril D — Decisión de avance
+
+- Gate Carril A **no** cumplido (sin cron `bde7d23` limpio) → **no se agregan medios**.
+- Solo se deja el ranking P1 y la readiness. Próxima ventana de alta: tras observar
+  el primer cron post-`bde7d23` limpio + Noroeste re-enriquecido / Excelsior reparado.
+
+---
+
 ## Estado actual y siguiente fase permitida
 
-- **Estado:** Fase 0 (shadow medible) **consolidada**; paridad medida.
-- **Siguiente fase permitida:** preparar **Fase 1** (piloto interno CLI-0002 email con
-  credenciales apagadas) — sin activar envíos todavía.
-- **No permitido aún:** sustitución parcial/global (Fases 4–5) — sin evidencia suficiente.
+- **Estado:** Fase 0 (shadow medible) **consolidada**; paridad medida; Fase 1 (piloto
+  email interno CLI-0002) **preparada y apagada** (provider cableado, kill-switches off).
+- **Siguiente fase permitida (elegir con autorización):**
+  1. Observar el primer cron post-`bde7d23` (MED-0005/MED-0049) y validarlo limpio.
+  2. Cargar credenciales SMTP internas con `SEND_ALERTS=false` (checklist).
+- **No permitido aún:** envío real, sustitución parcial/global (Fases 3–5) — sin
+  evidencia suficiente ni autorización.

@@ -662,6 +662,46 @@ sin envíos, sin tocar `.yml`). Tests del tier actualizados (760 passing).
 
 ---
 
+## 0.8 Aceleración Controlada: Piloto Interno CLI-0002 + Lote P1 (2026-07-09)
+
+Fase sin producción y sin envíos. Detalle en `docs/PRODUCTION_READINESS_PLAN.md`
+(sección "Progreso — Aceleración Controlada").
+
+### Cron post-`bde7d23`
+
+- **Pendiente.** Último run programado `29030756545` (schedule, 2026-07-09T15:45:04Z,
+  success) sobre `headSha=397f38f` — **anterior** al push de `bde7d23` (~19:50Z). Aún
+  **no** hay corrida con MED-0005/MED-0049. Sin cron limpio confirmado → **no se agregan
+  medios** este lote.
+
+### Fase 1 piloto email CLI-0002 (preparada, disabled)
+
+- **Provider email cableado** con `nodemailer` vía `createSmtpTransport`
+  (`src/notifications/smtpTransport.ts`): construye transporte real **solo** con todas
+  las capas activas; hoy → `null` (`send_alerts_disabled`). Import dinámico (nodemailer
+  no se carga salvo autorización).
+- **Kill-switches** (`.env.example`) apagados: `SEND_ALERTS`/`ALLOW_REAL_ALERTS`/
+  `EMAIL_ALERTS_ENABLED=false`; `ALERTS_INTERNAL_ONLY=true`; `ALLOWED_CLIENTS=CLI-0002`;
+  `ALLOWED_SEVERITIES=P1`; `MAX_PER_RUN/DAY=5`.
+- **Dry-run digest CLI-0002**: 196 P1 → 2 clusters (Guanajuato 14 + Nacional 6);
+  `blocked=4`, `would_send=0`, `enviadas=0`, `envio_real_confirmado=false`.
+- Tests nuevos: `test/smtp-transport.test.ts` (8 casos: cada kill-switch → `null`;
+  autorizado → transporte; sin fuga de password).
+
+### Lote P1 auditado (read-only)
+
+| medio | id | catálogo | estado | texto_ok | PC | clasificación |
+|---|---|---|---|---|---|---|
+| Noroeste | MED-0055 | sí | ok | 58% | 6 | P1_REENRICH_PRIMERO |
+| Excelsior | MED-0028 | sí | error | 0% | 11 | P1_REPARAR_FUENTE |
+| La Silla Rota / Jalisco Hoy / Noticias México 24 / Hoy Tamaulipas | — | no | — | — | 9–11 | P2_AUDITAR_MANUAL (fuente nueva) |
+
+Ninguno `P1_LISTO_CRON` inmediato → sin alta. Recomendación: re-enrich Noroeste y
+reparar fuente de Excelsior antes de considerar cron; evaluar altas de catálogo para
+las 4 fuentes nuevas de mayor gap.
+
+---
+
 ## 1. Estado general
 
 | Dimensión | Valor | Lectura |

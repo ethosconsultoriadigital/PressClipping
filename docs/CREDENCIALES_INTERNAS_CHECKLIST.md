@@ -4,7 +4,7 @@
 > piloto interno en un entorno seguro **manteniendo el módulo apagado**
 > (`SEND_ALERTS=false`, `ALLOW_REAL_ALERTS=false`). Cargar credenciales **no
 > envía nada**: las 9 guardas de `assertCanSendRealAlerts` siguen bloqueando.
-> Última actualización: 2026-07-08.
+> Última actualización: 2026-07-09 (transporte email cableado con `nodemailer`, apagado).
 
 ---
 
@@ -26,6 +26,13 @@
 | `SMTP_FROM` | *(pendiente)* | remitente visible. |
 | `INTERNAL_ALERT_EMAILS` | *(pendiente)* | destinatarios INTERNOS (equipo MDP). |
 | `EMAIL_ALERTS_ENABLED` | `false` | mantener en false tras cargar credenciales. |
+
+> **Transporte email ya cableado (2026-07-09).** `createSmtpTransport`
+> (`src/notifications/smtpTransport.ts`) construye un transporte `nodemailer` real
+> **solo** si `SEND_ALERTS` + `ALLOW_REAL_ALERTS` + `EMAIL_ALERTS_ENABLED` están en
+> `true`, SMTP está configurado y hay destinatarios. Mientras estos sigan en `false`
+> el factory devuelve `null` y no se abre ninguna conexión SMTP. Cargar `SMTP_*` con
+> los kill-switches apagados es seguro: no envía ni conecta.
 
 ## 2. Variables WhatsApp internas
 

@@ -18,6 +18,9 @@ import { getOutputTab } from '../src/sheets/client.js';
 import { normalizeHeader } from '../src/utils/parse.js';
 import { loadNotificationConfig } from '../src/notifications/guards.js';
 import { NotificationService } from '../src/notifications/notificationService.js';
+import { EmailProvider } from '../src/notifications/emailProvider.js';
+import { TwilioWhatsAppProvider } from '../src/notifications/whatsappProvider.js';
+import { createSmtpTransport } from '../src/notifications/smtpTransport.js';
 import { renderEmailSubject, renderWhatsappMessage, renderEmailDigestPreview, renderWhatsAppDigestPreview } from '../src/notifications/templates.js';
 import { groupAlertsForDigest } from '../src/notifications/grouping.js';
 import type { InternalAlert, Severidad } from '../src/notifications/types.js';
@@ -183,7 +186,17 @@ async function main(): Promise<void> {
     logger.warn({}, '--send-real presente: el envío real depende ENTERAMENTE de las guardas de entorno.');
   }
 
-  const service = new NotificationService(config);
+  // Transporte SMTP real: solo se construye si el canal email está plenamente
+  // autorizado (kill-switches ON + config completa). En esta fase → null.
+  const { transport, reason: transportReason } = await createSmtpTransport(config);
+  logger.info(
+    { smtp_transport: transport ? 'wired' : 'null', transport_reason: transportReason },
+    'Estado transporte SMTP (disabled by default)',
+  );
+  const service = new NotificationService(config, [
+    new EmailProvider(config, transport),
+    new TwilioWhatsAppProvider(config),
+  ]);
   const report = await service.run(alertasParaEnviar, { dryRun: args.dryRun || !args.sendReal, sendReal: args.sendReal });
 
   for (const r of report.resultados) {

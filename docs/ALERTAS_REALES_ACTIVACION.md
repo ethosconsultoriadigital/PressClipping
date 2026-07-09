@@ -3,7 +3,7 @@
 > Estado actual: **NO ACTIVADO**. Todo el sistema opera en modo sombra
 > (observación, sin envíos). Este documento define CÓMO y CUÁNDO se activarían
 > alertas reales. Crearlo **no activa nada**.
-> Última actualización: 2026-07-07 (post-commit `e2fc9ea`).
+> Última actualización: 2026-07-09 (Fase 1 piloto email CLI-0002 preparada, disabled).
 
 ---
 
@@ -15,8 +15,14 @@ Antes de cualquier fase con envío real, hay un **prerequisito de ingeniería**:
   (`src/notifications/*`, `scripts/send-internal-alerts.ts`). Ver sección 8. No
   envía nada con la configuración por defecto: las guardas bloquean el envío real.
 - Las alertas de producción siguen **simuladas** (`canal_simulado` en
-  `10_Alertas_Sombra`). **No hay credenciales** Twilio ni Gmail/SMTP en el repo, y
-  el transport real de email/WhatsApp **no está cableado** (seam inyectable vacío).
+  `10_Alertas_Sombra`). **No hay credenciales** Twilio ni Gmail/SMTP en el repo.
+- **Novedad (2026-07-09)**: el transporte **email** ya está cableado con `nodemailer`
+  a través de `createSmtpTransport` (`src/notifications/smtpTransport.ts`), pero
+  **disabled by default**: el factory devuelve `null` salvo que TODAS las capas de
+  habilitación estén activas (`SEND_ALERTS` + `ALLOW_REAL_ALERTS` + `EMAIL_ALERTS_ENABLED`
+  + SMTP configurado + destinatarios). Con la config por defecto no se construye
+  transporte → `EmailProvider` no envía. El transporte de **WhatsApp** sigue como
+  seam inyectable vacío.
 - Las guardas anti-envío operan en varias capas y deben permanecer:
   1. CLI shadow: `run-shadow-alerts.ts` aborta con exit 2 ante `--send/--whatsapp/--email`.
   2. Entorno shadow: `verificarEnvObservacion` aborta si `SEND_ALERTS` /
@@ -24,10 +30,11 @@ Antes de cualquier fase con envío real, hay un **prerequisito de ingeniería**:
   3. Código: el tier crisis fuerza `send=false whatsapp=false email=false`.
   4. Módulo interno: `assertCanSendRealAlerts` exige 9 condiciones AND (sección 8).
 
-**Conclusión**: el módulo ya está listo en modo apagado. La activación real aún
-requiere (a) autorización explícita, (b) credenciales, (c) cablear el transport y
-(d) destinatarios internos — todo ausente/apagado hoy. Máxima madurez alcanzable:
-"piloto INTERNO en dry-run", sin envío real.
+**Conclusión**: el módulo ya está listo en modo apagado y el transporte email ya
+está cableado (nodemailer, guardado). La activación real aún requiere (a)
+autorización explícita, (b) credenciales SMTP internas, (c) habilitar los
+kill-switches y (d) destinatarios internos — todo ausente/apagado hoy. Máxima
+madurez alcanzable sin autorización: "piloto INTERNO en dry-run", sin envío real.
 
 ---
 
@@ -157,10 +164,32 @@ Si algún ítem falla → **NO-GO**, permanecer en la fase actual.
 - `src/notifications/types.ts` — tipos (`InternalAlert`, `NotificationConfig`, `SendResult`).
 - `src/notifications/guards.ts` — `loadNotificationConfig`, `assertCanSendRealAlerts`, `hashRecipient`.
 - `src/notifications/templates.ts` — plantillas email/WhatsApp (marcadas PILOTO INTERNO).
-- `src/notifications/emailProvider.ts` — SMTP vía transport inyectable (sin `nodemailer`).
+- `src/notifications/emailProvider.ts` — SMTP vía transport inyectable (`SmtpTransport`).
+- `src/notifications/smtpTransport.ts` — **factory `createSmtpTransport`**: construye
+  transporte `nodemailer` real SOLO si el canal está plenamente autorizado; si no,
+  devuelve `null` (fase actual). Import dinámico: nodemailer no se carga salvo autorización.
 - `src/notifications/whatsappProvider.ts` — Twilio vía sender inyectable (`not_configured`).
 - `src/notifications/notificationService.ts` — orquesta guardas + providers.
-- `scripts/send-internal-alerts.ts` — CLI dry-run por defecto.
+- `scripts/send-internal-alerts.ts` — CLI dry-run por defecto; cablea el transporte
+  vía `createSmtpTransport` (null hoy) y loggea `smtp_transport`/`transport_reason`.
+
+### Fase 1 — piloto interno email CLI-0002 preparado, disabled by default
+
+Estado tras 2026-07-09:
+
+- **Provider email**: cableado (`nodemailer` instalado; `createSmtpTransport` guardado).
+- **Kill-switches** (`.env.example`, valores por defecto): `SEND_ALERTS=false`,
+  `ALLOW_REAL_ALERTS=false`, `EMAIL_ALERTS_ENABLED=false`, `ALERTS_INTERNAL_ONLY=true`,
+  `ALERTS_ALLOWED_CLIENTS=CLI-0002`, `ALERTS_ALLOWED_SEVERITIES=P1`,
+  `ALERTS_MAX_PER_RUN=5`, `ALERTS_MAX_PER_DAY=5`. Todos apagados/acotados.
+- **Dry-run digest CLI-0002** (`--dry-run --digest --limit=20`): 196 P1 CLI-0002 →
+  2 clusters (crisis bebidas adulteradas Guanajuato 14 + Nacional 6). Resultado:
+  `smtp_transport=null`, `transport_reason=send_alerts_disabled`, `blocked=4`,
+  `would_send=0`, `enviadas=0`, `envio_real_confirmado=false`.
+- **Falta para cargar credenciales** (cuando haya GO): definir destinatarios internos
+  (`INTERNAL_ALERT_EMAILS`), cargar `SMTP_HOST/PORT/USER/PASS/FROM` y
+  `REAL_ALERTS_CONFIRMATION_TOKEN` como secrets (NO en `.env`), y recién entonces
+  activar los kill-switches. Ver `docs/CREDENCIALES_INTERNAS_CHECKLIST.md`.
 
 ### Variables requeridas (todas apagadas por defecto)
 
