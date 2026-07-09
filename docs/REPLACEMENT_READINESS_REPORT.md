@@ -609,6 +609,59 @@ La puerta contextual ya garantiza que, cuando aparezca señal real, entre limpia
 
 ---
 
+## 0.7 Paridad de Medios PressClipping vs Ethos + Ruta a Producción (2026-07-08)
+
+Auditoría read-only de paridad de medios y activación acotada de la ruta rápida.
+Detalle completo en `docs/MEDIA_PARITY_MATRIX.md` y plan en
+`docs/PRODUCTION_READINESS_PLAN.md`.
+
+### Paridad (números)
+
+| Métrica | Valor |
+|---|---|
+| Medios únicos PressClipping | 302 |
+| Medios catálogo Ethos | 171 |
+| Medios Ethos en cron shadow | 34 |
+| Overlap PC ∩ cron | 27 (8.9%) |
+| Overlap PC ∩ catálogo (dominio / fuzzy) | 64 (21%) / ~85 (~28%) |
+| Solo PC / Solo Ethos | 238 / 100 |
+
+**Clasificación de los 302 PC:** 27 cubiertos en cron · **58 EN_CATALOGO_NO_CRON
+(ruta rápida)** · 32 importantes fuera de catálogo · 182 bajo valor (cola larga) · 3 sindicados.
+
+**Interpretación:** PressClipping es más ancho pero **60% es cola larga de 1–3 notas**.
+La brecha accionable se concentra en ~58 medios **ya catalogados** que solo faltaba
+activar en cron, no en crear fuentes nuevas.
+
+### Lote rápido ejecutado (alta daily shadow)
+
+| medio_id | medio | gap PC | audit | extracción | acción |
+|---|---|---|---|---|---|
+| MED-0005 | lado.mx | 28 | READY conf 1.0 (RSS) | 102/102 texto (100%) | **ALTA daily shadow** |
+| MED-0049 | Telediario Monterrey | 14 | READY conf 1.0 (sitemap idx) | 70/70 texto (100%) | **ALTA daily shadow** |
+| MED-0055 | Noroeste | 4 | READY conf 1.0 | 28/48 texto (58%) | candidato (siguiente lote) |
+| MED-0033 / MED-0038 | Eje Central / NTR Gdl | 3 / 3 | DIRECT_EXTRACTION_ONLY | — | auditar manual |
+
+Detect dry-run sobre 41 notas nuevas: **1 potencial (CLI-PRUEBA)**, 0 señal de cliente
+real, sin flood, sin FP. Gate de flood/boilerplate ✅. **Detect real NO ejecutado**
+(el único potencial era CLI-PRUEBA; el alta es cobertura *forward* vía cron, no inserción
+inmediata). Comparativo sin cambios (se reflejará tras las corridas de cron).
+
+`shadowMedia.ts`: +2 medios en `SHADOW_MEDIOS_DAILY_VALIDATED` (config-only, shadow,
+sin envíos, sin tocar `.yml`). Tests del tier actualizados (760 passing).
+
+### Readiness
+
+- **Cobertura:** Ethos aún < PC en número bruto, pero cierra el gap accionable por lotes
+  activando medios ya catalogados. CLI-0002 (Bebidas alcohólicas) es el cliente con mayor
+  gap resoluble y precisión ya validada.
+- **Siguiente fase permitida:** preparar **Fase 1** (piloto interno CLI-0002 email, credenciales
+  apagadas). **No** hay base para sustitución global.
+- **Siguiente brecha:** siguiente lote EN_CATALOGO_NO_CRON (Noroeste, Excelsior reparable)
+  + evaluar fuentes nuevas de alto valor (La Silla Rota, Jalisco Hoy — CLI-0002).
+
+---
+
 ## 1. Estado general
 
 | Dimensión | Valor | Lectura |

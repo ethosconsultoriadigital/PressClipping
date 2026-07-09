@@ -231,6 +231,30 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED: readonly ShadowMedioDaily[] = [
     max_notas_shadow: 30,
     activo_shadow: true,
   },
+  {
+    // Lote Paridad (2026-07-08): EN_CATALOGO_NO_CRON con el mayor gap PC (28 notas,
+    // 3 clientes, sobre todo CLI-0002 Bebidas alcohólicas). Auditoría READY_KEEP_CURRENT
+    // (conf 1.0, RSS), extracción EXCELENTE (102/102 con texto, 100%). Detect dry-run
+    // limpio (0 FP de cliente real, sin flood). Net-new: no estaba en ningún cron.
+    // Alta como cobertura forward (shadow, sin envíos); captura contenido de cliente
+    // conforme se publique.
+    medio_id: 'MED-0005',
+    nombre: 'lado.mx',
+    fuente: 'auto',
+    max_notas_shadow: 30,
+    activo_shadow: true,
+  },
+  {
+    // Lote Paridad (2026-07-08): EN_CATALOGO_NO_CRON, 2º mayor gap PC (14 notas,
+    // 3 clientes). Auditoría READY_SITEMAP_INDEX (conf 1.0), extracción EXCELENTE
+    // (70/70 con texto, 100%). Detect dry-run limpio (sin flood, sin FP de cliente
+    // real). Net-new. Alta como cobertura forward (shadow, sin envíos).
+    medio_id: 'MED-0049',
+    nombre: 'Telediario Monterrey',
+    fuente: 'auto',
+    max_notas_shadow: 30,
+    activo_shadow: true,
+  },
 ] as const;
 
 /**

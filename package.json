@@ -43,6 +43,7 @@
     "update-media-coverage-med164": "tsx scripts/update-media-coverage-med164.ts",
     "update-media-coverage-gaps": "tsx scripts/update-media-coverage-gaps.ts",
     "update-media-coverage-jumex-cov": "tsx scripts/update-media-coverage-jumex-cov.ts",
+    "update-media-coverage-parity": "tsx scripts/update-media-coverage-parity.ts",
     "shadow-daily-validated-tier": "tsx scripts/run-shadow-daily-validated-tier.ts",
     "send-internal-alerts": "tsx scripts/send-internal-alerts.ts",
     "import-pc-media-catalog": "tsx scripts/import-pressclipping-media-catalog.ts",
