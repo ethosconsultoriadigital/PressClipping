@@ -210,6 +210,17 @@ apagado**. Cargar credenciales **no envía nada**.
   si se expuso. Detalle y transición a `GO_ENVIO_INTERNO_LIMITADO` (requiere autorización
   explícita) en `docs/CREDENCIALES_INTERNAS_CHECKLIST.md` §7.
 
+### Checklist previo a GO_ENVIO_INTERNO_LIMITADO (2026-07-09)
+
+Puerta de salida del piloto apagado. Ver tabla completa en
+`docs/CREDENCIALES_INTERNAS_CHECKLIST.md` §8. Estado resumido:
+
+- ✅ Listos (código/infra): dry-run con SMTP real sigue `blocked` (lógica validada),
+  digest CLI-0002 estable (2 clusters), rollback documentado.
+- ⏳ Pendientes (operativos): cron post-`bde7d23` limpio con MED-0005/MED-0049, SMTP
+  real cargado fuera del repo, recipient hashes revisados, y **autorización explícita**.
+- `GO_ENVIO_INTERNO_LIMITADO` **no** habilitado; esta fase **no envía nada**.
+
 ### Variables requeridas (todas apagadas por defecto)
 
 `SEND_ALERTS`, `ALLOW_REAL_ALERTS`, `ALERTS_INTERNAL_ONLY`, `ALERTS_ALLOWED_CLIENTS`,

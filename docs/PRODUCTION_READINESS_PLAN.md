@@ -157,6 +157,19 @@ Fase de "Piloto Interno CLI-0002 + Lote P1 de Medios". Sin producción, sin env�
   `GO_ENVIO_INTERNO_LIMITADO` sin autorización explícita. Detalle en
   `docs/CREDENCIALES_INTERNAS_CHECKLIST.md` §7.
 
+### Cierre de gates pre-piloto — checklist GO_ENVIO_INTERNO_LIMITADO (2026-07-09)
+
+Puerta de salida del piloto apagado (tabla completa en
+`docs/CREDENCIALES_INTERNAS_CHECKLIST.md` §8):
+
+- ✅ **Gates de código/infra:** transporte SMTP no se construye con switches off
+  (validado), digest CLI-0002 estable (2 clusters), rollback trivial documentado.
+- ⏳ **Gates operativos pendientes:** (1) cron post-`bde7d23` limpio con
+  MED-0005/MED-0049 —sigue pendiente, último run sobre `397f38f`—, (2) SMTP real
+  cargado fuera del repo, (3) recipient hashes revisados, (4) **autorización explícita**.
+- **Veredicto:** `GO_ENVIO_INTERNO_LIMITADO` **NO** habilitado. Se recomienda **no**
+  pedir autorización de envío mientras el cron post-`bde7d23` siga pendiente.
+
 ---
 
 ## Estado actual y siguiente fase permitida
