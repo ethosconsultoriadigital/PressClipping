@@ -1060,3 +1060,20 @@ de 05/07/08. Detalle: `docs/MEDIA_PARITY_MATRIX.md` §9, `docs/PRODUCTION_READIN
 - Calidad extracción: `src/comparators/extractionQuality.ts` +
   `scripts/audit-extraction-quality.ts`.
 - cluster_id: `computeClusterFields` en `src/notifications/grouping.ts`.
+
+---
+
+## EMERGENCIA: PressClipping cancelado — Ethos como fuente principal (2026-07-11)
+
+PressClipping (servicio externo) ya no disponible. El comparativo deja de ser gate;
+reemplazado por `scripts/audit-operational-readiness-no-pc.ts`. CLI-0002 (Patrón/Bacardí)
+y CLI-0001 (Jumex) confirmados **OPERATIVO_INTERNO (90%)**: keywords activas (27 y 7
+respectivamente, incl. 9 nuevas — Tequila Patrón/Casa Patrón/CRT/IEPS alcohol para CLI-0002,
+IEPS bebidas azucaradas/etiquetado frontal/retiro de producto/Profeco para CLI-0001), 39
+medios en cron, texto_ok 100% (de menciones), 0 errores, menciones reales fluyendo (59 y 5
+en 7 días). Gap crítico corregido: CLI-0002 no tenía la marca "Patrón" como keyword. Hallazgo
+no bloqueante: 20/39 medios del tier base sin enrich (SIN_CUERPO) por diseño de
+`--only-pending-mentions` — no afecta detección (matchea sobre título). Tab
+`11_Operacion_Sin_PressClipping` documentada pero no creada (sin helper seguro probado para
+nuevas pestañas). Detalle completo: `docs/PRODUCTION_READINESS_PLAN.md` §Emergencia,
+`docs/PUENTE_REPORTES_JUMEX_PATRON.md`. 894 tests, todos verdes.

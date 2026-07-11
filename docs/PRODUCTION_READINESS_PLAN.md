@@ -376,3 +376,70 @@ el pipeline de detección, sí lo es para la métrica formal de comparación.
 **Tiempo estimado actualizado:** con el lote P1 + backtest corto validado, el camino a
 `GO_ENVIO_INTERNO_LIMITADO` para CLI-0002 se estima en días, no en 30 días — sujeto a
 reparar el feed XML y correr 2-3 ciclos más de `shadow-alerts` sin mismatch.
+
+---
+
+## EMERGENCIA — PressClipping cancelado: Ethos como servicio principal (2026-07-11)
+
+**Cambio de estrategia:** el servicio externo PressClipping ya no está disponible. El
+comparativo Ethos-vs-PressClipping deja de ser el gate — se reemplaza por métricas
+operativas propias (`scripts/audit-operational-readiness-no-pc.ts`).
+
+### Estado CLI-0002 (Patrón / Bacardí / Bebidas alcohólicas)
+
+| métrica | valor | estado |
+|---|---|---|
+| keywords_activas | 27 (22 previas + 5 nuevas: Tequila Patrón, Casa Patrón, Atotonilco el Alto, CRT, IEPS alcohol) | |
+| medios_en_cron | 39 | |
+| texto_ok_pct (de menciones) | 100% | |
+| menciones_24h / 7d | 9 / 59 | |
+| errores_medios | 0 | |
+| **estado_operativo** | **OPERATIVO_INTERNO (90%)** | ✅ |
+
+### Estado CLI-0001 (Jumex)
+
+| métrica | valor | estado |
+|---|---|---|
+| keywords_activas | 7 (3 previas + 4 nuevas: IEPS bebidas azucaradas, etiquetado frontal, retiro de producto, Profeco) | |
+| medios_en_cron | 39 | |
+| texto_ok_pct (de menciones) | 100% | |
+| menciones_24h / 7d | 1 / 5 | |
+| errores_medios | 0 | |
+| **estado_operativo** | **OPERATIVO_INTERNO (90%)** | ✅ |
+
+### Gap crítico corregido: falta de keywords de marca
+
+CLI-0002 no tenía **"Patrón"/"Tequila Patrón"** (la marca que da nombre a la emergencia) ni
+"Consejo Regulador del Tequila". CLI-0001 solo tenía 3 keywords, sin cubrir IEPS/regulatorio.
+Corregido vía `scripts/tune-patron-jumex-keywords.ts` (idempotente, NO toca `clientes` ni
+`alertas_activas`). Validado sin FP/flood contra 1000 noticias históricas
+(`scripts/simulate-keywords-shadow.ts`).
+
+### Hallazgo (no bloqueante): tier base sin enrich para noticias no matcheadas
+
+20 de 39 medios en cron (tier `base`, incluye El Financiero, Forbes, Expansión, Proceso)
+muestran `SIN_CUERPO` (0% texto limpio) en `audit-extraction-quality`. Causa: `enrich-news.ts`
+solo enriquece noticias con `--only-pending-mentions` (ya matcheadas por título). Esto NO
+bloquea la detección (los keywords `frase_exacta`/`contiene` matchean sobre título, que
+siempre existe) — confirmado por las 59 y 5 menciones reales de CLI-0002/CLI-0001. Es un
+área de mejora para detección basada en cuerpo completo, no un bloqueante de esta emergencia.
+
+### Sheets — tab `11_Operacion_Sin_PressClipping` propuesta, no creada
+
+No existe un helper seguro/probado para crear pestañas nuevas en el spreadsheet
+(`getOutputTab` solo lee existentes). Se documentó el esquema completo en
+`docs/PUENTE_REPORTES_JUMEX_PATRON.md` §7 para implementarlo en una fase separada,
+con su propio test, en vez de arriesgar código sin probar durante una emergencia.
+
+### Scripts nuevos de esta fase
+
+- `scripts/audit-operational-clients.ts` — inventario de clientes/keywords (solo lectura)
+- `scripts/audit-owned-media-coverage.ts` — inventario de medios propios (solo lectura)
+- `scripts/audit-operational-readiness-no-pc.ts` — nueva métrica de readiness sin PC
+- `scripts/tune-patron-jumex-keywords.ts` — alta idempotente de 9 keywords faltantes
+- `scripts/simulate-keywords-shadow.ts` — validador genérico de FP para cualquier keyword_id
+- `docs/PUENTE_REPORTES_JUMEX_PATRON.md` — especificación del puente hacia reportes finales
+
+**Prohibido sin autorización:** activar `alertas_activas=true` (ninguno de los 2 clientes
+fue modificado — CLI-0001 ya tenía `true` preexistente, CLI-0002 sigue en `false`).
+Enviar email/WhatsApp real. Conectar hoja de reportes final.

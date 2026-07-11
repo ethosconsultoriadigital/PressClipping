@@ -295,3 +295,19 @@ actividad real y estable. El score bajo refleja falta de matching en el comparat
 para los 3 clientes productivos + primer match real validado de Mery Pozos. La decisión de
 piloto interno para CLI-0002 puede tomarse con esta base — el `alertas_score` bajo es un
 artefacto del comparativo bloqueado, no una señal de baja calidad de detección.
+
+---
+
+## EMERGENCIA: PressClipping cancelado (2026-07-11)
+
+PressClipping externo ya no disponible — deja de ser gate. Nueva métrica operativa propia:
+`npm run audit-operational-readiness-no-pc -- --client=CLI-0002` (y `--client=CLI-0001`).
+
+| cliente | estado_operativo | % ready | keywords | menciones_7d |
+|---|---|---|---|---|
+| CLI-0002 (Patrón/Bacardí) | OPERATIVO_INTERNO | 90% | 27 (+5 nuevas) | 59 |
+| CLI-0001 (Jumex) | OPERATIVO_INTERNO | 90% | 7 (+4 nuevas) | 5 |
+
+Gap corregido: faltaba "Patrón"/"Tequila Patrón" en CLI-0002. Ver
+`docs/PRODUCTION_READINESS_PLAN.md` §Emergencia y `docs/PUENTE_REPORTES_JUMEX_PATRON.md`
+para el detalle completo y el camino hacia el reporte final.
