@@ -162,6 +162,32 @@ npm run tune-mery-pozos-shadow -- --dry
 
 No se escribió nada en Supabase. Script listo para ejecución real con autorización.
 
+### Ejecución real — 2026-07-10
+
+**Estado: MERY_SHADOW_CONFIG_CREATED**
+
+`npm run tune-mery-pozos-shadow` ejecutado sin `--dry` el 2026-07-10.
+
+Read-back desde Supabase confirmado:
+```
+CLI-MERY-TEST: alertas_activas=false, activo=true ✅
+KEY-0040..KEY-0051: 12/12 con cliente_id=CLI-MERY-TEST ✅
+Post-upsert assertion: alertas_activas=false ✅
+Sin conflictos de keyword_id ✅
+```
+
+Dry-run de detección ejecutado:
+```
+npm run detect-mentions -- --dry-run --only-with-text
+
+keywords_activas: 49 (incluye 12 nuevas de Mery Pozos)
+noticias pendientes: 0 (históricas ya procesadas en runs previos)
+menciones_potenciales: 0
+insertas: 0 (dry-run real confirmado)
+```
+
+**Próximo ciclo de crawl** aplicará automáticamente las keywords de Mery Pozos a noticias nuevas.
+
 ---
 
 ## 9. Riesgos de homónimos

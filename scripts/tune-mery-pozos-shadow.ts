@@ -272,6 +272,23 @@ async function main() {
   for (const k of kwAntes ?? []) console.log(JSON.stringify(k));
   console.log(`(existentes: ${(kwAntes ?? []).length} / objetivo: ${KEYWORDS.length})`);
 
+  // ── Validación de conflictos: ningún KEY-004x puede pertenecer a otro cliente ──
+  const conflictoKw = (kwAntes ?? []).filter((k) => k.cliente_id !== CLI_ID);
+  if (conflictoKw.length > 0) {
+    console.error('CONFLICTO CRÍTICO: los siguientes keyword_ids ya existen con otro cliente_id:');
+    for (const c of conflictoKw) console.error(`  ${c.keyword_id} → cliente=${c.cliente_id}`);
+    console.error('Abortar. No se escribió nada.');
+    process.exit(1);
+  }
+
+  // ── Validación de cliente existente: alertas_activas nunca debe ser true ───────
+  const cliExistente = (cliAntes ?? [])[0];
+  if (cliExistente && cliExistente.alertas_activas === true) {
+    console.error('CONFLICTO CRÍTICO: CLI-MERY-TEST ya existe con alertas_activas=true.');
+    console.error('Abortar. No se puede sobrescribir sin revisión manual.');
+    process.exit(1);
+  }
+
   if (dry) {
     console.log('\n[DRY] Plan cliente:');
     console.log(`  ${CLIENTE.cliente_id} "${CLIENTE.nombre_cliente}" alertas_activas=${CLIENTE.alertas_activas}`);

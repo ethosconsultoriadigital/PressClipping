@@ -251,18 +251,22 @@ Siguiente gate habilitado: cargar SMTP real fuera del repo con switches apagados
 
 ### Estado
 
-- Script listo para ejecución real (sin `--dry`) con autorización explícita.
-- `alertas_activas=false` garantizado en script + verificación post-upsert.
+- Script ejecutado el 2026-07-10 con autorización. Read-back confirma `alertas_activas=false`.
 - Cobertura histórica en PressClipping CSV: 2 notas confirmadas (El Informador + lado.mx,
   2026-02-06, "Operación Enjambre — nadie está por encima de la ley").
 - lado.mx (MED-0005, ya en daily shadow) cubrió a Mery Pozos — alta relevancia directa.
+- keywords_activas: 49 (12 nuevas Mery + 37 existentes) confirmado en dry-run detección.
+- noticias pendientes en dry-run: 0 (históricas ya procesadas). Monitoreo activo desde próximo cron.
 
-### Gate de activación en Supabase
+### Estado: MERY_SHADOW_CONFIG_CREATED (2026-07-10)
 
-**Pendiente autorización explícita** para:
-1. `npm run tune-mery-pozos-shadow` (sin `--dry`) — inserta cliente + keywords.
-2. `npm run detect-mentions -- --dry-run --only-with-text` — valida potenciales sin escribir.
-3. Si FP ≤ 20% y sin flood: detect real (sin `--dry-run`) — inserta menciones, no envía.
+- `npm run tune-mery-pozos-shadow` ✅ ejecutado
+- Read-back Supabase: CLI-MERY-TEST + 12 keywords ✅
+- alertas_activas=false post-upsert assertion ✅
+- detect-mentions --dry-run: 0 menciones insertadas ✅
 
-**Prohibido sin autorización:** activar `alertas_activas=true` ni ejecutar detect real
-antes de validar potenciales en dry-run.
+**Siguiente gate:** detect real (sin `--dry-run`) — solo cuando el cron produzca
+noticias nuevas y se quiera ver menciones reales de Mery Pozos en Supabase.
+Requiere autorización explícita antes de ejecutar detect real.
+
+**Prohibido sin autorización:** activar `alertas_activas=true`.

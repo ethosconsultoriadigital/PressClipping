@@ -983,7 +983,7 @@ Ethos ahora tiene capacidad de monitorear personas públicas además de marcas/i
 | tier 3 | exacta_contextual — 4 keywords, alerta=false, contexto político requerido |
 | cobertura histórica | 2 notas en PressClipping CSV (El Informador + lado.mx, feb 2026) |
 | medio clave | MED-0005 lado.mx — ya en daily shadow tier |
-| estado | Script listo; ejecución en Supabase pendiente autorización |
+| estado | MERY_SHADOW_CONFIG_CREATED — cliente + 12 keywords en Supabase (2026-07-10) |
 
 Script: `scripts/tune-mery-pozos-shadow.ts` — idempotente, `--dry` validado limpio.
 Tests: `test/matcher-mery-pozos.test.ts` — 30 nuevos tests (798 total, todos verdes).
