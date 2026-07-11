@@ -968,6 +968,29 @@ Estados: `LISTO_PARA_PILOTO_INTERNO`, `SHADOW_ESTABLE_NO_REAL`,
 
 ---
 
+## Monitoreo persona pública — CLI-MERY-TEST (2026-07-10)
+
+Ethos ahora tiene capacidad de monitorear personas públicas además de marcas/industrias.
+
+| campo | valor |
+|---|---|
+| cliente_id | CLI-MERY-TEST |
+| nombre | Mery Pozos / Merilyn Gómez Pozos |
+| tipo | persona_publica |
+| alertas_activas | false (shadow only) |
+| keywords | 12 (KEY-0040 a KEY-0051) |
+| tier 1/2 | frase_exacta — 8 keywords, alerta=true |
+| tier 3 | exacta_contextual — 4 keywords, alerta=false, contexto político requerido |
+| cobertura histórica | 2 notas en PressClipping CSV (El Informador + lado.mx, feb 2026) |
+| medio clave | MED-0005 lado.mx — ya en daily shadow tier |
+| estado | Script listo; ejecución en Supabase pendiente autorización |
+
+Script: `scripts/tune-mery-pozos-shadow.ts` — idempotente, `--dry` validado limpio.
+Tests: `test/matcher-mery-pozos.test.ts` — 30 nuevos tests (798 total, todos verdes).
+Docs: `docs/PERSONA_PUBLICA_MERY_POZOS_SHADOW.md`.
+
+---
+
 ### Anexos técnicos
 
 - `10_Alertas_Sombra`: 25 columnas originales preservadas + 19 nuevas de

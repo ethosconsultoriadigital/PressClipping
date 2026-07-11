@@ -236,3 +236,33 @@ sin FP severo, sin envíos. `decisionDetect=SHADOW_OK` en los dos.
 
 Siguiente gate habilitado: cargar SMTP real fuera del repo con switches apagados
 (GO_CREDENCIALES_INTERNAS step 2) — requiere autorización explícita.
+
+---
+
+## Validación shadow CLI-MERY-TEST — Mery Pozos (2026-07-10)
+
+### Script de alta
+
+`scripts/tune-mery-pozos-shadow.ts` creado e idempotente.
+- Upsert cliente CLI-MERY-TEST (`alertas_activas=false`, `activo=true`).
+- Upsert 12 keywords KEY-0040 a KEY-0051 (frase_exacta Tier 1/2 + exacta_contextual Tier 3).
+- `npm run tune-mery-pozos-shadow -- --dry` ejecutado limpio el 2026-07-10.
+- Typecheck: 0 errores. Tests: 42 archivos / 798 tests todos en verde (30 tests Mery nuevos).
+
+### Estado
+
+- Script listo para ejecución real (sin `--dry`) con autorización explícita.
+- `alertas_activas=false` garantizado en script + verificación post-upsert.
+- Cobertura histórica en PressClipping CSV: 2 notas confirmadas (El Informador + lado.mx,
+  2026-02-06, "Operación Enjambre — nadie está por encima de la ley").
+- lado.mx (MED-0005, ya en daily shadow) cubrió a Mery Pozos — alta relevancia directa.
+
+### Gate de activación en Supabase
+
+**Pendiente autorización explícita** para:
+1. `npm run tune-mery-pozos-shadow` (sin `--dry`) — inserta cliente + keywords.
+2. `npm run detect-mentions -- --dry-run --only-with-text` — valida potenciales sin escribir.
+3. Si FP ≤ 20% y sin flood: detect real (sin `--dry-run`) — inserta menciones, no envía.
+
+**Prohibido sin autorización:** activar `alertas_activas=true` ni ejecutar detect real
+antes de validar potenciales en dry-run.
