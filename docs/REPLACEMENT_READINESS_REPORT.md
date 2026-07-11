@@ -669,10 +669,13 @@ Fase sin producción y sin envíos. Detalle en `docs/PRODUCTION_READINESS_PLAN.m
 
 ### Cron post-`bde7d23`
 
-- **Pendiente.** Último run programado `29030756545` (schedule, 2026-07-09T15:45:04Z,
-  success) sobre `headSha=397f38f` — **anterior** al push de `bde7d23` (~19:50Z). Aún
-  **no** hay corrida con MED-0005/MED-0049. Sin cron limpio confirmado → **no se agregan
-  medios** este lote.
+- ✅ **GATE_DAILY_POST_BDE7D23_LIMPIO CERRADO (2026-07-11).**
+  - Run schedule: `29103114449` — headSha=`1623645` (HEAD), 2026-07-10, success.
+  - Run dispatch: `29139253475` — headSha=`1623645`, 2026-07-11, success.
+  - MED-0005 lado.mx: estado=ok, insertadas=0 (duplicadas del catálogo), errors=0.
+  - MED-0049 Telediario: estado=ok, insertadas=29, errors=0.
+  - `decisionDetect=SHADOW_OK`. Sin flood, sin FP severo, sin envíos.
+  - Gate de medios cerrado. Próxima alta condicionada a re-enrich (Noroeste) o reparación (Excelsior).
 
 ### Fase 1 piloto email CLI-0002 (preparada, disabled)
 

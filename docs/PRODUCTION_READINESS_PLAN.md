@@ -98,12 +98,18 @@ Fase de "Piloto Interno CLI-0002 + Lote P1 de Medios". Sin producción, sin env�
 
 ### Carril A — Cron post-`bde7d23`
 
-- **Pendiente.** Último run programado de `live-comparison-shadow-daily-validated`:
-  `29030756545` (event=schedule, 2026-07-09T15:45:04Z, conclusion=success) corrió
-  sobre `headSha=397f38f` — **anterior a `bde7d23`** (push ~19:50Z del 9-jul).
-- No hay run `schedule` con `bde7d23` o posterior todavía. El próximo programado
-  (~10-jul) será el primero en incluir **MED-0005 lado.mx** y **MED-0049 Telediario
-  Monterrey**. Hasta confirmarlo limpio, **no se agregan más medios** (Carril D gate).
+- **GATE_DAILY_POST_BDE7D23_LIMPIO ✅ CERRADO (2026-07-11).**
+- **Run schedule** (primero post-`bde7d23`): `29103114449` — event=schedule,
+  headSha=`1623645` (HEAD), 2026-07-10T15:17:41Z, conclusion=success, duración 10m33s.
+- **Run manual** (validación explícita): `29139253475` — event=workflow_dispatch,
+  headSha=`1623645`, 2026-07-11T04:13:07Z, conclusion=success, duración 9m37s.
+- **MED-0005 lado.mx:** `estado=ok`, insertadas=0 (duplicadas del catálogo), duplicados=30,
+  errors=0; detect 5 menciones SOLO_ETHOS_BORDERLINE (Tequila×2, Jumex×1, Reforma laboral×2).
+- **MED-0049 Telediario Monterrey:** `estado=ok`, insertadas=29 (primera corrida), duplicados=1,
+  errors=0; detect 1 mención SOLO_ETHOS_BORDERLINE.
+- Gate detect dry-run: `potenciales≤3`, `gate_pasa=true`, `decisionDetect=SHADOW_OK` en ambos runs.
+- **Sin flood, sin boilerplate, sin FP severo, sin turismo/deporte dominante.**
+- Gate Carril A **cerrado**. Próxima ventana de alta de medios habilitada.
 
 ### Carril B — Lote P1 `EN_CATALOGO_NO_CRON` (auditoría read-only)
 
@@ -139,14 +145,15 @@ Fase de "Piloto Interno CLI-0002 + Lote P1 de Medios". Sin producción, sin env�
 
 ### Carril D — Decisión de avance
 
-- Gate Carril A **no** cumplido (sin cron `bde7d23` limpio) → **no se agregan medios**.
-- Solo se deja el ranking P1 y la readiness. Próxima ventana de alta: tras observar
-  el primer cron post-`bde7d23` limpio + Noroeste re-enriquecido / Excelsior reparado.
+- Gate Carril A **cerrado** (cron post-`bde7d23` limpio, `29103114449` + `29139253475`). ✅
+- Próxima ventana de alta habilitada: Noroeste (re-enrich texto 58%) o Excelsior (reparar fuente).
+- No se agregan medios sin re-enrich/reparación previa de los P1 pendientes.
 
 ### Pre-activación SMTP interna — GO_CREDENCIALES_INTERNAS (2026-07-09)
 
-- **Cron post-`bde7d23`:** sigue **pendiente** (último run programado `29030756545`
-  sobre `397f38f`). Sin cron nuevo → sin altas.
+- **Cron post-`bde7d23`:** ✅ **CERRADO** — runs `29103114449` (schedule 2026-07-10) y
+  `29139253475` (dispatch 2026-07-11) sobre `1623645` (HEAD), ambos conclusion=success,
+  MED-0005/MED-0049 sin errores, `decisionDetect=SHADOW_OK`.
 - **SMTP interno preparado, apagado:** `.env.example` con los 15 placeholders (switches
   off, SMTP vacíos). Validado que con credenciales presentes pero
   `SEND_ALERTS=false`/`EMAIL_ALERTS_ENABLED=false`, `createSmtpTransport` **no** crea
@@ -164,9 +171,10 @@ Puerta de salida del piloto apagado (tabla completa en
 
 - ✅ **Gates de código/infra:** transporte SMTP no se construye con switches off
   (validado), digest CLI-0002 estable (2 clusters), rollback trivial documentado.
-- ⏳ **Gates operativos pendientes:** (1) cron post-`bde7d23` limpio con
-  MED-0005/MED-0049 —sigue pendiente, último run sobre `397f38f`—, (2) SMTP real
-  cargado fuera del repo, (3) recipient hashes revisados, (4) **autorización explícita**.
+- ✅ **Gate operativo #1 cerrado:** cron post-`bde7d23` limpio con MED-0005/MED-0049
+  (`29103114449` + `29139253475`, ambos `SHADOW_OK`, 2026-07-10/11).
+- ⏳ **Gates operativos pendientes:** (2) SMTP real cargado fuera del repo,
+  (3) recipient hashes revisados, (4) **autorización explícita**.
 - **Veredicto:** `GO_ENVIO_INTERNO_LIMITADO` **NO** habilitado. Se recomienda **no**
   pedir autorización de envío mientras el cron post-`bde7d23` siga pendiente.
 
@@ -177,7 +185,54 @@ Puerta de salida del piloto apagado (tabla completa en
 - **Estado:** Fase 0 (shadow medible) **consolidada**; paridad medida; Fase 1 (piloto
   email interno CLI-0002) **preparada y apagada** (provider cableado, kill-switches off).
 - **Siguiente fase permitida (elegir con autorización):**
-  1. Observar el primer cron post-`bde7d23` (MED-0005/MED-0049) y validarlo limpio.
+  1. ~~Observar el primer cron post-`bde7d23` (MED-0005/MED-0049) y validarlo limpio.~~ ✅ Cerrado.
   2. Cargar credenciales SMTP internas con `SEND_ALERTS=false` (checklist).
 - **No permitido aún:** envío real, sustitución parcial/global (Fases 3–5) — sin
   evidencia suficiente ni autorización.
+
+---
+
+## Validación manual daily shadow post-`bde7d23` (2026-07-11)
+
+### Resumen de ejecución
+
+| campo | schedule | dispatch |
+|---|---|---|
+| run_id | `29103114449` | `29139253475` |
+| headSha | `1623645` | `1623645` |
+| event | schedule | workflow_dispatch |
+| fecha | 2026-07-10T15:17:41Z | 2026-07-11T04:13:07Z |
+| conclusion | success | success |
+| duración | 10m33s | 9m37s |
+
+### Resultados por medio
+
+| medio_id | medio | nuevas | duplicadas | errores | detect_potenciales | decisionDetect | observación |
+|---|---|---|---|---|---|---|---|
+| MED-0005 | lado.mx | 0 | 30 | 0 | incluido en ≤3 globales | SHADOW_OK | 0 nuevas = esperado (EN_CATALOGO_NO_CRON; cron garantiza cobertura forward) |
+| MED-0049 | Telediario Monterrey | 29 (sched) / 28 (disp) | 1/2 | 0 | incluido en ≤3 globales | SHADOW_OK | Limpio; primera corrida real |
+
+Menciones SOLO_ETHOS_BORDERLINE desde los nuevos medios (run schedule):
+- lado.mx: Tequila ×2 (CLI-0002), Reforma laboral ×2 (CLI-0003), Jumex ×1 (CLI-0001)
+- Telediario: Ayuntamiento de Puebla ×1 (CLI-0003)
+
+### Validación sheets
+
+| tab | escritas | mismatch | estado |
+|---|---|---|---|
+| 05_Comparativo_PressClipping | 95 / 97 | false | OK |
+| 07_Métricas_Live | metrics_history=1 | — | OK |
+| 08_Cobertura_Medios | 162 filas, actualizadas=6 | false | OK |
+
+### Sin envíos confirmado
+
+`--no-send --no-whatsapp --no-email` presentes. SMTP no configurado en `.env`.
+`sent=0`, `would_send=0`. No SMTP/Twilio/Gmail call en logs.
+
+### Gate
+
+**`GATE_DAILY_POST_BDE7D23_LIMPIO` ✅ CERRADO** — ambos runs sin errores, sin flood,
+sin FP severo, sin envíos. `decisionDetect=SHADOW_OK` en los dos.
+
+Siguiente gate habilitado: cargar SMTP real fuera del repo con switches apagados
+(GO_CREDENCIALES_INTERNAS step 2) — requiere autorización explícita.

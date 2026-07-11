@@ -169,8 +169,8 @@ En el log del dry-run debe verse:
 
 | # | gate | estado (2026-07-09) |
 |---|---|---|
-| 1 | **Cron post-`bde7d23` limpio** (run `schedule` con `bde7d23`/`6efbf0a`/`5f91f74` o posterior, conclusion=success) | ⏳ **PENDIENTE** (último run `29030756545` sobre `397f38f`; próximo programado ~10-jul) |
-| 2 | **MED-0005 lado.mx / MED-0049 Telediario Monterrey sin errores** en ese cron | ⏳ PENDIENTE (depende de #1) |
+| 1 | **Cron post-`bde7d23` limpio** (run `schedule` con `bde7d23`/`6efbf0a`/`5f91f74` o posterior, conclusion=success) | ✅ **CERRADO** — `29103114449` (schedule 2026-07-10) y `29139253475` (dispatch 2026-07-11), ambos sobre `1623645` (HEAD), conclusion=success |
+| 2 | **MED-0005 lado.mx / MED-0049 Telediario Monterrey sin errores** en ese cron | ✅ **CERRADO** — ambos `estado=ok`, errors=0, gate_pasa=true, `decisionDetect=SHADOW_OK` |
 | 3 | **SMTP real cargado fuera del repo** (`SMTP_*` + `INTERNAL_ALERT_EMAILS` en Secrets/`.env` ignorado) | ⏳ PENDIENTE (no cargadas en este entorno) |
 | 4 | **Dry-run con SMTP real sigue `blocked`** (`smtp_transport=null`, `reason=real_alerts_disabled`) | ✅ Lógica validada (creds ficticias, fase previa) — repetir con reales al cargarlas |
 | 5 | **Digest CLI-0002 estable** (agrupación consistente, sin flood) | ✅ 196 P1 → 2 clusters (Guanajuato 14 + Nacional 6), reproducible |
@@ -178,8 +178,9 @@ En el log del dry-run debe verse:
 | 7 | **Rollback documentado** (§6 y §7.6) | ✅ Documentado y trivial (switches=false + vaciar destinatarios + rotar pass) |
 | 8 | **Autorización explícita del usuario** para envío interno | ⏳ PENDIENTE (requerida antes de cualquier envío) |
 
-**Estado de la puerta:** `GO_ENVIO_INTERNO_LIMITADO` **NO** habilitado. Gates de
-código/infra listos (4,5,7); faltan gates operativos (1,2,3,6) y la autorización (8).
+**Estado de la puerta (2026-07-11):** `GO_ENVIO_INTERNO_LIMITADO` **NO** habilitado.
+Gates de código/infra listos (4,5,7); gates operativos cerrados (1,2);
+faltan operativos (3,6) y la autorización (8).
 
 > `GO_ENVIO_INTERNO_LIMITADO` requiere **autorización explícita posterior**. La fase
 > actual **no envía nada**; deja el piloto en modo apagado con la infra completa.

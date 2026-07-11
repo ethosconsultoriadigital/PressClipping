@@ -87,10 +87,11 @@ aportan cobertura regional de crisis que PressClipping no rastrea → **valor a�
 
 ## 7.b Seguimiento — Aceleración Controlada (2026-07-09)
 
-- **Cron post-`bde7d23` (MED-0005 / MED-0049):** aún **pendiente**. El último run
-  programado corrió sobre `397f38f` (anterior al push). Sin cron limpio confirmado,
-  **no se agregan más medios** este lote (regla de gate). Detalle en
-  `docs/PRODUCTION_READINESS_PLAN.md` (Carril A).
+- **Cron post-`bde7d23` (MED-0005 / MED-0049):** ✅ **GATE_DAILY_POST_BDE7D23_LIMPIO
+  CERRADO (2026-07-11).** Runs `29103114449` (schedule) y `29139253475` (dispatch),
+  ambos sobre `1623645` (HEAD), conclusion=success, MED-0005 estado=ok, MED-0049
+  estado=ok, errors=0, `decisionDetect=SHADOW_OK`. Detalle en
+  `docs/PRODUCTION_READINESS_PLAN.md` (§Validación manual daily shadow post-`bde7d23`).
 - **Re-auditoría lote P1** (read-only): Noroeste (MED-0055) = `P1_REENRICH_PRIMERO`
   (texto 58%); Excelsior (MED-0028) = `P1_REPARAR_FUENTE` (estado error, 0 notas);
   La Silla Rota / Jalisco Hoy / Noticias México 24 / Hoy Tamaulipas = fuera de catálogo

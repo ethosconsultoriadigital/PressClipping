@@ -217,8 +217,10 @@ Puerta de salida del piloto apagado. Ver tabla completa en
 
 - ✅ Listos (código/infra): dry-run con SMTP real sigue `blocked` (lógica validada),
   digest CLI-0002 estable (2 clusters), rollback documentado.
-- ⏳ Pendientes (operativos): cron post-`bde7d23` limpio con MED-0005/MED-0049, SMTP
-  real cargado fuera del repo, recipient hashes revisados, y **autorización explícita**.
+- ✅ **Cron post-`bde7d23` limpio con MED-0005/MED-0049 CERRADO** (2026-07-11,
+  runs `29103114449` + `29139253475`, `decisionDetect=SHADOW_OK`).
+- ⏳ Pendientes (operativos): SMTP real cargado fuera del repo, recipient hashes
+  revisados, y **autorización explícita**.
 - `GO_ENVIO_INTERNO_LIMITADO` **no** habilitado; esta fase **no envía nada**.
 
 ### Variables requeridas (todas apagadas por defecto)
