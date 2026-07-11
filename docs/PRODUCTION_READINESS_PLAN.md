@@ -258,15 +258,24 @@ Siguiente gate habilitado: cargar SMTP real fuera del repo con switches apagados
 - keywords_activas: 49 (12 nuevas Mery + 37 existentes) confirmado en dry-run detección.
 - noticias pendientes en dry-run: 0 (históricas ya procesadas). Monitoreo activo desde próximo cron.
 
-### Estado: MERY_SHADOW_CONFIG_CREATED (2026-07-10)
+### Estado: MERY_SHADOW_DRY_RUN_OK (2026-07-11)
 
-- `npm run tune-mery-pozos-shadow` ✅ ejecutado
+- `npm run tune-mery-pozos-shadow` ✅ ejecutado (2026-07-10)
 - Read-back Supabase: CLI-MERY-TEST + 12 keywords ✅
 - alertas_activas=false post-upsert assertion ✅
 - detect-mentions --dry-run: 0 menciones insertadas ✅
+- detect-mentions --client=CLI-MERY-TEST (real, 2026-07-11): filtro funcional, 0 pendientes, 0 insertadas ✅
+- simulate-mery-pozos-shadow --window-days=180: 1000 noticias, 0 matches, 0 FP ✅
+- shadow-alerts --shadow-client-allowlist=CLI-MERY-TEST: 72 filas 10_Alertas_Sombra, mismatch=false ✅
 
-**Siguiente gate:** detect real (sin `--dry-run`) — solo cuando el cron produzca
-noticias nuevas y se quiera ver menciones reales de Mery Pozos en Supabase.
-Requiere autorización explícita antes de ejecutar detect real.
+**Artefactos nuevos (2026-07-11):**
+- `scripts/simulate-mery-pozos-shadow.ts` — scan histórico read-only
+- `detect-mentions --client=VALUE` — filtro por cliente implementado y validado
+- `detect-mentions --max-inserts=N` — safety cap implementado
+- `test/detect-mentions-client-filter.test.ts` — 24 tests (822 total, todos verdes)
+
+**Siguiente gate:** aguardar primer crawl con noticias de Mery Pozos.
+Verificar con `simulate-mery-pozos-shadow --window-days=7`. Si el match es correcto,
+el pipeline está completo — menciones se insertan y aparecen en 10_Alertas_Sombra.
 
 **Prohibido sin autorización:** activar `alertas_activas=true`.

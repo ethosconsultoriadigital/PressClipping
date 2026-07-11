@@ -188,6 +188,56 @@ insertas: 0 (dry-run real confirmado)
 
 **Próximo ciclo de crawl** aplicará automáticamente las keywords de Mery Pozos a noticias nuevas.
 
+### Validación end-to-end shadow — 2026-07-11
+
+**Estado: MERY_SHADOW_DRY_RUN_OK**
+
+#### Simulación histórica (FASE 6)
+```
+npm run simulate-mery-pozos-shadow -- --window-days=180
+
+noticias_analizadas: 1000
+matches_potenciales: 0
+con_texto_cuerpo: 0
+sin_texto_titulo_only: 0
+keywords_con_hits: 0
+keywords_sin_hits: 12
+FP estimado: 0% ✅
+Flood: NO ✅
+Homónimos: 0 ✅
+```
+Resultado: sin cobertura histórica de Mery Pozos en DB (período ene-jul 2026).
+Las notas de feb-2026 confirmadas (Operación Enjambre) no están en el DB actual o
+son anteriores a la ventana de las 1000 noticias más recientes.
+
+Gate FASE 6: **PASS** (0 matches ≤ 100, FP = 0%, no flood).
+
+#### Detect real controlado — FASE 7
+```
+npm run detect-mentions -- --client=CLI-MERY-TEST --only-with-text --max-inserts=50
+
+clientId: CLI-MERY-TEST
+keywords_cliente: 12 ✅ (solo las de CLI-MERY-TEST, no las de otros clientes)
+noticias_pendientes: 0 (todas previamente procesadas antes de crear CLI-MERY-TEST)
+menciones insertadas: 0
+noticias marcadas_procesadas: NO ✅ (preservado para detect global futuro)
+otros clientes afectados: 0 ✅
+```
+
+Gate FASE 7: **PASS** — filtro `--client` funciona correctamente en modo real.
+
+#### Shadow-alerts dry-run — FASE 8 / FASE 9
+```
+npm run shadow-alerts -- --shadow-client-allowlist=CLI-MERY-TEST --no-send --no-whatsapp --no-email --dry-run
+
+send: false ✅
+whatsapp: false ✅
+email: false ✅
+menciones_de_CLI-MERY-TEST: 0 (sin menciones en DB aún)
+10_Alertas_Sombra escritas: 72 filas (otros clientes activos)
+readback: 72 filas, mismatch=false ✅
+```
+
 ---
 
 ## 9. Riesgos de homónimos
@@ -202,17 +252,26 @@ insertas: 0 (dry-run real confirmado)
 
 ---
 
-## 10. Siguiente paso recomendado
+## 10. Infraestructura creada en esta sesión
 
-1. **Autorizar escritura en Supabase:** ejecutar `npm run tune-mery-pozos-shadow` (sin `--dry`)
-   para insertar CLI-MERY-TEST y las 12 keywords en producción shadow.
-2. **Ejecutar dry-run de detect-mentions:**
-   ```bash
-   npm run detect-mentions -- --dry-run --only-with-text
-   ```
-   para ver cuántas menciones históricas produce antes de marcar ninguna.
-3. **Revisar resultado:** potenciales, FP estimado, flood sí/no, homónimos.
-4. Si FP ≤ 20% y no hay flood: ejecutar `npm run detect-mentions -- --only-with-text`
-   (sin `--dry-run`) con `alertas_activas=false` garantizado — solo inserta menciones, no envía.
+| artefacto | estado |
+|---|---|
+| `scripts/tune-mery-pozos-shadow.ts` | Activo — upsert idempotente en Supabase |
+| `scripts/simulate-mery-pozos-shadow.ts` | Activo — scan histórico read-only, `--window-days` configurable |
+| `test/matcher-mery-pozos.test.ts` | 30 tests, todos verdes |
+| `test/detect-mentions-client-filter.test.ts` | 24 tests, todos verdes |
+| `detect-mentions --client=CLI-MERY-TEST` | Implementado y validado en real |
+| CLI-MERY-TEST en Supabase | `alertas_activas=false`, 12 keywords activas |
+
+## 11. Siguiente paso recomendado
+
+El pipeline está completo para el monitoreo shadow de Mery Pozos. Las menciones se
+insertarán automáticamente en el próximo ciclo de crawl que traiga noticias que la mencionen.
+
+1. **Observar 3–5 días:** esperar el próximo crawl con noticias de Mery Pozos.
+2. **Verificar primer match:** `npm run simulate-mery-pozos-shadow -- --window-days=7`
+   para confirmar que el primer match real sea correcto (no FP).
+3. **Si primer match es correcto:** el flujo shadow ya funciona — las menciones se guardan
+   en `menciones` y aparecen en `10_Alertas_Sombra` en el siguiente shadow-alerts run.
 
 **No activar `alertas_activas=true` sin autorización explícita.**

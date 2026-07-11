@@ -49,6 +49,14 @@ interface DetectArgs {
   includeDiagnostic?: boolean;
   /** Aísla la detección a estos medio_id (no mezcla backlog global). */
   medioIds?: string[];
+  /**
+   * Filtra las keywords al cliente indicado. Cuando se especifica, las noticias NO
+   * se marcan como procesadas (menciones_procesado=true), para preservar que el
+   * próximo detect global las analice con todas las keywords de otros clientes.
+   */
+  clientId?: string;
+  /** Límite máximo de menciones a insertar en modo real (safety cap por cliente). */
+  maxInserts?: number;
 }
 
 function splitList(v: string): string[] {
@@ -68,6 +76,8 @@ function parseArgs(argv: string[]): DetectArgs {
     if (key === 'include-diagnostic') out.includeDiagnostic = true;
     if (key === 'limit') out.limit = parseIntOrNull(value) ?? undefined;
     if (key === 'medio-ids') out.medioIds = splitList(value);
+    if (key === 'client' && value) out.clientId = value;
+    if (key === 'max-inserts') out.maxInserts = parseIntOrNull(value) ?? undefined;
   }
   return out;
 }
@@ -128,11 +138,19 @@ async function main() {
   const limit = args.limit ?? configLimit;
 
   logger.info(
-    { dryRun: args.dryRun, limit, onlyWithText: args.onlyWithText ?? false, includeDiagnostic: args.includeDiagnostic ?? false, medioIds: args.medioIds ?? null },
+    { dryRun: args.dryRun, limit, onlyWithText: args.onlyWithText ?? false, includeDiagnostic: args.includeDiagnostic ?? false, medioIds: args.medioIds ?? null, clientId: args.clientId ?? null, maxInserts: args.maxInserts ?? null },
     'Iniciando detección de menciones',
   );
 
-  const keywordRows = await getKeywordsActivas();
+  let keywordRows = await getKeywordsActivas();
+  if (args.clientId) {
+    keywordRows = keywordRows.filter((k) => k.cliente_id === args.clientId);
+    logger.info({ clientId: args.clientId, keywords_cliente: keywordRows.length }, 'Filtrando keywords por cliente');
+    if (keywordRows.length === 0) {
+      logger.warn({ clientId: args.clientId }, 'No hay keywords activas para este cliente. Sin menciones.');
+      return;
+    }
+  }
   const reglas = keywordRows.map(toRule);
   const alertaPorKeyword = new Map(keywordRows.map((k) => [k.keyword_id, k.alerta]));
 
@@ -228,9 +246,20 @@ async function main() {
     return;
   }
 
-  // Modo real: insertar y marcar
-  const insertadas = await insertMenciones(menciones);
-  await markNoticiasProcesadas(noticias.map((n) => n.noticia_id));
+  // Modo real: insertar y (opcionalmente) marcar
+  const mencionesAInsertar = args.maxInserts != null ? menciones.slice(0, args.maxInserts) : menciones;
+  if (args.maxInserts != null && menciones.length > args.maxInserts) {
+    logger.info({ total: menciones.length, insertando: mencionesAInsertar.length, cap: args.maxInserts }, 'max-inserts cap aplicado');
+  }
+  const insertadas = await insertMenciones(mencionesAInsertar);
+
+  // Cuando se filtra por --client, NO se marcan las noticias como procesadas:
+  // el detect global futuro debe poder procesarlas con keywords de otros clientes.
+  if (!args.clientId) {
+    await markNoticiasProcesadas(noticias.map((n) => n.noticia_id));
+  } else {
+    logger.info({ clientId: args.clientId }, 'Noticias NO marcadas como procesadas (modo --client): el detect global las seguirá viendo.');
+  }
 
   await writeIngestaLog({
     accion: 'detect_mentions',

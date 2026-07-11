@@ -983,10 +983,17 @@ Ethos ahora tiene capacidad de monitorear personas públicas además de marcas/i
 | tier 3 | exacta_contextual — 4 keywords, alerta=false, contexto político requerido |
 | cobertura histórica | 2 notas en PressClipping CSV (El Informador + lado.mx, feb 2026) |
 | medio clave | MED-0005 lado.mx — ya en daily shadow tier |
-| estado | MERY_SHADOW_CONFIG_CREATED — cliente + 12 keywords en Supabase (2026-07-10) |
+| estado | MERY_SHADOW_DRY_RUN_OK — end-to-end validado (2026-07-11) |
+
+**End-to-end shadow validado 2026-07-11:**
+- `simulate-mery-pozos-shadow --window-days=180`: 1000 noticias, 0 matches, 0 FP ✅
+- `detect-mentions --client=CLI-MERY-TEST --only-with-text --max-inserts=50`: 0 pendientes, 0 insertadas ✅
+- `shadow-alerts --shadow-client-allowlist=CLI-MERY-TEST --no-send`: 72 filas en 10_Alertas_Sombra, mismatch=false ✅
+- Filtro `--client` y `--max-inserts` implementados en detect-mentions ✅
 
 Script: `scripts/tune-mery-pozos-shadow.ts` — idempotente, `--dry` validado limpio.
-Tests: `test/matcher-mery-pozos.test.ts` — 30 nuevos tests (798 total, todos verdes).
+Script: `scripts/simulate-mery-pozos-shadow.ts` — scan histórico read-only.
+Tests: `test/matcher-mery-pozos.test.ts` + `test/detect-mentions-client-filter.test.ts` — 822 total, todos verdes.
 Docs: `docs/PERSONA_PUBLICA_MERY_POZOS_SHADOW.md`.
 
 ---
