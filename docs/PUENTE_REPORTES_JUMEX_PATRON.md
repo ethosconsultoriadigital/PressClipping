@@ -97,19 +97,97 @@ menciones_24h | menciones_7d | ultima_mencion | texto_ok_pct | errores_medios |
 siguiente_accion | notas
 ```
 
-**Por qué no se creó en esta fase:** no existe actualmente un helper seguro y probado para
-crear pestañas nuevas en el spreadsheet (`getOutputTab` solo lee pestañas existentes; crear
-una requeriría código nuevo sin testear, en medio de una fase etiquetada "no romper
-producción"). Se recomienda crear y probar ese helper en una fase separada, no urgente.
+**Actualización 2026-07-11: la tab YA fue creada.** Se implementó `ensureSheetTabAndHeaders()`
+en `src/sheets/write.ts` (helper genérico, con lógica pura testeable en `src/sheets/tabPlan.ts`)
+que crea la pestaña si no existe, preserva filas si ya existe, y hace **readback real**
+(re-lee la cabecera desde la API tras escribir, no confía en la variable local).
 
-## 8. Siguiente fase para exportar de verdad
+### Estado real de `11_Operacion_Sin_PressClipping`
 
-1. Crear helper `ensureOutputSheetExists(title, headers)` con test dedicado (nuevo, no
-   existe hoy) — antes de usarlo en producción.
-2. Crear `11_Operacion_Sin_PressClipping` con ese helper + readback obligatorio.
-3. Escribir snapshot diario (cliente, estado_operativo, métricas) — reutilizando
-   `audit-operational-readiness-no-pc.ts`.
+| campo | valor |
+|---|---|
+| Creada | ✅ Sí (2026-07-11) |
+| Sheet ID | `1izEL0y6mGttGawEvpYScMoxB7CKUseKw00rAVW5vGxM` |
+| Headers | 23 columnas (ver §4 arriba) |
+| Filas exportadas | 64 (CLI-0002: 59, CLI-0001: 5) — ventana 7 días |
+| Readback | ✅ mismatch=false |
+| Dedupe verificado | ✅ segunda corrida: 0 filas nuevas, 64 duplicados omitidos |
+
+### Exportador: `scripts/export-operational-news-no-pc.ts`
+
+```bash
+npm run export-operational-news-no-pc -- --clients=CLI-0001,CLI-0002 --window-days=7 --output=sheet --max-rows=500
+```
+
+- `dedupe_key = cliente_id::url_norm::keyword_id` — estable entre corridas.
+- Estados: `EXPORTADO`, `DUPLICADO_OMITIDO`, `SIN_TEXTO_LIMPIO`, `REVISAR` (falso positivo
+  según `estado_revision`).
+- `sentimiento`/`valoracion` quedan vacíos hasta que exista clasificación IA autorizada
+  (columna presente, valor pendiente — no bloquea el export).
+- `prioridad` viene de `keywords.prioridad` (Alta/Media/Baja del keyword que matcheó).
+
+## 8. Cómo conectar a hoja final Jumex
+
+1. La hoja final de Jumex necesita: filtrar `11_Operacion_Sin_PressClipping` por
+   `cliente_id = 'CLI-0001'` (o correr el exportador con `--clients=CLI-0001` solo).
+2. Antes de conectar: agregar clasificación de sentimiento (requiere `classify-ia`,
+   autorización separada — prohibido en esta fase).
+3. Revisar filas con `estado_export = 'REVISAR'` antes de reportar (falsos positivos).
+4. Conectar vía script dedicado (no creado aún) que lea `11_Operacion_Sin_PressClipping`
+   filtrado por cliente y haga push a la hoja de reportes de Jumex, con su propio readback.
+
+## 9. Cómo conectar a hoja final Patrón
+
+1. Igual que Jumex, filtrando `cliente_id = 'CLI-0002'`.
+2. Las keywords `Tequila Patrón`/`Casa Patrón` (alerta=true) deberían priorizarse en el
+   reporte — usar columna `requiere_alerta` para ordenar/destacar.
+3. Igual que Jumex: pendiente clasificación IA y conexión real a hoja final.
+
+## 9.b Re-enrich controlado (2026-07-11)
+
+Top 5 medios por impacto+volumen (todos con `cuerpo_vacio_pct=100%` en ventana 7d):
+
+| medio_id | medio | notas_7d | impacta | 
+|---|---|---|---|
+| MED-0157 | El Heraldo de México | 100 | CLI-0002 |
+| MED-0153 | Zócalo | 98 | CLI-0001 + CLI-0002 |
+| MED-0017 | El Informador | 83 | CLI-0002 |
+| MED-0160 | El Diario de Chihuahua | 75 | CLI-0001 |
+| MED-0020 | El Imparcial Sonora | 64 | CLI-0001 |
+
+```bash
+npm run enrich-news -- --medio-ids=MED-0157,MED-0153,MED-0017,MED-0160,MED-0020 \
+  --limit=500 --only-missing-clean-text
+```
+
+Resultado: 500 leídas, **487 actualizadas**, 13 sin cambios, 4 fallidas. Controlado (5 medios,
+tope de 500 notas total, `--only-missing-clean-text`, sin `--force-refresh-clean-text`).
+
+**Hallazgo importante:** estos 5 medios YA tenían buen texto histórico (82-84% de su catálogo
+completo tiene `texto_nota_limpia`). El problema es específico del **backlog reciente**: cada
+medio acumula ~400-600 notas sin enriquecer en su historial completo, de las cuales solo una
+fracción cae en la ventana de 7 días. El cap de 500 notas (respetando "no re-enrich masivo")
+corrigió una parte real pero no vació el backlog completo — se necesitarían más lotes
+controlados (mismo comando, en días sucesivos) para cerrar la brecha por completo.
+
+## 10. Riesgos
+
+- Sin clasificación de sentimiento/valoración: el reporte es solo hechos (medio, título,
+  keyword, fecha), sin análisis de tono. Aceptable para operación urgente; no para reporte
+  ejecutivo final.
+- Algunas keywords amplias (`tequila`, `mezcal` tipo `contiene`) pueden generar falsos
+  positivos de baja severidad (ej. mención de tequila en artículo no relacionado a
+  Patrón/CLI-0002) — requieren revisión humana vía `estado_revision` antes de publicar.
+- 20 medios en cron con `cuerpo_vacio_pct=100%` (ver `docs/PRODUCTION_READINESS_PLAN.md`
+  §Emergencia) — no bloquea detección por título, pero limita profundidad de contexto.
+
+## 11. Siguiente fase para exportar de verdad
+
+1. ~~Crear helper `ensureSheetTabAndHeaders` con test dedicado.~~ ✅ Hecho.
+2. ~~Crear `11_Operacion_Sin_PressClipping` con readback obligatorio.~~ ✅ Hecho.
+3. ~~Exportador staging con dedupe.~~ ✅ Hecho (`export-operational-news-no-pc.ts`).
 4. Cuando exista clasificación de sentimiento/valoración (fase separada, requiere IA
-   autorizada), agregar esas columnas al reporte.
-5. Recién entonces conectar a la hoja de reportes final del cliente (fuera del alcance
-   de este documento).
+   autorizada), completar esas columnas en el export.
+5. Crear script de conexión a hoja final por cliente (filtrado + push), con su propio
+   readback — fuera del alcance de esta fase.
+6. Automatizar corrida diaria del exportador (cron), una vez validado 2-3 días manualmente.

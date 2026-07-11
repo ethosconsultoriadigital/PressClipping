@@ -9,6 +9,7 @@ import type { GoogleSpreadsheetWorksheet } from 'google-spreadsheet';
 import { getTab, getOutputTab, getOutputSpreadsheet, withSheetsRetry } from './client.js';
 import { normalizeHeader } from '../utils/parse.js';
 import { planMergeByKey, type MergeUpdate } from './mergePlan.js';
+import { planEnsureTabHeaders } from './tabPlan.js';
 
 export type OutRow = Record<string, string | number | boolean | null | undefined>;
 
@@ -299,6 +300,82 @@ export async function appendHistoryRows(
     }
   }
   return appendToSheet(sheet, rows);
+}
+
+/** Resultado de asegurar pestaña + headers, con readback real post-escritura. */
+export interface EnsureTabResumen {
+  accion: 'crear_tab' | 'fijar_headers_vacios' | 'agregar_columnas' | 'sin_cambios';
+  headers_antes: string[];
+  headers_despues: string[];
+  columnas_agregadas: string[];
+  /** Headers releídos de la API DESPUÉS de escribir (no la variable local). */
+  readback_headers: string[];
+  /** true si readback_headers no coincide exactamente con headers_despues planeados. */
+  mismatch: boolean;
+  /** Filas de datos preexistentes (solo si la pestaña ya existía con headers). */
+  filas_preexistentes: number;
+}
+
+/**
+ * Asegura que una pestaña de la Sheet de SALIDA exista con las `headers`
+ * requeridas, creándola si hace falta. Con readback OBLIGATORIO: tras
+ * cualquier escritura, vuelve a leer la fila de cabecera desde la API (no
+ * confía en la variable local) y reporta `mismatch` si no coincide con lo
+ * planeado. NUNCA borra filas existentes ni pestañas fuera de `title`.
+ *
+ * A diferencia de `ensureOutputHeaders` (que devuelve el plan sin re-leer),
+ * esta función SIEMPRE relee `sheet.loadHeaderRow()` después de escribir,
+ * pensada para altas de pestañas operativas nuevas donde el readback es un
+ * requisito de seguridad explícito (p. ej. `11_Operacion_Sin_PressClipping`).
+ */
+export async function ensureSheetTabAndHeaders(
+  title: string,
+  headers: string[],
+): Promise<EnsureTabResumen> {
+  const doc = await getOutputSpreadsheet();
+  let sheet = doc.sheetsByTitle[title];
+  const tabExiste = Boolean(sheet);
+
+  let headersActuales: string[] = [];
+  let filasPreexistentes = 0;
+  if (sheet) {
+    await withSheetsRetry(() => sheet!.loadHeaderRow(), `loadHeaderRow ${title}`).catch(() => undefined);
+    headersActuales = sheet.headerValues && sheet.headerValues.length > 0 ? [...sheet.headerValues] : [];
+    if (headersActuales.length > 0) {
+      const rows = await withSheetsRetry(() => sheet!.getRows(), `getRows ${title}`);
+      filasPreexistentes = rows.length;
+    }
+  }
+
+  const plan = planEnsureTabHeaders(tabExiste, headersActuales, headers);
+
+  if (plan.accion === 'crear_tab') {
+    sheet = await withSheetsRetry(() => doc.addSheet({ title, headerValues: headers }), `addSheet ${title}`);
+  } else if (plan.accion === 'fijar_headers_vacios' || plan.accion === 'agregar_columnas') {
+    if (sheet!.columnCount < plan.headers_despues.length) {
+      await withSheetsRetry(
+        () => sheet!.resize({ rowCount: sheet!.rowCount, columnCount: plan.headers_despues.length }),
+        `resize ${title}`,
+      );
+    }
+    await withSheetsRetry(() => sheet!.setHeaderRow(plan.headers_despues), `setHeaderRow ${title}`);
+  }
+  // 'sin_cambios': no se escribe nada.
+
+  // Readback OBLIGATORIO: releer la cabecera desde la API, no confiar en la local.
+  await withSheetsRetry(() => sheet!.loadHeaderRow(), `loadHeaderRow(readback) ${title}`);
+  const readbackHeaders = [...sheet!.headerValues];
+  const mismatch = JSON.stringify(readbackHeaders) !== JSON.stringify(plan.headers_despues);
+
+  return {
+    accion: plan.accion,
+    headers_antes: headersActuales,
+    headers_despues: plan.headers_despues,
+    columnas_agregadas: plan.columnas_agregadas,
+    readback_headers: readbackHeaders,
+    mismatch,
+    filas_preexistentes: filasPreexistentes,
+  };
 }
 
 /**

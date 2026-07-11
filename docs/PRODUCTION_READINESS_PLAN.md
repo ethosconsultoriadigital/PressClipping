@@ -443,3 +443,45 @@ con su propio test, en vez de arriesgar código sin probar durante una emergenci
 **Prohibido sin autorización:** activar `alertas_activas=true` (ninguno de los 2 clientes
 fue modificado — CLI-0001 ya tenía `true` preexistente, CLI-0002 sigue en `false`).
 Enviar email/WhatsApp real. Conectar hoja de reportes final.
+
+---
+
+## OPERACIÓN REAL SIN PRESSCLIPPING — Sheet staging Jumex + Patrón (2026-07-11)
+
+### Helper seguro de Sheets: `ensureSheetTabAndHeaders`
+
+Nuevo en `src/sheets/write.ts` (+ lógica pura en `src/sheets/tabPlan.ts`, mismo patrón que
+`mergePlan.ts`). Crea la pestaña si no existe, preserva filas si ya existe, y hace
+**readback real** (re-lee la cabecera desde la API tras escribir — no confía en la variable
+local). 17 tests (12 lógica pura + 5 I/O con mock de GoogleSpreadsheet).
+
+### Tab `11_Operacion_Sin_PressClipping` — creada
+
+Sheet `1izEL0y6mGttGawEvpYScMoxB7CKUseKw00rAVW5vGxM`, 23 columnas, readback `mismatch=false`.
+
+### Exportador: `scripts/export-operational-news-no-pc.ts`
+
+```bash
+npm run export-operational-news-no-pc -- --clients=CLI-0001,CLI-0002 --window-days=7 --output=sheet --max-rows=500
+```
+
+- 64 filas exportadas (CLI-0002: 59, CLI-0001: 5), `mismatch=false`.
+- Dedupe verificado: segunda corrida → 64 duplicados omitidos, 0 filas nuevas, tabla sin cambios.
+- `dedupe_key = cliente_id::url_norm::keyword_id`. Estados: EXPORTADO/DUPLICADO_OMITIDO/SIN_TEXTO_LIMPIO/REVISAR.
+- `sentimiento`/`valoracion` vacíos (requieren `classify-ia`, prohibido esta fase).
+
+### Re-enrich controlado (top 5 medios que impactan Jumex/Patrón)
+
+El Heraldo de México, Zócalo, El Informador, El Diario de Chihuahua, El Imparcial Sonora —
+todos con backlog reciente sin enriquecer. `npm run enrich-news -- --medio-ids=... --limit=500
+--only-missing-clean-text`: 487/500 actualizadas. Backlog histórico de estos medios ya era
+82-84% bueno; el backlog reciente (7d) es más grande que el cap permitido — requiere más
+lotes controlados en días sucesivos para cerrarse del todo (no se hizo re-enrich masivo).
+
+### Estado final CLI-0002 / CLI-0001
+
+Sin cambio de estado tras esta fase (ya eran OPERATIVO_INTERNO 90% antes del export/re-enrich
+— el export solo saca datos ya detectados hacia staging, no cambia la detección en sí).
+
+**Prohibido sin autorización:** conectar `11_Operacion_Sin_PressClipping` a hojas finales de
+reportes. Activar `alertas_activas=true`. Clasificar con IA (sentimiento/valoración).

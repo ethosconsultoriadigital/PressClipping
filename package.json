@@ -37,6 +37,7 @@
     "audit-operational-readiness-no-pc": "tsx scripts/audit-operational-readiness-no-pc.ts",
     "tune-patron-jumex-keywords": "tsx scripts/tune-patron-jumex-keywords.ts",
     "simulate-keywords-shadow": "tsx scripts/simulate-keywords-shadow.ts",
+    "export-operational-news-no-pc": "tsx scripts/export-operational-news-no-pc.ts",
     "live-comparison": "tsx scripts/run-live-comparison.ts",
     "shadow-scheduler": "tsx scripts/run-shadow-scheduler.ts",
     "shadow-national-tier": "tsx scripts/run-shadow-national-tier.ts",
