@@ -320,3 +320,59 @@ reglas de seguridad, comandos para generar y estado actual del sistema.
 
 **Prohibido sin autorización:** activar `alertas_activas=true`. Enviar email real.
 Activar `GO_ENVIO_INTERNO_LIMITADO`.
+
+---
+
+## FAST-TRACK 48H — Cobertura P1 + Readiness Piloto Interno (2026-07-11)
+
+### Lote P1 ejecutado (3 medios, dentro del tope de 5)
+
+| medio_id | medio | acción | resultado |
+|---|---|---|---|
+| MED-0028 | Excelsior | Reparado RSS + alta cron daily-validated | ✅ 30 noticias nuevas, 0 errores |
+| MED-0084 | Frontera | Reparado sitemap + alta cron daily-validated | ✅ 1 mención real (CLI-0003) |
+| MED-0055 | Noroeste | Ya READY, alta cron daily-validated | ✅ crawleado en el mismo ciclo |
+
+Descartados por baja confianza (conf=0.4, `DIRECT_EXTRACTION_ONLY`): MED-0033 Eje Central,
+MED-0038 NTR Guadalajara — requieren revisión manual, no aptos para alta automática.
+
+Detalle completo: `docs/MEDIA_PARITY_MATRIX.md` §9.
+
+### `--window-hours` agregado al rolling backtest
+
+`run-rolling-readiness-backtest.ts` solo soportaba `--window-days`. Agregado `--window-hours`
+con precedencia sobre `--window-days` (convierte a días fraccionarios para el filtro de fecha).
+Tests: 5 nuevos casos en `test/rolling-readiness-backtest.test.ts`.
+
+### Backtest 48h + 7d (post lote P1)
+
+| cliente_id | menciones_48h | menciones_7d | estado |
+|---|---|---|---|
+| CLI-0001 | 3 | 5 | ACTIVO_ESTABLE |
+| CLI-0002 | 12 | 59 | ACTIVO_ESTABLE |
+| CLI-0003 | 62 | 272 | ACTIVO_ESTABLE |
+| CLI-MERY-TEST | 2 | 2 | ACTIVO_ESTABLE (48h) / ACTIVO_CON_SENALES (7d) |
+
+**Primer match real de Mery Pozos:** 2 menciones legítimas detectadas ("diputada Mery Pozos"
+en nota sobre presentación de libro de Ricardo Monreal), contexto político genuino, sin
+homónimos, `requiere_alerta=true`. Confirma que el diseño de keywords Tier 1/2 funciona en
+producción real (vía cron de GitHub Actions).
+
+### Bug conocido (no bloqueante): feed XML PressClipping vacío
+
+`import-pressclipping.ts` vía el worker Cloudflare devolvió 0 items en este ciclo — causa
+externa preexistente, no relacionada al lote P1. Pospone actualización de 05/07/08 hasta
+que se repare el worker. No afecta crawl/enrich/detect (que sí completaron limpio).
+
+### Decisión: ¿CLI-0002 a piloto interno?
+
+**Aún no.** El fast-track de 48h confirma actividad estable y detección funcionando
+correctamente (59 menciones/7d, 29 alertas, sin flood, sin FP evidente), pero el gate
+`GO_ENVIO_INTERNO_LIMITADO` sigue requiriendo: SMTP interno cargado fuera del repo,
+3 corridas limpias adicionales en `10_Alertas_Sombra`, y autorización explícita separada.
+El bug del feed XML impide medir `cobertura_vs_pc` real este ciclo — no es bloqueante para
+el pipeline de detección, sí lo es para la métrica formal de comparación.
+
+**Tiempo estimado actualizado:** con el lote P1 + backtest corto validado, el camino a
+`GO_ENVIO_INTERNO_LIMITADO` para CLI-0002 se estima en días, no en 30 días — sujeto a
+reparar el feed XML y correr 2-3 ciclos más de `shadow-alerts` sin mismatch.

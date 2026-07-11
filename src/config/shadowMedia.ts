@@ -255,6 +255,39 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED: readonly ShadowMedioDaily[] = [
     max_notas_shadow: 30,
     activo_shadow: true,
   },
+  {
+    // Lote Fast-Track P1 (2026-07-11): EN_CATALOGO_NO_CRON, mayor gap PC del lote
+    // (9 notas). Reparado de estado=error a REPAIRABLE_RSS_HIGH_CONFIDENCE (conf 1.0,
+    // https://www.excelsior.com.mx/rss) vía audit-media-sources --update-db. Sin
+    // historial de crawl aún (0 noticias en Ethos): validación de FP pendiente del
+    // primer ciclo shadow-daily-validated-tier (gate detect dry-run).
+    medio_id: 'MED-0028',
+    nombre: 'Excelsior',
+    fuente: 'auto',
+    max_notas_shadow: 30,
+    activo_shadow: true,
+  },
+  {
+    // Lote Fast-Track P1 (2026-07-11): EN_CATALOGO_NO_CRON, gap PC=1. Reparado a
+    // REPAIRABLE_SITEMAP_HIGH_CONFIDENCE (conf 1.0, sitemap outboundfeeds) vía
+    // audit-media-sources --update-db. Sin historial de crawl aún; validación de
+    // FP pendiente del primer ciclo shadow-daily-validated-tier (gate detect dry-run).
+    medio_id: 'MED-0084',
+    nombre: 'Frontera',
+    fuente: 'auto',
+    max_notas_shadow: 30,
+    activo_shadow: true,
+  },
+  {
+    // Lote Fast-Track P1 (2026-07-11): EN_CATALOGO_NO_CRON, gap PC=4 (2 clientes).
+    // Auditoría READY_KEEP_CURRENT (conf 1.0, RSS ya validado). Sin historial de
+    // crawl aún; validación de FP pendiente del primer ciclo shadow-daily-validated-tier.
+    medio_id: 'MED-0055',
+    nombre: 'Noroeste',
+    fuente: 'auto',
+    max_notas_shadow: 30,
+    activo_shadow: true,
+  },
 ] as const;
 
 /**

@@ -110,3 +110,33 @@ aportan cobertura regional de crisis que PressClipping no rastrea → **valor a�
   con precisión ya validada— en pocos lotes.
 - **Aún NO hay base para sustitución global**; sí para seguir cerrando gap por lotes y
   avanzar el piloto interno CLI-0002.
+
+## 9. Lote Fast-Track P1 (2026-07-11)
+
+Ejecutado bajo el fast-track de 48h para acelerar cobertura de medios importantes.
+
+| medio_id | medio | gap PC | acción | resultado |
+|---|---|---|---|---|
+| MED-0028 | Excelsior | 9 (mayor gap del lote) | Reparado RSS (`audit-media-sources --update-db`) | ✅ **ALTA cron daily-validated** — 30 noticias nuevas crawleadas, 0 errores |
+| MED-0084 | Frontera | 1 | Reparado sitemap outboundfeeds | ✅ **ALTA cron daily-validated** — 1 mención real detectada (CLI-0003, "trabajadores") |
+| MED-0055 | Noroeste | 4 | Ya READY_KEEP_CURRENT (conf 1.0) | ✅ **ALTA cron daily-validated** — crawleado en el mismo ciclo |
+
+**Descartados de este lote** (confianza insuficiente, `DIRECT_EXTRACTION_ONLY` conf=0.4):
+- MED-0033 Eje Central — requiere revisión manual antes de alta
+- MED-0038 NTR Guadalajara — requiere revisión manual antes de alta
+
+**Resultado del primer ciclo `shadow-daily-validated-tier` (2026-07-11):**
+```
+crawl dirigido (9 medios net-new): 36 nuevas, 234 duplicados, 0 errores
+enrich aislado: 36 leídas, 36 actualizadas, 0 fallidas
+detect dry-run gate: PASA (0 riesgo flood)
+detect real aislado: 1 mención insertada (CLI-0003, Frontera, "trabajadores", legítima)
+live-comparison (paso 5): FALLÓ — feed XML PressClipping devolvió 0 items (bug preexistente,
+  no causado por este lote). 05/07/08 no se actualizaron en este ciclo por esta causa externa.
+10_Alertas_Sombra: sin cambios (72 filas, mismatch=false, del ciclo anterior).
+```
+
+**Conclusión:** el lote P1 (Excelsior + Frontera + Noroeste) fue crawleado y validado exitosamente
+(sin FP, sin flood, sin errores). El único fallo fue en el paso de comparación contra
+PressClipping, por una causa externa preexistente (feed XML vacío) — no bloquea la cobertura
+en sí, solo pospone la actualización del comparativo 05/07/08 hasta que el feed XML se repare.

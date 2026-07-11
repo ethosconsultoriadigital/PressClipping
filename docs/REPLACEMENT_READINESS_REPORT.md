@@ -1036,6 +1036,18 @@ Tests: 851 total, todos verdes.
 
 ---
 
+## Fast-Track 48h — Cobertura P1 + Readiness (2026-07-11)
+
+3 medios agregados al tier daily-validated: Excelsior (MED-0028, reparado RSS), Frontera
+(MED-0084, reparado sitemap), Noroeste (MED-0055, ya READY). Crawl dirigido limpio: 36
+noticias nuevas, 0 errores, 1 mención real sin FP. Primer match real de Mery Pozos
+confirmado (2 menciones, contexto político genuino). `--window-hours` agregado al rolling
+backtest. Bug conocido no bloqueante: feed XML PressClipping vacío pospone actualización
+de 05/07/08. Detalle: `docs/MEDIA_PARITY_MATRIX.md` §9, `docs/PRODUCTION_READINESS_PLAN.md`
+§Fast-Track. Tests: 871 total, todos verdes.
+
+---
+
 ### Anexos técnicos
 
 - `10_Alertas_Sombra`: 25 columnas originales preservadas + 19 nuevas de

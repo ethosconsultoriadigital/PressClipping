@@ -56,9 +56,11 @@ function estadoBacktest(opts: {
 }
 
 // ─── Argparse ────────────────────────────────────────────────────────────────
-interface Args { windowDays: number; json: boolean; }
+/** windowDays es siempre el resultado final (en días, fraccional si viene de --window-hours). */
+interface Args { windowDays: number; windowHours?: number; json: boolean; }
 function parseArgs(argv: string[]): Args {
   const out: Args = { windowDays: 7, json: false };
+  let explicitDays: number | undefined;
   for (const arg of argv) {
     if (arg === '--json') { out.json = true; continue; }
     if (!arg.startsWith('--')) continue;
@@ -66,8 +68,12 @@ function parseArgs(argv: string[]): Args {
     const eq = body.indexOf('=');
     const key = eq === -1 ? body : body.slice(0, eq);
     const val = eq === -1 ? '' : body.slice(eq + 1);
-    if (key === 'window-days') out.windowDays = parseIntOrNull(val) ?? out.windowDays;
+    if (key === 'window-days') explicitDays = parseIntOrNull(val) ?? undefined;
+    if (key === 'window-hours') out.windowHours = parseIntOrNull(val) ?? undefined;
   }
+  // --window-hours tiene precedencia si se especifica; si no, usa --window-days o el default.
+  if (out.windowHours != null) out.windowDays = out.windowHours / 24;
+  else if (explicitDays != null) out.windowDays = explicitDays;
   return out;
 }
 
@@ -106,13 +112,11 @@ async function main() {
   const sb = getSupabase();
 
   logger.info(
-    { windowDays: args.windowDays, clientes: [...CLIENTES_OBJETIVO].join(',') },
+    { windowDays: args.windowDays, windowHours: args.windowHours ?? args.windowDays * 24, clientes: [...CLIENTES_OBJETIVO].join(',') },
     '=== Rolling Readiness Backtest (SOLO LECTURA — sin writes, sin envíos) ===',
   );
 
-  const fechaDesde = new Date();
-  fechaDesde.setDate(fechaDesde.getDate() - args.windowDays);
-  const isoDesde = fechaDesde.toISOString();
+  const isoDesde = new Date(Date.now() - args.windowDays * 24 * 60 * 60 * 1000).toISOString();
 
   // ── Leer menciones del período ───────────────────────────────────────────
   const { data: raw, error } = await sb

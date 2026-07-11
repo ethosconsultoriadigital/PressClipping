@@ -85,6 +85,53 @@ describe('estadoBacktest: clientes productivos', () => {
   });
 });
 
+// ─── Parseo de --window-hours (precedencia sobre --window-days) ─────────────
+
+function parseIntOrNull(v: string): number | null {
+  const n = parseInt(v, 10);
+  return isNaN(n) ? null : n;
+}
+
+function parseWindowArgs(argv: string[]): number {
+  let windowDays = 7;
+  let explicitDays: number | undefined;
+  let windowHours: number | undefined;
+  for (const arg of argv) {
+    if (!arg.startsWith('--')) continue;
+    const body = arg.slice(2);
+    const eq = body.indexOf('=');
+    const key = eq === -1 ? body : body.slice(0, eq);
+    const val = eq === -1 ? '' : body.slice(eq + 1);
+    if (key === 'window-days') explicitDays = parseIntOrNull(val) ?? undefined;
+    if (key === 'window-hours') windowHours = parseIntOrNull(val) ?? undefined;
+  }
+  if (windowHours != null) windowDays = windowHours / 24;
+  else if (explicitDays != null) windowDays = explicitDays;
+  return windowDays;
+}
+
+describe('parseArgs --window-hours', () => {
+  it('--window-hours=48 produce windowDays=2', () => {
+    expect(parseWindowArgs(['--window-hours=48'])).toBe(2);
+  });
+
+  it('--window-hours tiene precedencia sobre --window-days', () => {
+    expect(parseWindowArgs(['--window-days=30', '--window-hours=48'])).toBe(2);
+  });
+
+  it('sin --window-hours, --window-days=14 se respeta', () => {
+    expect(parseWindowArgs(['--window-days=14'])).toBe(14);
+  });
+
+  it('sin ningún flag, default es 7 días', () => {
+    expect(parseWindowArgs([])).toBe(7);
+  });
+
+  it('--window-hours=24 produce windowDays=1', () => {
+    expect(parseWindowArgs(['--window-hours=24'])).toBe(1);
+  });
+});
+
 // ─── Inclusión/exclusión correcta de clientes ────────────────────────────────
 describe('clientesAAnalizar', () => {
   it('incluye CLI-MERY-TEST (shadow real, no de prueba)', () => {

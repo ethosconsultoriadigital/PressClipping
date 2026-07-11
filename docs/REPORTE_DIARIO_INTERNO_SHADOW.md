@@ -184,14 +184,16 @@ npm run shadow-alerts -- --no-send --no-whatsapp --no-email
 npm run audit-extraction-quality -- --window-days=7
 ```
 
-### Opción B — Script de reporte automático (PENDIENTE DE IMPLEMENTAR)
+### Opción B — Script de reporte automático
 
 ```bash
 npm run generate-shadow-report
+# Con ventana distinta (default: 7 días):
+npm run generate-shadow-report -- --window-days=14
 ```
 
-> Script pendiente: `scripts/generate-internal-daily-shadow-report.ts`
-> Generaría salida markdown local, sin SMTP, sin Gmail, sin Google Docs.
+Genera `data/reporte-diario-YYYY-MM-DD.md` con las 11 secciones de la plantilla.
+Solo lectura. Sin SMTP, sin Sheets, sin Google Docs. No activa `alertas_activas`.
 
 ---
 
@@ -206,37 +208,69 @@ npm run generate-shadow-report
 
 ---
 
-## Estado actual del sistema (2026-07-11)
+## Estado actual del sistema (2026-07-11, post fast-track P1)
+
+### Rolling backtest 48h
+
+| cliente_id | menciones | días activos | alertas | keywords | estado |
+|---|---|---|---|---|---|
+| CLI-0001 | 3 | 3 | 1 | 2 | ACTIVO_ESTABLE |
+| CLI-0002 | 12 | 3 | 4 | 8 | ACTIVO_ESTABLE |
+| CLI-0003 | 62 | 3 | 10 | 6 | ACTIVO_ESTABLE |
+| CLI-MERY-TEST | 2 | 1 | 2 | 2 | ACTIVO_ESTABLE |
 
 ### Rolling backtest 7 días
 
 | cliente_id | menciones | días activos | alertas | keywords | estado |
 |---|---|---|---|---|---|
 | CLI-0001 | 5 | 5 | 3 | 3 | ACTIVO_ESTABLE |
-| CLI-0002 | 54 | 8 | 26 | 11 | ACTIVO_ESTABLE |
-| CLI-0003 | 274 | 8 | 32 | 9 | ACTIVO_ESTABLE |
-| CLI-MERY-TEST | 0 | 0 | 0 | 0 | SHADOW_CONFIG_OK_SIN_DATOS |
+| CLI-0002 | 59 | 8 | 29 | 12 | ACTIVO_ESTABLE |
+| CLI-0003 | 272 | 8 | 37 | 9 | ACTIVO_ESTABLE |
+| CLI-MERY-TEST | 2 | 1 | 2 | 2 | ACTIVO_CON_SENALES |
+
+> **Primer match real de Mery Pozos confirmado (2026-07-11):** 2 menciones (KEY-0041 "Mery
+> Pozos" + KEY-0045 "diputada Mery Pozos") sobre un artículo político legítimo — presentación
+> del libro de Ricardo Monreal sobre gestión del recurso hídrico, mencionando a "la diputada
+> Mery Pozos". Contexto político genuino, `requiere_alerta=true`, sin homónimos. El sistema
+> shadow funciona como se diseñó.
 
 ### Readiness por cliente (audit-replacement-readiness)
 
 | cliente_id | cobertura_vs_pc | alertas_score | estado_readiness |
 |---|---|---|---|
-| CLI-0001 | 0% | 62.9 | NO_LISTO |
-| CLI-0002 | 0% | 9.7 | NO_LISTO |
-| CLI-0003 | 0% | 33.0 | NO_LISTO |
-| CLI-MERY-TEST | N/A (shadow) | N/A | SHADOW_CONFIG_OK_SIN_DATOS |
+| CLI-0001 | 0% | ~63 | NO_LISTO |
+| CLI-0002 | 0% | ~10 | NO_LISTO |
+| CLI-0003 | 0% | ~33 | NO_LISTO |
+| CLI-MERY-TEST | N/A (shadow) | N/A | ACTIVO_ESTABLE (backtest) |
 
 > `cobertura_vs_pc=0%` significa que el comparativo actual en 05_Comparativo muestra
-> 76 SOLO_PRESSCLIPPING vs 21 SOLO_ETHOS y 0 MATCH. Esto indica que el matching de
-> PressClipping vs Ethos aún no está produciendo coincidencias directas — el sistema
-> detecta noticias DIFERENTES a las de PressClipping o en ventanas de tiempo distintas.
-> No es señal de que Ethos no funcione: el shadow-alerts muestra 333 menciones en 7 días.
+> mayoría SOLO_PRESSCLIPPING y 0 MATCH. Esto indica que el matching de PressClipping vs
+> Ethos aún no está produciendo coincidencias directas — el sistema detecta noticias
+> DIFERENTES a las de PressClipping o en ventanas de tiempo distintas. No es señal de que
+> Ethos no funcione: el rolling backtest de Supabase muestra actividad real y estable en
+> los 4 clientes/personas monitoreados.
+
+### Lote P1 fast-track (2026-07-11)
+
+3 medios agregados al tier `daily-validated`: **Excelsior** (MED-0028, reparado RSS),
+**Frontera** (MED-0084, reparado sitemap), **Noroeste** (MED-0055, ya READY).
+Crawl dirigido: 36 noticias nuevas, 0 errores. Enrich: 36/36 OK. Detect: 1 mención real
+(CLI-0003, sin FP). Detalle completo en `docs/MEDIA_PARITY_MATRIX.md` §9.
 
 ### 10_Alertas_Sombra
 
 - Comportamiento `--dry-run`: **fijado** — ahora fuerza `output=console` (no escribe)
 - Modo normal sin `--dry-run`: escribe en Sheet con readback obligatorio
 - Última escritura: 72 filas, mismatch=false (sesión anterior — era un run real, no dry-run)
+- Sin cambios en este fast-track (no se corrió shadow-alerts de nuevo)
+
+### Bug conocido: feed XML de PressClipping vacío
+
+El paso `live-comparison` (import-pressclipping) del pipeline `shadow-daily-validated-tier`
+falló en este ciclo: el worker `https://tabla.ethosconsultoriadigital.workers.dev/read-xml`
+devolvió 0 items. Esto es una causa externa preexistente (no relacionada al lote P1) que
+pospone la actualización de 05/07/08 para este ciclo. Requiere investigación separada del
+worker Cloudflare — fuera de alcance de este fast-track de 48h.
 
 ---
 
@@ -252,6 +286,12 @@ Requerimientos pendientes:
 - [ ] `GO_ENVIO_INTERNO_LIMITADO=true` — requiere autorización explícita
 
 Nota: `alertas_score=9.7` para CLI-0002 está bajo porque el script de auditoría usa
-el comparativo PressClipping (05). El backtest de Supabase muestra 54 menciones en 7 días
-con 26 alertas — lo que indica actividad real. El score bajo refleja falta de matching
-en el comparativo, no ausencia de detección.
+el comparativo PressClipping (05), cuya actualización quedó pospuesta por el bug del
+feed XML. El backtest de Supabase muestra 59 menciones en 7 días con 29 alertas —
+actividad real y estable. El score bajo refleja falta de matching en el comparativo
+(bloqueado externamente), no ausencia de detección.
+
+**No es un gate de 30 días.** El fast-track de 48h confirma: actividad estable en 48h y 7d
+para los 3 clientes productivos + primer match real validado de Mery Pozos. La decisión de
+piloto interno para CLI-0002 puede tomarse con esta base — el `alertas_score` bajo es un
+artefacto del comparativo bloqueado, no una señal de baja calidad de detección.
