@@ -81,6 +81,9 @@ function parseArgs(argv: string[]): AlertArgs {
         break;
     }
   }
+  // --dry-run fuerza output=console para no escribir en 10_Alertas_Sombra.
+  // --observe-only tiene precedencia sobre --dry-run (observe-only siempre escribe a sheet).
+  if (!out.observeOnly && argv.some((a) => a === '--dry-run')) out.output = 'console';
   // El modo observación SIEMPRE escribe a la pestaña 10 (nunca console).
   if (out.observeOnly) out.output = 'sheet';
   return out;

@@ -279,3 +279,44 @@ Verificar con `simulate-mery-pozos-shadow --window-days=7`. Si el match es corre
 el pipeline está completo — menciones se insertan y aparecen en 10_Alertas_Sombra.
 
 **Prohibido sin autorización:** activar `alertas_activas=true`.
+
+---
+
+## Rolling backtest + auditoría dry-run (2026-07-11)
+
+### Fix crítico: `--dry-run` en shadow-alerts
+
+**Bug corregido:** el flag `--dry-run` en `run-shadow-alerts.ts` era aceptado pero no
+tenía efecto — `output` siempre defaulteaba a `'sheet'`. La sesión anterior escribió
+72 filas REALES en `10_Alertas_Sombra` creyendo hacer un dry-run.
+
+**Fix aplicado:** `--dry-run` ahora fuerza `output=console`, previniendo escritura en Sheet.
+`--observe-only` tiene precedencia (ese modo sí escribe a 10 intencionalmente).
+
+Tests agregados: `test/shadow-alerts-dry-run.test.ts` — 17 tests de invariante de seguridad.
+
+### Rolling readiness backtest (7 días, 2026-07-11)
+
+Script nuevo: `scripts/run-rolling-readiness-backtest.ts`
+Comando: `npm run rolling-readiness-backtest -- --window-days=7`
+Fuente: Supabase menciones directamente (no depende de Sheets 05/07/08/10).
+
+| cliente_id | menciones_7d | días_activos | alertas | keywords | estado |
+|---|---|---|---|---|---|
+| CLI-0001 | 5 | 5 | 3 | 3 | ACTIVO_ESTABLE |
+| CLI-0002 | 54 | 8 | 26 | 11 | ACTIVO_ESTABLE |
+| CLI-0003 | 274 | 8 | 32 | 9 | ACTIVO_ESTABLE |
+| CLI-MERY-TEST | 0 | 0 | 0 | 0 | SHADOW_CONFIG_OK_SIN_DATOS |
+
+**Nota CLI-MERY-TEST:** `esClientePrueba('CLI-MERY-TEST', 'CLI-MERY-TEST')` retornaba `true`
+porque el regex `/\b(prueba|test)\b/` matcheaba "test" en el ID. Fijado con check explícito.
+Tests: `test/rolling-readiness-backtest.test.ts` — 12 tests (851 total, todos verdes).
+
+### Reporte diario interno
+
+Plantilla creada: `docs/REPORTE_DIARIO_INTERNO_SHADOW.md`
+Incluye: estado por cliente, P1/P2, gaps PressClipping vs Ethos, Mery Pozos,
+reglas de seguridad, comandos para generar y estado actual del sistema.
+
+**Prohibido sin autorización:** activar `alertas_activas=true`. Enviar email real.
+Activar `GO_ENVIO_INTERNO_LIMITADO`.

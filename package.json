@@ -31,6 +31,7 @@
     "tune-crisis-keywords": "tsx scripts/tune-crisis-keywords.ts",
     "tune-mery-pozos-shadow": "tsx scripts/tune-mery-pozos-shadow.ts",
     "simulate-mery-pozos-shadow": "tsx scripts/simulate-mery-pozos-shadow.ts",
+    "rolling-readiness-backtest": "tsx scripts/run-rolling-readiness-backtest.ts",
     "live-comparison": "tsx scripts/run-live-comparison.ts",
     "shadow-scheduler": "tsx scripts/run-shadow-scheduler.ts",
     "shadow-national-tier": "tsx scripts/run-shadow-national-tier.ts",

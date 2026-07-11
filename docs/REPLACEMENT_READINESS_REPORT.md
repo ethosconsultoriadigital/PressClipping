@@ -998,11 +998,50 @@ Docs: `docs/PERSONA_PUBLICA_MERY_POZOS_SHADOW.md`.
 
 ---
 
+## Fix shadow-alerts --dry-run + Rolling backtest (2026-07-11)
+
+### Bug fix: `--dry-run` ahora previene escritura en 10_Alertas_Sombra
+
+**Problema:** `run-shadow-alerts.ts` aceptaba `--dry-run` sin efecto. `output` defaulteaba
+siempre a `'sheet'` y la sesión anterior (2026-07-11) escribió 72 filas REALES en
+`10_Alertas_Sombra` creyendo ser un dry-run.
+
+**Fix:** `--dry-run` ahora fuerza `output='console'`.
+`--observe-only` tiene precedencia: ese modo siempre escribe a 10 (es su función).
+Tests: `test/shadow-alerts-dry-run.test.ts` — 17 tests de invariante.
+
+### Rolling backtest (7 días, 2026-07-11)
+
+Script: `scripts/run-rolling-readiness-backtest.ts` — `npm run rolling-readiness-backtest`
+Lee directamente de Supabase `menciones` por cliente+día. No depende de Sheets 05/07/08/10.
+Incluye CLI-MERY-TEST con estado `SHADOW_CONFIG_OK_SIN_DATOS` cuando no hay matches.
+
+| cliente | menciones_7d | alertas | estado |
+|---|---|---|---|
+| CLI-0001 | 5 | 3 | ACTIVO_ESTABLE |
+| CLI-0002 | 54 | 26 | ACTIVO_ESTABLE |
+| CLI-0003 | 274 | 32 | ACTIVO_ESTABLE |
+| CLI-MERY-TEST | 0 | 0 | SHADOW_CONFIG_OK_SIN_DATOS |
+
+### Bug fix: CLI-MERY-TEST falsamente excluido por regex "test"
+
+`esClientePrueba('CLI-MERY-TEST', 'CLI-MERY-TEST')` retornaba `true` porque el regex
+`/\b(prueba|test)\b/` matcheaba la palabra "test" dentro del ID. El backtest usaba
+este check y excluía CLI-MERY-TEST. Fijado con check explícito `IDS_PRUEBA.has(cid)`.
+
+### Reporte diario interno
+
+`docs/REPORTE_DIARIO_INTERNO_SHADOW.md` creado. Incluye plantilla completa y estado actual.
+Tests: 851 total, todos verdes.
+
+---
+
 ### Anexos técnicos
 
 - `10_Alertas_Sombra`: 25 columnas originales preservadas + 19 nuevas de
   observabilidad (append, sin reordenar). Writer: `ensureOutputHeaders` +
   `appendHistoryRows` en `run-shadow-alerts.ts`.
+  **Nota:** `--dry-run` ahora fuerza `output=console`; no usa `appendHistoryRows`.
 - Clasificador SOLO_PC: `src/comparators/soloPressclippingClassifier.ts`.
 - Readiness: `src/comparators/replacementReadiness.ts` +
   `scripts/audit-replacement-readiness.ts`.
