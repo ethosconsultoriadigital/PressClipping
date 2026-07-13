@@ -1077,3 +1077,17 @@ no bloqueante: 20/39 medios del tier base sin enrich (SIN_CUERPO) por diseño de
 `11_Operacion_Sin_PressClipping` documentada pero no creada (sin helper seguro probado para
 nuevas pestañas). Detalle completo: `docs/PRODUCTION_READINESS_PLAN.md` §Emergencia,
 `docs/PUENTE_REPORTES_JUMEX_PATRON.md`. 894 tests, todos verdes.
+
+---
+
+## Consolidación editorial — tab 12 (2026-07-13)
+
+Tras auditoría GPT de la tab 11 raw, se creó la capa consolidada editorial
+`12_Operacion_Consolidada_Sin_PressClipping` (1 fila por noticia, agrupando keywords por
+url_norm). Reglas determinísticas en `src/editorial/consolidation.ts` (relevancia_editorial,
+grupo_tema, sentimiento, valoración, fp_flags, decode HTML entities), SIN classify-ia.
+Resultado 7d: 66 raw → 43 consolidadas. **Patrón = GO CONDICIONADO** (36 filas, filtrar por
+`estado_editorial ∈ {GO_ALTA, GO_MEDIA}`). **Jumex = NO-GO** (7 filas, 3 Museo Jumex excluidas;
+requiere más fuentes regulatorias). Museo Jumex bloqueado para CLI-0001 salvo autorización.
+Hallazgo detección: alias "CRT" (`contiene`) genera FP en notas tech — pendiente afinación.
+Detalle: `docs/PUENTE_REPORTES_JUMEX_PATRON.md` §0. 951 tests, todos verdes.

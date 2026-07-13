@@ -311,3 +311,13 @@ PressClipping externo ya no disponible — deja de ser gate. Nueva métrica oper
 Gap corregido: faltaba "Patrón"/"Tequila Patrón" en CLI-0002. Ver
 `docs/PRODUCTION_READINESS_PLAN.md` §Emergencia y `docs/PUENTE_REPORTES_JUMEX_PATRON.md`
 para el detalle completo y el camino hacia el reporte final.
+
+---
+
+## Consolidación editorial — tab 12 (2026-07-13)
+
+Nueva capa editorial `12_Operacion_Consolidada_Sin_PressClipping` (1 fila por noticia).
+`npm run export-operational-news-consolidated-no-pc -- --clients=CLI-0001,CLI-0002 --window-days=7 --output=sheet`.
+66 raw → 43 consolidadas. **Patrón GO condicionado** (filtrar GO_ALTA/GO_MEDIA), **Jumex NO-GO**
+(Museo Jumex excluido, poca señal regulatoria). Reglas determinísticas sin IA en
+`src/editorial/consolidation.ts`. Detalle: `docs/PUENTE_REPORTES_JUMEX_PATRON.md` §0.

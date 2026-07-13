@@ -6,6 +6,53 @@ salida real todavía — solo especifica campos, origen y validaciones._
 
 ---
 
+## 0. Capa consolidada editorial — tab 12 (2026-07-13)
+
+Tras auditoría externa (GPT) de la tab 11 raw, se creó una capa consolidada editorial:
+
+| capa | tab | granularidad | uso |
+|---|---|---|---|
+| Raw staging técnico | `11_Operacion_Sin_PressClipping` | 1 fila por mención (por keyword) | auditoría técnica, dedupe por keyword_id |
+| **Consolidada editorial** | `12_Operacion_Consolidada_Sin_PressClipping` | **1 fila por noticia (por url_norm)** | **candidata a reporte final** |
+
+Script: `scripts/export-operational-news-consolidated-no-pc.ts`
+(lógica pura determinística en `src/editorial/consolidation.ts`, sin classify-ia).
+
+```bash
+npm run export-operational-news-consolidated-no-pc -- --clients=CLI-0001,CLI-0002 --window-days=7 --output=sheet
+```
+
+**Resultado (ventana 7d, 2026-07-13):** 66 filas raw → **43 consolidadas** (23 duplicados
+editoriales agrupados por url_norm). Readback `mismatch=false`. Dedupe verificado
+(2ª corrida: 0 nuevas, 43 omitidas).
+
+| relevancia_editorial | filas |
+|---|---|
+| ALTA_RELEVANCIA | 16 |
+| MEDIA_RELEVANCIA | 8 |
+| BAJA_RELEVANCIA | 8 |
+| POSIBLE_FP | 11 |
+
+### Decisión GO / NO-GO (incorpora dictamen GPT)
+
+- **Patrón / CLI-0002 = GO CONDICIONADO.** 36 filas consolidadas, mayoría CRISIS_ALCOHOL_ADULTERADO
+  (13) e INDUSTRIA_TEQUILA. Suficientes ALTA/MEDIA para reporte. **Condición:** filtrar
+  `estado_editorial ∈ {GO_ALTA, GO_MEDIA}` y excluir POSIBLE_FP/EXCLUIR (turismo, seguridad
+  incidental, T-MEC/COFEPRIS sin contexto bebida) antes de conectar a hoja final.
+- **Jumex / CLI-0001 = NO-GO para hoja final.** 7 filas consolidadas, 3 marcadas
+  MUSEO_JUMEX_EXCLUIR, y las restantes con poca señal regulatoria real. Se mantiene en
+  staging hasta ampliar fuentes regulatorias (IEPS/Profeco/COFEPRIS) y acumular volumen útil.
+
+### Hallazgo (detección, no editorial): alias "CRT" demasiado amplio
+
+KEY-0063 ("Consejo Regulador del Tequila", alias **"CRT"**, tipo=`contiene`) matchea "CRT"
+en notas tech no relacionadas (ej. "CFE Internet…", "Movimiento Ciudadano… celulares" en
+Xataka). La capa editorial las clasificó INDUSTRIA_TEQUILA por confiar en el keyword. Es un
+FP a nivel de detección: el alias "CRT" `contiene` debería ser `exacta` o eliminarse.
+Pendiente de afinación de keyword (fuera del alcance de esta fase editorial).
+
+---
+
 ## 1. Contexto
 
 PressClipping (servicio externo) fue cancelado. Ethos pasa de "comparativo vs PressClipping"

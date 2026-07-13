@@ -485,3 +485,31 @@ Sin cambio de estado tras esta fase (ya eran OPERATIVO_INTERNO 90% antes del exp
 
 **Prohibido sin autorización:** conectar `11_Operacion_Sin_PressClipping` a hojas finales de
 reportes. Activar `alertas_activas=true`. Clasificar con IA (sentimiento/valoración).
+
+---
+
+## CONSOLIDACIÓN EDITORIAL — tab 12, Patrón GO condicionado / Jumex cleanup (2026-07-13)
+
+Auditoría externa GPT dictaminó: tab 11 técnicamente sana pero no apta cruda para hoja final
+(duplicados editoriales por URL, campos grupo_tema/sentimiento/valoración vacíos, ruido de
+keywords amplias en Patrón, contaminación de Museo Jumex en Jumex). Respuesta:
+
+- **`src/editorial/consolidation.ts`** — módulo puro determinístico (mismo patrón que
+  `mergePlan.ts`/`tabPlan.ts`): agrupa por `cliente_id+url_norm`, fusiona keywords, deriva
+  relevancia_editorial / grupo_tema / sentimiento / valoración / fp_flags con reglas (NO IA),
+  y decodifica HTML entities en la salida. 33 tests.
+- **Tab `12_Operacion_Consolidada_Sin_PressClipping`** creada (30 columnas, readback ok).
+- **Exportador** `export-operational-news-consolidated-no-pc.ts`: 66 raw → 43 consolidadas,
+  dedupe por `cliente_id::url_norm` verificado.
+
+| decisión | cliente | detalle |
+|---|---|---|
+| **GO CONDICIONADO** | CLI-0002 Patrón | 36 filas; filtrar `estado_editorial ∈ {GO_ALTA,GO_MEDIA}` antes de hoja final |
+| **NO-GO** | CLI-0001 Jumex | 7 filas, 3 Museo Jumex excluidas; requiere más fuentes regulatorias |
+
+Museo Jumex → `MUSEO_JUMEX_EXCLUIR` (no alimenta Jumex bebidas salvo autorización explícita).
+Hallazgo detección pendiente: alias "CRT" (`contiene`) genera FP en notas tech (afinación de
+keyword, fuera de alcance editorial).
+
+**Prohibido sin autorización:** conectar tab 12 a hojas finales. Cambiar la exclusión de
+Museo Jumex. Clasificar con IA. Activar `alertas_activas=true`.

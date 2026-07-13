@@ -302,6 +302,27 @@ export async function appendHistoryRows(
   return appendToSheet(sheet, rows);
 }
 
+/**
+ * Lee la fila de cabecera de una pestaña de forma tolerante: si la pestaña está
+ * vacía (recién creada / sin header), `loadHeaderRow()` lanza y el getter
+ * `headerValues` también lanza — en ese caso devolvemos [] en vez de propagar.
+ */
+async function safeHeaderValues(
+  sheet: GoogleSpreadsheetWorksheet,
+  title: string,
+): Promise<string[]> {
+  try {
+    await withSheetsRetry(() => sheet.loadHeaderRow(), `loadHeaderRow ${title}`);
+  } catch {
+    return [];
+  }
+  try {
+    return sheet.headerValues && sheet.headerValues.length > 0 ? [...sheet.headerValues] : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Resultado de asegurar pestaña + headers, con readback real post-escritura. */
 export interface EnsureTabResumen {
   accion: 'crear_tab' | 'fijar_headers_vacios' | 'agregar_columnas' | 'sin_cambios';
@@ -339,8 +360,7 @@ export async function ensureSheetTabAndHeaders(
   let headersActuales: string[] = [];
   let filasPreexistentes = 0;
   if (sheet) {
-    await withSheetsRetry(() => sheet!.loadHeaderRow(), `loadHeaderRow ${title}`).catch(() => undefined);
-    headersActuales = sheet.headerValues && sheet.headerValues.length > 0 ? [...sheet.headerValues] : [];
+    headersActuales = await safeHeaderValues(sheet, title);
     if (headersActuales.length > 0) {
       const rows = await withSheetsRetry(() => sheet!.getRows(), `getRows ${title}`);
       filasPreexistentes = rows.length;
@@ -363,8 +383,7 @@ export async function ensureSheetTabAndHeaders(
   // 'sin_cambios': no se escribe nada.
 
   // Readback OBLIGATORIO: releer la cabecera desde la API, no confiar en la local.
-  await withSheetsRetry(() => sheet!.loadHeaderRow(), `loadHeaderRow(readback) ${title}`);
-  const readbackHeaders = [...sheet!.headerValues];
+  const readbackHeaders = await safeHeaderValues(sheet!, title);
   const mismatch = JSON.stringify(readbackHeaders) !== JSON.stringify(plan.headers_despues);
 
   return {
