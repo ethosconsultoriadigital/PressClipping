@@ -321,3 +321,10 @@ Nueva capa editorial `12_Operacion_Consolidada_Sin_PressClipping` (1 fila por no
 66 raw → 43 consolidadas. **Patrón GO condicionado** (filtrar GO_ALTA/GO_MEDIA), **Jumex NO-GO**
 (Museo Jumex excluido, poca señal regulatoria). Reglas determinísticas sin IA en
 `src/editorial/consolidation.ts`. Detalle: `docs/PUENTE_REPORTES_JUMEX_PATRON.md` §0.
+
+## Preview final Patrón — tab 13 (2026-07-13)
+
+`npm run export-patron-final-preview-no-pc -- --window-days=7 --output=sheet` proyecta la tab 12
+→ `13_Patron_Final_Preview` (solo CLI-0002 GO). 9 filas (5 ALTA crisis, 4 MEDIA). Jumex NO
+exportado. Keyword CRT afinada (ya no genera FP tech). Sin hoja externa conectada. Detalle:
+`docs/PUENTE_REPORTES_JUMEX_PATRON.md` §0.b.

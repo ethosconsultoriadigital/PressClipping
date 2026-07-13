@@ -1091,3 +1091,19 @@ Resultado 7d: 66 raw → 43 consolidadas. **Patrón = GO CONDICIONADO** (36 fila
 requiere más fuentes regulatorias). Museo Jumex bloqueado para CLI-0001 salvo autorización.
 Hallazgo detección: alias "CRT" (`contiene`) genera FP en notas tech — pendiente afinación.
 Detalle: `docs/PUENTE_REPORTES_JUMEX_PATRON.md` §0. 951 tests, todos verdes.
+
+---
+
+## Preview final Patrón + fix CRT — tab 13 (2026-07-13)
+
+**CRT resuelto:** KEY-0063 pasó de `contiene` a `exacta_contextual` con contexto tequilero
+(`scripts/tune-crt-keyword.ts`); "CRT" ya solo matchea con contexto de tequila. 0 FP en
+simulación; 9 tests. Guard editorial defensivo `crt_sin_contexto_titulo` para menciones stale.
+
+**Preview Patrón:** `scripts/export-patron-final-preview-no-pc.ts` filtra tab 12 → tab
+`13_Patron_Final_Preview` (solo CLI-0002 GO_ALTA/GO_MEDIA, excluye POSIBLE_FP/EXCLUIR/BAJA y
+Jumex). 9 filas (5 ALTA crisis, 4 MEDIA), readback mismatch=false, dedupe por
+`cliente_id::url_norm`. NO conectado a hoja externa (`--allow-final-sheet` aborta: no hay ID).
+**Patrón = GO CONDICIONADO** (revisión humana antes de hoja final). **Jumex = NO-GO** (sin
+export final; Museo Jumex excluido). Detalle: `docs/PUENTE_REPORTES_JUMEX_PATRON.md` §0.b.
+973 tests, todos verdes.

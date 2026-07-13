@@ -15,7 +15,7 @@
 import 'dotenv/config';
 import { pathToFileURL } from 'node:url';
 import { getSupabase } from '../src/supabase/client.js';
-import { ensureSheetTabAndHeaders, appendHistoryRows, type OutRow } from '../src/sheets/write.js';
+import { ensureSheetTabAndHeaders, appendHistoryRows, replaceOutputRows, type OutRow } from '../src/sheets/write.js';
 import { getOutputTab } from '../src/sheets/client.js';
 import { canonicalizeUrl } from '../src/normalizers/url.js';
 import { logger } from '../src/utils/logger.js';
@@ -39,12 +39,16 @@ interface Args {
   output: 'console' | 'sheet';
   dryRun: boolean;
   maxRows: number;
+  /** Reconstruye la tab 12 desde cero (clear + rewrite) en vez de append+dedupe.
+   *  Útil tras cambiar reglas editoriales/keywords para reflejar clasificación fresca. */
+  replace: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
-  const out: Args = { clients: [], output: 'console', dryRun: false, maxRows: 500 };
+  const out: Args = { clients: [], output: 'console', dryRun: false, maxRows: 500, replace: false };
   for (const arg of argv) {
     if (arg === '--dry-run') { out.dryRun = true; continue; }
+    if (arg === '--replace') { out.replace = true; continue; }
     if (!arg.startsWith('--')) continue;
     const body = arg.slice(2);
     const eq = body.indexOf('=');
@@ -224,7 +228,19 @@ async function main() {
   logger.info({ accion: ensure.accion, mismatch: ensure.mismatch, columnas_agregadas: ensure.columnas_agregadas }, 'ensureSheetTabAndHeaders (tab 12)');
   if (ensure.mismatch) { logger.error({}, 'MISMATCH en headers de la tab 12. Abortando antes de escribir filas.'); process.exit(1); }
 
-  // Dedupe contra filas ya presentes por dedupe_key_consolidado.
+  if (args.replace) {
+    // Modo replace: reconstruye la tab desde cero (refleja clasificación fresca).
+    const escritas = await replaceOutputRows(TAB, filas);
+    const tab = await getOutputTab(TAB);
+    const rowsDespues = await tab.getRows();
+    logger.info(
+      { modo: 'replace', filas_escritas: escritas, filas_totales_tab: rowsDespues.length, run_id: runId },
+      '=== Export consolidado completado — tab 12 (REPLACE, sin envíos) ===',
+    );
+    return;
+  }
+
+  // Dedupe contra filas ya presentes por dedupe_key_consolidado (append por default).
   const existentes = new Set<string>();
   try {
     const tab = await getOutputTab(TAB);

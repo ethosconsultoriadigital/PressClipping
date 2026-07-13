@@ -121,6 +121,19 @@ describe('clasificarConsolidado CLI-0002 (Patrón)', () => {
     expect(c.relevancia_editorial).toBe('MEDIA_RELEVANCIA');
     expect(['EXPORTACION_COMERCIO', 'INDUSTRIA_TEQUILA']).toContain(c.grupo_tema);
   });
+
+  it('CRT-name-only sin tequila en título (stale FP tech) = POSIBLE_FP / EXCLUIR', () => {
+    const c = clasificarConsolidado('CLI-0002', ['Consejo Regulador del Tequila'], 'CFE Internet por 35 pesos al mes: qué incluye el paquete');
+    expect(c.relevancia_editorial).toBe('POSIBLE_FP');
+    expect(c.estado_editorial).toBe('EXCLUIR');
+    expect(c.fp_flags).toContain('crt_sin_contexto_titulo');
+  });
+
+  it('CRT-name con tequila en el título = MEDIA (sectorial legítimo)', () => {
+    const c = clasificarConsolidado('CLI-0002', ['Consejo Regulador del Tequila'], 'El Consejo Regulador del Tequila reporta récord de producción de tequila');
+    expect(c.relevancia_editorial).toBe('MEDIA_RELEVANCIA');
+    expect(c.grupo_tema).toBe('INDUSTRIA_TEQUILA');
+  });
 });
 
 // ─── CLI-0001 (Jumex) — reglas editoriales ───────────────────────────────────

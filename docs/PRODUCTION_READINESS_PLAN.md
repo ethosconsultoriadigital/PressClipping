@@ -513,3 +513,27 @@ keyword, fuera de alcance editorial).
 
 **Prohibido sin autorización:** conectar tab 12 a hojas finales. Cambiar la exclusión de
 Museo Jumex. Clasificar con IA. Activar `alertas_activas=true`.
+
+---
+
+## PATRÓN FINAL REPORT BRIDGE — tab 13 preview + fix CRT (2026-07-13)
+
+- **Fix keyword CRT (KEY-0063):** de `contiene` a `exacta_contextual` con contexto tequilero
+  (`scripts/tune-crt-keyword.ts`, idempotente, solo KEY-0063, no toca alertas_activas). "CRT"
+  ya solo matchea con contexto de tequila/agave/bebida. Validado 0 FP; 9 tests
+  (`test/crt-keyword-gate.test.ts`). Guard editorial defensivo `crt_sin_contexto_titulo`.
+- **Preview Patrón (tab 13):** `scripts/export-patron-final-preview-no-pc.ts` proyecta la tab 12
+  a `13_Patron_Final_Preview` filtrando SOLO CLI-0002 GO_ALTA/GO_MEDIA (excluye
+  POSIBLE_FP/EXCLUIR/BAJA y todo Jumex). 9 filas, readback mismatch=false, dedupe
+  `cliente_id::url_norm`. **No conecta a hoja externa**: no hay ID final autorizado
+  (`--allow-final-sheet=true` aborta con exit 2). Default = preview en el Output Sheet.
+- **Modo `--replace`** añadido al consolidado para reconstruir la tab 12 tras cambios de
+  reglas/keywords (evita que filas stale con clasificación vieja persistan por append+dedupe).
+
+| decisión | cliente | detalle |
+|---|---|---|
+| GO CONDICIONADO (preview listo) | CLI-0002 Patrón | tab 13 con 9 filas GO; revisión humana antes de hoja final (algunas crisis vienen de match en cuerpo con título off-topic) |
+| NO-GO | CLI-0001 Jumex | sin export final; Museo Jumex excluido; se mantiene en staging tab 12 |
+
+**Prohibido sin autorización:** conectar tab 13 a hoja final externa de Patrón. Exportar Jumex
+a hoja final. Clasificar con IA. Activar `alertas_activas=true`.

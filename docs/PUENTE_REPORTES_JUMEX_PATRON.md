@@ -43,13 +43,42 @@ editoriales agrupados por url_norm). Readback `mismatch=false`. Dedupe verificad
   MUSEO_JUMEX_EXCLUIR, y las restantes con poca señal regulatoria real. Se mantiene en
   staging hasta ampliar fuentes regulatorias (IEPS/Profeco/COFEPRIS) y acumular volumen útil.
 
-### Hallazgo (detección, no editorial): alias "CRT" demasiado amplio
+### Alias "CRT" — RESUELTO (2026-07-13)
 
-KEY-0063 ("Consejo Regulador del Tequila", alias **"CRT"**, tipo=`contiene`) matchea "CRT"
-en notas tech no relacionadas (ej. "CFE Internet…", "Movimiento Ciudadano… celulares" en
-Xataka). La capa editorial las clasificó INDUSTRIA_TEQUILA por confiar en el keyword. Es un
-FP a nivel de detección: el alias "CRT" `contiene` debería ser `exacta` o eliminarse.
-Pendiente de afinación de keyword (fuera del alcance de esta fase editorial).
+KEY-0063 ("Consejo Regulador del Tequila", alias "CRT") era tipo=`contiene` y matcheaba "CRT"
+en notas tech ("CFE Internet…", "…celulares"). **Fix aplicado** (`scripts/tune-crt-keyword.ts`):
+cambiado a `exacta_contextual` con `contexto_incluir` tequilero. Ahora "CRT" solo matchea con
+contexto de tequila/agave/bebida ("CRT del tequila" pasa; "CRT monitor/display" bloquea).
+Validado: `simulate-keywords-shadow --keyword-ids=KEY-0063` = 0 FP; 9 tests en
+`test/crt-keyword-gate.test.ts`. Además, la capa editorial tiene un guard defensivo
+(`crt_sin_contexto_titulo`) para menciones stale pre-fix.
+
+---
+
+## 0.b Preview final Patrón — tab 13 (2026-07-13)
+
+Puente de la tab 12 consolidada → preview final para Patrón (solo CLI-0002 GO).
+
+Script: `scripts/export-patron-final-preview-no-pc.ts`
+```bash
+npm run export-patron-final-preview-no-pc -- --window-days=7 --output=sheet --max-rows=300
+```
+
+- **Tab destino:** `13_Patron_Final_Preview` (en el Output Sheet). NO hay hoja final externa
+  autorizada; `--allow-final-sheet=true` **aborta** (no se inventa ID). Default = preview.
+- **Filtro:** `cliente_id = CLI-0002` **Y** (`relevancia_editorial ∈ {ALTA,MEDIA}` o
+  `estado_editorial ∈ {GO_ALTA,GO_MEDIA}`). Excluye POSIBLE_FP / EXCLUIR / BAJA / Jumex.
+- **Resultado (7d):** 9 filas (5 ALTA crisis, 4 MEDIA industria/exportación). 7 filas Jumex
+  omitidas, 18 excluidas por relevancia (incluye los CRT FPs). 0 duplicados, campos completos,
+  readback `mismatch=false`. Dedupe por `cliente_id::url_norm` verificado (2ª corrida: 0 nuevas).
+
+### Riesgo residual (justifica "GO CONDICIONADO", requiere revisión humana)
+
+Algunas filas ALTA_RELEVANCIA/CRISIS provienen de un match de keyword de crisis en el CUERPO
+de la nota mientras el TÍTULO es off-topic (ej. "Planta de Fertilizantes", "Jardín Corona
+tradición"). Es recall de crisis legítimo (la frase aparece en el cuerpo) pero el título
+despista. Por eso el preview NO se conecta automáticamente a la hoja final: un editor debe
+revisar título + keywords_detectadas + URL antes de publicar.
 
 ---
 

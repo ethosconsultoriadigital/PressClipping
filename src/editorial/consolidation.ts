@@ -177,6 +177,34 @@ function clasificarCli0002(keywordsFold: string[], tituloFold: string): Clasific
     };
   }
 
+  // 2.b Guard anti-FP CRT: "Consejo Regulador del Tequila"/"CRT" NOMBRAN "tequila",
+  // pero no implican que la nota sea de tequila. Si el único indicio on-topic es
+  // ese nombre de regulador y el TÍTULO no habla de tequila/agave/bebida, es FP
+  // (cubre menciones stale pre-fix del alias "CRT" en notas tech).
+  const soloCrt =
+    keywordsFold.length > 0 &&
+    keywordsFold.every((k) => {
+      const t = k.trim();
+      return t === 'crt' || t === 'consejo regulador del tequila';
+    });
+  if (soloCrt) {
+    const tituloOnTopic =
+      algunPresente(tituloFold, CLI0002.contextoBebida) !== null ||
+      contienePalabra(tituloFold, 'denominacion de origen');
+    if (!tituloOnTopic) {
+      flags.push('crt_sin_contexto_titulo');
+      return {
+        relevancia_editorial: 'POSIBLE_FP',
+        grupo_tema: 'NO_RELEVANTE',
+        sentimiento: 'neutral',
+        valoracion: 'BAJA',
+        fp_flags: flags,
+        estado_editorial: 'EXCLUIR',
+        razon_clasificacion: 'CRT/Consejo Regulador del Tequila sin contexto de tequila en el título',
+      };
+    }
+  }
+
   // 3. COFEPRIS: relevante SOLO con contexto de bebida/alcohol/tequila.
   if (contienePalabra(blob, 'cofepris')) {
     if (algunPresente(blob, CLI0002.contextoBebida)) {
