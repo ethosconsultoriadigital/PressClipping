@@ -328,3 +328,11 @@ Nueva capa editorial `12_Operacion_Consolidada_Sin_PressClipping` (1 fila por no
 → `13_Patron_Final_Preview` (solo CLI-0002 GO). 9 filas (5 ALTA crisis, 4 MEDIA). Jumex NO
 exportado. Keyword CRT afinada (ya no genera FP tech). Sin hoja externa conectada. Detalle:
 `docs/PUENTE_REPORTES_JUMEX_PATRON.md` §0.b.
+
+## Acceso NoticiasPatron resuelto + operación 24h (2026-07-15)
+
+Acceso a la hoja final concedido; 2 bugs corregidos (gate + mapeo columna). `ready_to_write=true`
+pero sin escribir aún (falta autorización explícita). Readiness 24h: ambos OPERATIVO_INTERNO 90%.
+Segundo lote re-enrich: 489/500 notas. Jumex refuerza NO-GO: FP de Museo Jumex (Mundial) y
+Profeco (gasolina, keyword IEPS demasiado amplia). Detalle:
+`docs/PRODUCTION_READINESS_PLAN.md` §NO-PC OPERATION ADVANCE.

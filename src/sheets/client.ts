@@ -40,6 +40,7 @@ const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 
 let cachedControl: GoogleSpreadsheet | null = null;
 let cachedOutput: GoogleSpreadsheet | null = null;
+const cachedById = new Map<string, GoogleSpreadsheet>();
 
 /**
  * ¿El error de Google Sheets/googleapis es transitorio y conviene reintentar?
@@ -141,6 +142,31 @@ export async function getOutputSpreadsheet(): Promise<GoogleSpreadsheet> {
   const { email, privateKey, sheetId } = requireOutputSheetsEnv();
   cachedOutput = await openDoc(email, privateKey, sheetId);
   return cachedOutput;
+}
+
+/**
+ * Abre (y cachea) un spreadsheet EXTERNO arbitrario por su id, usando las
+ * mismas credenciales de la cuenta de servicio (control/output). Pensado para
+ * escribir en hojas finales de reportes fuera del Output Sheet propio (p.ej.
+ * `NoticiasPatron`), que deben compartirse con el email de la cuenta de
+ * servicio como Editor para que esto funcione. NUNCA crea el documento: si no
+ * existe o no hay permiso, `doc.loadInfo()` lanza.
+ */
+export async function getSpreadsheetById(sheetId: string): Promise<GoogleSpreadsheet> {
+  const cached = cachedById.get(sheetId);
+  if (cached) return cached;
+  const { email, privateKey } = requireSheetsEnv();
+  const doc = await openDoc(email, privateKey, sheetId);
+  cachedById.set(sheetId, doc);
+  return doc;
+}
+
+/** Obtiene una pestaña de un spreadsheet externo arbitrario por id + título. */
+export async function getTabById(
+  sheetId: string,
+  title: string,
+): Promise<GoogleSpreadsheetWorksheet> {
+  return resolveTab(await getSpreadsheetById(sheetId), title);
 }
 
 function resolveTab(

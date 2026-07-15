@@ -537,3 +537,81 @@ Museo Jumex. Clasificar con IA. Activar `alertas_activas=true`.
 
 **Prohibido sin autorización:** conectar tab 13 a hoja final externa de Patrón. Exportar Jumex
 a hoja final. Clasificar con IA. Activar `alertas_activas=true`.
+
+---
+
+## NO-PC OPERATION ADVANCE — cobertura + re-enrich + 24h (2026-07-15)
+
+### Bloqueo Sheet final Patrón: RESUELTO durante esta fase
+
+El service account (`pressclipping@pressclipping-498822.iam.gserviceaccount.com`) recibió acceso
+a `NoticiasPatron` (`1dKWAGa_U6AgNSWU8oFbqvmwaLRLV2JHREIg8_M48RaU`). Al re-correr el dry-run se
+detectaron y corrigieron 2 bugs en `scripts/export-patron-final-approved-no-pc.ts`:
+
+1. **Gate mal diseñado:** exigía `human_review_rows === 0` de forma global, pero las 3 filas
+   retenidas son correctas por diseño (nunca deben llegar a 0). Corregido: el gate ahora verifica
+   que ninguna fila de revisión humana esté en el set a escribir (`nuevas`) — garantía estructural
+   + verificación explícita — en vez de exigir que el conteo total sea cero.
+2. **Mapeo de columna combinada:** el header real de `NoticiasPatron` es `"titulo / titular"`
+   (una sola columna), no dos separadas. `mapaCol()` ahora reconoce headers combinados por
+   `/` o `,` que contengan el nombre buscado como palabra completa.
+
+**Resultado tras el fix:** `acceso_target_ok=true`, `ready_to_write=true`. Las 6 filas aprobadas
+tienen nota completa real (1440–5152 caracteres). **NO se escribió nada aún** — se reporta el
+gate y se espera autorización explícita del usuario antes de ejecutar `--output=sheet` contra
+la hoja externa real.
+
+### Segundo lote de re-enrich (2026-07-15)
+
+5 medios (ninguno requiere proxy/JS, todos `ultimo_estado=ok`): La Crónica de Hoy (MED-0154,
+impacta ambos clientes), El Economista (MED-0001, Patrón), La Razón de México (MED-0034,
+Jumex), EdoMex Al Día (MED-0148, Patrón), Líder Empresarial (MED-0163, Patrón).
+
+```
+npm run enrich-news -- --medio-ids=MED-0154,MED-0001,MED-0034,MED-0148,MED-0163 --limit=500 --only-missing-clean-text
+leidas: 500 | actualizadas: 489 | fallidas: 11 | conTextoLimpio: 488
+```
+
+### Readiness 24h sin PressClipping
+
+| cliente | estado | % ready | menciones 24h/7d | texto_ok | errores |
+|---|---|---|---|---|---|
+| CLI-0002 Patrón | OPERATIVO_INTERNO | 90% | 15 / 54 | 100% | 0 |
+| CLI-0001 Jumex | OPERATIVO_INTERNO | 90% | 2 / 9 | 100% | 0 |
+
+### Jumex: hallazgo concreto de FP (refuerza NO-GO)
+
+De 9 menciones/7d, solo ~2 son útiles. 4 son "Museo Jumex" (2 legítimas del museo — deben
+excluirse igual —, **2 falsos positivos totales** en notas del Mundial de fútbol sin relación
+alguna). 2 son "Profeco" en notas de **precio de gasolina** — FP porque el contexto de la
+keyword incluye "IEPS" y el IEPS también aplica a combustibles, no solo a bebidas azucaradas
+(gate demasiado amplio). Acciones recomendadas (no ejecutadas, requieren aprobación):
+- Retirar "IEPS" del `contexto_incluir` de KEY-0068 (Profeco) o exigir coocurrencia con
+  "bebidas"/"jugos"/"Jumex" específicamente, no solo "IEPS" a secas.
+- Investigar por qué "Museo Jumex" (frase_exacta) matchea notas de Mundial — posible
+  contaminación de texto por bloques de "relacionadas"/boilerplate en esos 2 medios.
+
+### Siguiente lote de medios críticos — auditado con `audit-media-sources` (read-only)
+
+Selección inicial especulativa (basada solo en `ultimo_estado`/prioridad de catálogo) NO se
+tomó como buena — se corrió `audit-media-sources` (que sí prueba la fuente real) sobre los 5
+candidatos antes de recomendar nada:
+
+| medio_id | medio | estado real | conf | acción recomendada |
+|---|---|---|---|---|
+| MED-0007 | Fortuna y Poder | **DO_NOT_TOUCH** | 0.45 | D. Descartar (la auditoría real desaconseja tocar la fuente, contrario a lo que sugería `ultimo_estado=ok` de catálogo) |
+| MED-0032 | Animal Político | DIRECT_EXTRACTION_ONLY | 0.4 | C. Necesita revisión manual antes de alta (confianza media-baja) |
+| MED-0121 | Vallarta Opina | NO_FEED | 0.1 | D. Descartar (sin feed detectable) |
+| MED-0029 | La Jornada | (ver detalle, gap=26 vs PC) | 0.4 | C. Revisión manual — gap real contra PC es el más alto del lote pero confianza no es alta |
+| MED-0008 | Aristegui Noticias | READY_KEEP_CURRENT (probable) | — | Único con señal positiva; confirmar antes de alta |
+
+**Resultado: `high_confidence: 0` de 5.** Ninguno califica para alta/reparación inmediata sin
+revisión manual adicional. La lección: no recomendar medios por `ultimo_estado`/prioridad de
+catálogo sin correr `audit-media-sources` primero (ya se corrigió aquí, pero se documenta el
+error para no repetirlo). Quedan 43 medios de prioridad Alta fuera de cron sin auditar — se
+recomienda una sesión dedicada para pasarlos por `audit-media-sources` en lotes de 5-10 antes
+de elegir el siguiente batch real de alta a cron.
+
+**Prohibido sin autorización:** escribir en `NoticiasPatron` (aunque el gate ya pasa). Agregar
+medios al cron sin pasar primero por `audit-media-sources` con confianza alta. Cambiar keywords
+de Jumex sin aprobación (solo propuesto, no aplicado).

@@ -267,3 +267,12 @@ controlados (mismo comando, en días sucesivos) para cerrar la brecha por comple
 5. Crear script de conexión a hoja final por cliente (filtrado + push), con su propio
    readback — fuera del alcance de esta fase.
 6. Automatizar corrida diaria del exportador (cron), una vez validado 2-3 días manualmente.
+
+## 12. Acceso a NoticiasPatron resuelto (2026-07-15)
+
+El service account ya tiene acceso. `export-patron-final-approved-no-pc.ts` corregido (gate +
+mapeo de columna combinada `"titulo / titular"`). Dry-run actual: `acceso_target_ok=true`,
+`ready_to_write=true`, 6 filas aprobadas con nota completa real lista para escribir. **No se ha
+ejecutado la escritura real** — se reportó el resultado y se espera autorización explícita del
+usuario antes de correr `--output=sheet` contra la hoja externa (por diseño: escribir en una
+hoja de reporte externa real requiere confirmación humana, no solo que el gate técnico pase).

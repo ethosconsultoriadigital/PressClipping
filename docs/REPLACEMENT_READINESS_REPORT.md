@@ -1107,3 +1107,21 @@ Jumex). 9 filas (5 ALTA crisis, 4 MEDIA), readback mismatch=false, dedupe por
 **Patrón = GO CONDICIONADO** (revisión humana antes de hoja final). **Jumex = NO-GO** (sin
 export final; Museo Jumex excluido). Detalle: `docs/PUENTE_REPORTES_JUMEX_PATRON.md` §0.b.
 973 tests, todos verdes.
+
+---
+
+## Acceso a NoticiasPatron resuelto + fixes + segundo lote re-enrich (2026-07-15)
+
+Service account recibió acceso a la hoja final real. Se corrigieron 2 bugs en
+`export-patron-final-approved-no-pc.ts`: gate exigía `human_review_rows=0` global (imposible,
+las 3 retenidas son correctas por diseño) y el mapeo no reconocía el header combinado real
+`"titulo / titular"`. Tras el fix: `acceso_target_ok=true`, `ready_to_write=true`, 6 filas con
+nota completa real. **No escrito aún** — pendiente autorización explícita.
+
+Segundo lote de re-enrich (5 medios, 500 notas): 489/500 actualizadas. Readiness 24h: ambos
+clientes OPERATIVO_INTERNO 90%, texto_ok 100%, 0 errores. Hallazgo Jumex: de 9 menciones/7d
+solo ~2 útiles — 2 FP totales de "Museo Jumex" en notas del Mundial, 2 FP de "Profeco" en notas
+de gasolina (keyword IEPS demasiado amplia). Refuerza NO-GO. Siguiente lote de medios auditado
+con `audit-media-sources`: 0/5 alta confianza (lección: no recomendar por catálogo sin auditar
+la fuente real primero). Detalle: `docs/PRODUCTION_READINESS_PLAN.md` §NO-PC OPERATION ADVANCE.
+983 tests, todos verdes.

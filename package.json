@@ -41,6 +41,7 @@
     "export-operational-news-no-pc": "tsx scripts/export-operational-news-no-pc.ts",
     "export-operational-news-consolidated-no-pc": "tsx scripts/export-operational-news-consolidated-no-pc.ts",
     "export-patron-final-preview-no-pc": "tsx scripts/export-patron-final-preview-no-pc.ts",
+    "export-patron-final-approved-no-pc": "tsx scripts/export-patron-final-approved-no-pc.ts",
     "live-comparison": "tsx scripts/run-live-comparison.ts",
     "shadow-scheduler": "tsx scripts/run-shadow-scheduler.ts",
     "shadow-national-tier": "tsx scripts/run-shadow-national-tier.ts",
