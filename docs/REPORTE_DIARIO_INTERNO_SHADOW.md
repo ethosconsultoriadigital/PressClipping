@@ -344,3 +344,11 @@ Escritura real autorizada y ejecutada: 6 filas en `NoticiasPatron`. Comando úni
 1 nota nueva detectada+aprobada+escrita sin intervención humana (`NoticiasPatron` 6→7). Fix
 Profeco/IEPS (Jumex) aplicado, sin conectar Jumex a hoja final. Workflow manual creado, sin
 cron. Detalle: `docs/PRODUCTION_READINESS_PLAN.md` §PATRÓN NO-PC PRODUCTION CAPTURE LOOP.
+
+## Marca Patrón + readiness de medios (2026-07-16)
+
+Keyword de marca reforzada (KEY-0069 "Patrón" con contexto anti-palabra-común, orden invertido,
+Bacardí México). 35 medios importantes auditados: `docs/PATRON_IMPORTANT_MEDIA_READINESS.md`.
+2/10 P1 LISTO_LEYENDO; el resto necesita re-enrich (backlog estructural del cron base) o está
+fuera de cron (varios paywall). `NoticiasPatron` al día (7 filas, 0 nuevas este ciclo). Cron
+sigue sin activar (pendiente autorización explícita). Jumex sin cambios.

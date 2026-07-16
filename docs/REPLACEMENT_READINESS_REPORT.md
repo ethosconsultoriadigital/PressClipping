@@ -1143,3 +1143,16 @@ corrida confirmó dedupe perfecto (0 nuevas). Fix Jumex: keyword Profeco ya no m
 (quitado "IEPS" suelto del contexto). Workflow manual creado (`workflow_dispatch` únicamente,
 sin cron). 1033 tests, todos verdes. Detalle: `docs/PRODUCTION_READINESS_PLAN.md` §PATRÓN NO-PC
 PRODUCTION CAPTURE LOOP.
+
+---
+
+## Patrón: marca directa + readiness de medios (2026-07-16)
+
+Marca directa reforzada (KEY-0069 "Patrón" exacta_contextual + "Patrón Tequila" orden invertido +
+"Bacardí México"), 13 tests matcher, 0 flood. Backtest 30d: 0 menciones de marca en el corpus
+(la marca no apareció; captura lista para cuando aparezca). Auditados 35 medios importantes:
+solo 2 de 10 P1 LISTO_LEYENDO (Excélsior, Periódico Correo — este último 9 menciones sector/7d).
+Hallazgo estructural: el cron base no enriquece → backlog de cuerpo vacío persistente (no bloquea
+captura de Patrón por título). Reforma/Milenio/Mural = paywall/política, no candidatos. Matriz en
+`docs/PATRON_IMPORTANT_MEDIA_READINESS.md`. Cron NO activado (requiere autorización explícita para
+automatización recurrente a hoja externa). 1057 tests, todos verdes.

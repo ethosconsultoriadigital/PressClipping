@@ -679,3 +679,52 @@ pendientes de auditar (siguiente lote propuesto, no ejecutado).
 **Prohibido sin autorización:** correr `patron:no-pc:capture` con `--allow-final-sheet=true`
 sin supervisión (aunque el comando ya es seguro por diseño). Programar el workflow con cron.
 Tocar Jumex final. Otro re-enrich masivo.
+
+---
+
+## PATRÓN BRAND + IMPORTANT MEDIA READINESS (2026-07-16)
+
+### Marca directa Patrón reforzada
+
+Auditoría `audit-patron-brand-keywords` confirmó gaps: faltaba "Patrón" solo, el orden invertido
+"Patrón Tequila" y "Bacardí México". Backtest `simulate-patron-brand-mentions` (30d): **0
+menciones de marca directa** en el corpus (la marca no apareció, no es fallo de captura) y la
+regla candidata "Patrón" no genera flood. Fix aplicado (`tune-patron-brand-keywords.ts`, solo
+CLI-0002, no toca `alertas_activas`):
+- KEY-0060 "Tequila Patrón": +alias "Patrón Tequila"/"Patron Tequila" (orden invertido).
+- KEY-0015 "Bacardí": +alias "Bacardí México"/"Bacardi Mexico".
+- **KEY-0069 "Patrón" nueva** (exacta_contextual, alerta=true): exige contexto de marca/tequila,
+  excluye palabra común (jefe, patrón de conducta/diseño/consumo, santo patrón, etc.). 13 tests
+  a nivel matcher validan que captura marca y bloquea palabra común. detect dry-run: 0 flood.
+
+### Readiness de medios importantes (35 auditados)
+
+`audit-patron-important-media-readiness` + matriz en `docs/PATRON_IMPORTANT_MEDIA_READINESS.md`
+(+ export para GPT en `PATRON_IMPORTANT_MEDIA_READINESS_FOR_GPT.md`). 10 P1_CRÍTICO: solo 2
+LISTO_LEYENDO (Excélsior, Periódico Correo), 3 CATALOGO_NO_CRON (Reforma/Milenio/Mural — todos
+paywall/política, NO candidatos válidos), 3 NECESITA_REENRICH (El Financiero, El Economista, El
+Informador), 2 BLOQUEADO (El Universal 404, La Jornada 403). **Caballo de batalla: Periódico
+Correo** (95.2% texto, 9 menciones sector/7d).
+
+**Hallazgo estructural:** el cron base crawlea títulos pero NO enriquece → el backlog de cuerpo
+vacío regenera más rápido de lo que los lotes de re-enrich (cap 500) lo limpian. Por eso El
+Informador/El Economista siguen en 0% texto pese a 2 re-enrich previos. Fix estructural sugerido
+(fase separada, requiere autorización): encadenar `enrich-news --only-pending-mentions` en el cron
+base como ya hace el tier daily-validated. NO bloquea la captura de Patrón (detección por título
++ re-enrich dirigido de menciones pendientes en el capture loop).
+
+### Producción y cron
+
+`patron:no-pc:capture` dry-run: `NoticiasPatron` ya al día (7 filas), `new_rows=0` — no había nada
+nuevo que escribir este ciclo, no se forzó corrida real (habría sido no-op). **Cron NO activado**
+a propósito: encender un `schedule` que escribe automáticamente a la hoja externa real del cliente
+cada 2h es una automatización recurrente de cara al exterior que requiere autorización explícita e
+inequívoca (más allá de que el gate técnico pase). El workflow sigue `workflow_dispatch`-only.
+
+### Lote inmediato de medios (propuesto, NO ejecutado)
+
+Ver `PATRON_IMPORTANT_MEDIA_READINESS.md` §6: reparar El Universal + La Jornada, re-enrich
+dirigido El Economista + El Informador, evaluar catalogar AM León. Requiere autorización.
+
+**Prohibido sin autorización:** activar cron. Agregar Reforma/Milenio/Mural al cron (paywall/
+política). Tocar Jumex final. Ejecutar el lote de medios sin aprobación.
