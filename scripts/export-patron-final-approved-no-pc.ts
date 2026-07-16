@@ -24,12 +24,19 @@ import 'dotenv/config';
 import { pathToFileURL } from 'node:url';
 import { getSupabase } from '../src/supabase/client.js';
 import { getOutputTab, getTabById, withSheetsRetry } from '../src/sheets/client.js';
+import { ensureSheetTabAndHeaders, appendHistoryRows, type OutRow } from '../src/sheets/write.js';
 import { logger } from '../src/utils/logger.js';
 import { parseIntOrNull } from '../src/utils/parse.js';
 import { clasificarAprobacion } from '../src/editorial/patronApproval.js';
 
 const SOURCE_TAB_DEFAULT = '13_Patron_Final_Preview';
+const REVISION_HUMANA_TAB = '15_Patron_Revision_Humana';
 const MIN_CHARS_NOTA_COMPLETA = 600;
+const REVISION_HUMANA_HEADERS = [
+  'fecha_export', 'run_id', 'cliente_id', 'cliente_nombre', 'fecha_noticia', 'medio',
+  'titulo', 'url', 'keywords_detectadas', 'grupo_tema', 'relevancia_editorial',
+  'estado_editorial', 'razon_revision', 'dedupe_key_final',
+];
 
 /** Columnas críticas mínimas que DEBEN existir en NoticiasPatron. */
 const COLUMNAS_CRITICAS = ['idnoticia', 'fecha_publicacion', 'medio', 'url'];
@@ -78,15 +85,20 @@ function horaMexico(): { hora: string; fecha: string } {
   return { hora: fmt.format(now), fecha: fmtFecha.format(now) };
 }
 
+/** estado_editorial que autoriza envío a NoticiasPatron (mismo criterio que tab 12→13). */
+const ESTADO_GO = new Set(['GO_ALTA', 'GO_MEDIA']);
+
 interface FilaTab13 {
   cliente_id: string; cliente_nombre: string; fecha_noticia: string; medio: string; titulo: string;
   url: string; keywords_detectadas: string; grupo_tema: string; sentimiento: string; valoracion: string;
-  relevancia_editorial: string; prioridad: string; requiere_alerta: string; cluster_id: string;
+  relevancia_editorial: string; estado_editorial: string; prioridad: string; requiere_alerta: string; cluster_id: string;
   cluster_tipo: string; texto_limpio_chars: string; medio_id: string; fuente: string; dedupe_key_final: string;
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  const runId = `PATRON-APPROVED-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+  const fechaExport = new Date().toISOString();
 
   logger.info(
     { sourceTab: args.sourceTab, targetSheetId: args.targetSheetId ?? null, targetTab: args.targetTab ?? null, output: args.output, dryRun: args.dryRun, allowFinalSheet: args.allowFinalSheet, maxRows: args.maxRows },
@@ -153,6 +165,7 @@ async function main() {
     sentimiento: txt(r.get('sentimiento')),
     valoracion: txt(r.get('valoracion')),
     relevancia_editorial: txt(r.get('relevancia_editorial')),
+    estado_editorial: txt(r.get('estado_editorial')),
     prioridad: txt(r.get('prioridad')),
     requiere_alerta: txt(r.get('requiere_alerta')),
     cluster_id: txt(r.get('cluster_id')),
@@ -165,13 +178,18 @@ async function main() {
 
   logger.info({ source_rows: filas.length }, 'Filas leídas de tab 13');
 
-  // ── Clasificar por dictamen editorial GPT fijo ──────────────────────────────
+  // ── Clasificar: estado_editorial (reglas deterministas, repetible para notas
+  // nuevas) con fallback a la lista fija del dictamen GPT (2026-07-13) solo para
+  // filas legacy que no tienen la columna estado_editorial poblada. ──────────────
   const jumex = filas.filter((f) => f.cliente_id !== 'CLI-0002');
   const cli0002 = filas.filter((f) => f.cliente_id === 'CLI-0002');
   const aprobadas: FilaTab13[] = [];
   const revisionHumana: FilaTab13[] = [];
   for (const f of cli0002) {
-    if (clasificarAprobacion(f.titulo) === 'APROBADO') aprobadas.push(f);
+    const aprobado = f.estado_editorial
+      ? ESTADO_GO.has(f.estado_editorial)
+      : clasificarAprobacion(f.titulo) === 'APROBADO'; // fallback legacy (sin estado_editorial)
+    if (aprobado) aprobadas.push(f);
     else revisionHumana.push(f);
   }
 
@@ -253,6 +271,42 @@ async function main() {
   if (args.dryRun || args.output === 'console') {
     logger.info({ ready_to_write: readyToWrite }, '=== FIN dry-run — NADA ESCRITO EN NoticiasPatron ===');
     return;
+  }
+
+  // ── Revisión humana: escribir SIEMPRE en tab interna propia (Output Sheet),
+  // independiente del gate de la hoja externa (nunca se escriben en NoticiasPatron). ──
+  if (revisionHumana.length > 0) {
+    const filasRevision: OutRow[] = revisionHumana.map((f) => ({
+      fecha_export: fechaExport,
+      run_id: runId,
+      cliente_id: f.cliente_id,
+      cliente_nombre: f.cliente_nombre,
+      fecha_noticia: f.fecha_noticia,
+      medio: f.medio,
+      titulo: f.titulo,
+      url: f.url,
+      keywords_detectadas: f.keywords_detectadas,
+      grupo_tema: f.grupo_tema,
+      relevancia_editorial: f.relevancia_editorial,
+      estado_editorial: f.estado_editorial || '(sin estado_editorial — clasificado por lista legacy)',
+      razon_revision: f.estado_editorial === 'REVISAR'
+        ? 'crisis/keyword sin confirmar en título — requiere revisión humana'
+        : 'no aprobado por reglas editoriales (relevancia/estado no GO)',
+      dedupe_key_final: f.dedupe_key_final,
+    }));
+    const ensureRevision = await ensureSheetTabAndHeaders(REVISION_HUMANA_TAB, REVISION_HUMANA_HEADERS);
+    const existentesRevision = new Set<string>();
+    try {
+      const tabRevision = await getOutputTab(REVISION_HUMANA_TAB);
+      const rowsRevision = await tabRevision.getRows();
+      for (const r of rowsRevision) { const k = txt(r.get('dedupe_key_final')); if (k) existentesRevision.add(k); }
+    } catch { /* recién creada */ }
+    const nuevasRevision = filasRevision.filter((f) => !existentesRevision.has(String(f.dedupe_key_final)));
+    const escritasRevision = await appendHistoryRows(REVISION_HUMANA_TAB, REVISION_HUMANA_HEADERS, nuevasRevision);
+    logger.info(
+      { accion: ensureRevision.accion, filas_escritas: escritasRevision, duplicados_omitidos: filasRevision.length - nuevasRevision.length },
+      `Revisión humana escrita en ${REVISION_HUMANA_TAB} (tab interna, nunca en NoticiasPatron)`,
+    );
   }
 
   if (!readyToWrite) {

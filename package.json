@@ -37,6 +37,8 @@
     "audit-operational-readiness-no-pc": "tsx scripts/audit-operational-readiness-no-pc.ts",
     "tune-patron-jumex-keywords": "tsx scripts/tune-patron-jumex-keywords.ts",
     "tune-crt-keyword": "tsx scripts/tune-crt-keyword.ts",
+    "tune-jumex-profeco-ieps": "tsx scripts/tune-jumex-profeco-ieps.ts",
+    "patron:no-pc:capture": "tsx scripts/run-patron-no-pc-production-capture.ts",
     "simulate-keywords-shadow": "tsx scripts/simulate-keywords-shadow.ts",
     "export-operational-news-no-pc": "tsx scripts/export-operational-news-no-pc.ts",
     "export-operational-news-consolidated-no-pc": "tsx scripts/export-operational-news-consolidated-no-pc.ts",

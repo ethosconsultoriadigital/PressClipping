@@ -615,3 +615,67 @@ de elegir el siguiente batch real de alta a cron.
 **Prohibido sin autorización:** escribir en `NoticiasPatron` (aunque el gate ya pasa). Agregar
 medios al cron sin pasar primero por `audit-media-sources` con confianza alta. Cambiar keywords
 de Jumex sin aprobación (solo propuesto, no aplicado).
+
+---
+
+## PATRÓN NO-PC PRODUCTION CAPTURE LOOP (2026-07-16)
+
+### Comando único de producción: `npm run patron:no-pc:capture`
+
+`scripts/run-patron-no-pc-production-capture.ts` orquesta el pipeline completo (reutiliza
+scripts ya validados, sin duplicar lógica): detect por cliente → staging raw (tab 11) →
+consolidado editorial (tab 12) → preview final (tab 13) → escritura aprobada a
+`NoticiasPatron` + revisión humana interna (tab 15, nueva).
+
+**Defaults seguros:** sin `--output=sheet`, siempre dry-run (aunque no se pase `--dry-run`
+explícito). Sin `--allow-final-sheet=true`, nunca escribe en la hoja externa real (solo tabs
+propias). Fijo: `--clients=CLI-0002` en cada paso — Jumex nunca se toca.
+
+### Fix crítico de repetibilidad: guard de crisis en título
+
+El pipeline anterior dependía de una lista fija de 9 títulos (auditoría GPT puntual) para
+decidir aprobado/revisión — **nunca habría aprobado automáticamente notas nuevas**. Se
+reemplazó por un criterio 100% determinístico (sin IA) basado en `estado_editorial`
+(`GO_ALTA`/`GO_MEDIA` = aprobado), propagado ahora de tab 12 → tab 13 → escritura final.
+
+Se corrigió además el bug que originó las 3 filas dudosas de la auditoría GPT: la clasificación
+de crisis buscaba la palabra de crisis en `keywords + título` combinados, y como el propio
+NOMBRE de la keyword detectada (p.ej. "alcohol adulterado") ya contiene esa palabra, el check
+pasaba trivialmente aunque el título no hablara del tema (la keyword había matcheado solo en
+el cuerpo). Fix: exigir la palabra de crisis en el TÍTULO específicamente (con lista de
+palabras sueltas, no solo frases exactas, para tolerar "tequila **presuntamente** adulterado").
+Si la keyword es de crisis pero el título no la confirma → `estado_editorial=REVISAR` (revisión
+humana), nunca auto-aprobación. 6 tests nuevos validan exactamente los 3 casos reales.
+
+### Validación end-to-end (2026-07-16)
+
+Corrida real con `--allow-final-sheet=true`: el pipeline detectó y aprobó automáticamente
+**1 nota nueva** ("Cofepris alerta por tequila falsificado y adulterado", Publimetro México)
+vía el guard de crisis en título — `NoticiasPatron` pasó de 6 a **7 filas**. Una segunda corrida
+inmediata confirmó dedupe perfecto: `new_rows=0`, gate abortó sin escribir (comportamiento
+correcto, no un error). Tab 15 (`15_Patron_Revision_Humana`) creada con las 3 filas retenidas.
+
+### Fix Jumex: keyword Profeco/IEPS (sin conectar Jumex a hoja final)
+
+`scripts/tune-jumex-profeco-ieps.ts`: KEY-0068 (Profeco) tenía "IEPS" suelto en
+`contexto_incluir` — el IEPS también aplica a gasolina/tabaco, no solo bebidas azucaradas.
+Causaba 2 FP confirmados en notas de precio de gasolina. Fix: se quitó "IEPS" del contexto
+(quedan Jumex/jugos/néctares/bebidas azucaradas) y se agregó `contexto_excluir` para
+gasolina/diésel/combustible/tabaco. 13 tests a nivel matcher. **Jumex sigue NO-GO, sin hoja
+final, sin cambios en `alertas_activas`.**
+
+### Workflow manual (sin cron)
+
+`.github/workflows/patron-no-pc-capture.yml` — solo `workflow_dispatch`, sin `schedule`.
+Defaults: `dry_run=true`, `output_sheet=false`, `allow_final_sheet=false`. Siempre pasa
+`--no-send --no-whatsapp --no-email`. 8 tests verifican estas garantías sobre el YAML.
+
+### Medios (sin cambios desde la fase anterior — no se ejecutó otro re-enrich)
+
+171 catálogo, 39 en cron, 27 scrapeados 24h, 5 OPERATIVO_OK, 21 NECESITA_REENRICH, 0 bloqueados
+con error, 489/500 notas re-enriquecidas en el segundo lote, 43 medios de prioridad Alta
+pendientes de auditar (siguiente lote propuesto, no ejecutado).
+
+**Prohibido sin autorización:** correr `patron:no-pc:capture` con `--allow-final-sheet=true`
+sin supervisión (aunque el comando ya es seguro por diseño). Programar el workflow con cron.
+Tocar Jumex final. Otro re-enrich masivo.

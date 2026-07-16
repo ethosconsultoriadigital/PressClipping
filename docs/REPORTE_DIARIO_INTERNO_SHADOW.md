@@ -336,3 +336,11 @@ pero sin escribir aún (falta autorización explícita). Readiness 24h: ambos OP
 Segundo lote re-enrich: 489/500 notas. Jumex refuerza NO-GO: FP de Museo Jumex (Mundial) y
 Profeco (gasolina, keyword IEPS demasiado amplia). Detalle:
 `docs/PRODUCTION_READINESS_PLAN.md` §NO-PC OPERATION ADVANCE.
+
+## Ciclo de producción Patrón operativo (2026-07-16)
+
+Escritura real autorizada y ejecutada: 6 filas en `NoticiasPatron`. Comando único
+`npm run patron:no-pc:capture` (orquestador completo). Primera captura 100% automática validada:
+1 nota nueva detectada+aprobada+escrita sin intervención humana (`NoticiasPatron` 6→7). Fix
+Profeco/IEPS (Jumex) aplicado, sin conectar Jumex a hoja final. Workflow manual creado, sin
+cron. Detalle: `docs/PRODUCTION_READINESS_PLAN.md` §PATRÓN NO-PC PRODUCTION CAPTURE LOOP.

@@ -271,8 +271,25 @@ controlados (mismo comando, en días sucesivos) para cerrar la brecha por comple
 ## 12. Acceso a NoticiasPatron resuelto (2026-07-15)
 
 El service account ya tiene acceso. `export-patron-final-approved-no-pc.ts` corregido (gate +
-mapeo de columna combinada `"titulo / titular"`). Dry-run actual: `acceso_target_ok=true`,
-`ready_to_write=true`, 6 filas aprobadas con nota completa real lista para escribir. **No se ha
-ejecutado la escritura real** — se reportó el resultado y se espera autorización explícita del
-usuario antes de correr `--output=sheet` contra la hoja externa (por diseño: escribir en una
-hoja de reporte externa real requiere confirmación humana, no solo que el gate técnico pase).
+mapeo de columna combinada `"titulo / titular"`). **Escritura real ejecutada** (autorización
+explícita del usuario): 6 filas aprobadas escritas en `NoticiasPatron`.
+
+## 13. Ciclo de producción repetible (2026-07-16)
+
+`npm run patron:no-pc:capture` — comando único que orquesta todo el pipeline (detect →
+tab11 → tab12 → tab13 → NoticiasPatron + tab15 revisión humana). Reemplaza la dependencia de
+la lista fija de 9 títulos por `estado_editorial` (GO_ALTA/GO_MEDIA), con un guard nuevo que
+exige la palabra de crisis en el TÍTULO (no solo en el nombre de la keyword) para auto-aprobar
+— replica el criterio que la auditoría GPT aplicó manualmente, ahora determinístico y repetible.
+
+**Primera captura automática real:** el ciclo detectó y aprobó "Cofepris alerta por tequila
+falsificado y adulterado" (Publimetro México, 2026-07-15) sin intervención humana.
+`NoticiasPatron`: 6→7 filas. Segunda corrida inmediata: 0 nuevas (dedupe correcto).
+
+Tab `15_Patron_Revision_Humana` (nueva, en Output Sheet propio) recibe las filas dudosas —
+nunca llegan a `NoticiasPatron`. Workflow manual `.github/workflows/patron-no-pc-capture.yml`
+(`workflow_dispatch` únicamente, sin cron) permite ejecutar el ciclo desde GitHub Actions con
+defaults seguros (dry_run=true, output_sheet=false, allow_final_sheet=false).
+
+**Siguiente paso:** correr el ciclo manualmente (dry-run, luego real) 1-2 veces al día por
+24-48h antes de considerar programarlo con cron.

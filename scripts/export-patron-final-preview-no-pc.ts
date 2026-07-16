@@ -27,7 +27,7 @@ const CLIENTE = 'CLI-0002';
 const HEADERS = [
   'fecha_export', 'run_id', 'cliente_id', 'cliente_nombre', 'fecha_noticia', 'medio',
   'titulo', 'url', 'keywords_detectadas', 'grupo_tema', 'sentimiento', 'valoracion',
-  'relevancia_editorial', 'prioridad', 'requiere_alerta', 'cluster_id', 'cluster_tipo',
+  'relevancia_editorial', 'estado_editorial', 'prioridad', 'requiere_alerta', 'cluster_id', 'cluster_tipo',
   'texto_limpio_chars', 'medio_id', 'fuente', 'dedupe_key_final', 'estado_export', 'notas_editoriales',
 ];
 
@@ -115,8 +115,11 @@ async function main() {
 
     const relevancia = txt(r.get('relevancia_editorial'));
     const estadoEditorial = txt(r.get('estado_editorial'));
-    // Filtro GO: relevancia ALTA/MEDIA o estado_editorial GO_ALTA/GO_MEDIA.
-    const esGo = RELEVANCIA_GO.has(relevancia) || ESTADO_GO.has(estadoEditorial);
+    // Filtro GO: si hay estado_editorial, MANDA (excluye REVISAR/EXCLUIR aunque la
+    // relevancia sea MEDIA/ALTA — p.ej. crisis solo confirmada por keyword, no por
+    // título, queda REVISAR y no debe pasar). Sin estado_editorial (filas legacy
+    // sin esa columna), cae al fallback por relevancia_editorial solamente.
+    const esGo = estadoEditorial ? ESTADO_GO.has(estadoEditorial) : RELEVANCIA_GO.has(relevancia);
     if (!esGo) { excluidasRelevancia++; continue; }
 
     const fechaNoticia = txt(r.get('fecha_noticia'));
@@ -147,6 +150,7 @@ async function main() {
       sentimiento: txt(r.get('sentimiento')),
       valoracion: txt(r.get('valoracion')),
       relevancia_editorial: relevancia,
+      estado_editorial: estadoEditorial,
       prioridad: txt(r.get('prioridad')),
       requiere_alerta: txt(r.get('requiere_alerta')),
       cluster_id: txt(r.get('cluster_id')),

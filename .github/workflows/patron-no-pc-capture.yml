@@ -1,0 +1,94 @@
+# ============================================================================
+# PATRÓN NO-PC PRODUCTION CAPTURE — MANUAL, NO CRON TODAVÍA
+# ----------------------------------------------------------------------------
+# Ejecuta scripts/run-patron-no-pc-production-capture.ts: SOLO CLI-0002
+# (Patrón/Bacardí/Bebidas alcohólicas). Nunca toca Jumex. Nunca envía nada
+# (email/WhatsApp/Twilio/SMTP). Nunca usa classify-ia/generate-xml/export-results.
+#
+# SOLO `workflow_dispatch` — sin `schedule` (cron) todavía, a propósito: se
+# ejecuta manualmente varios días antes de considerar programarlo. Defaults
+# seguros: dry_run=true, output_sheet=false — hay que cambiar EXPLÍCITAMENTE
+# ambos inputs a false/true respectivamente para que escriba en Sheets, y
+# ADEMÁS pasar allow_final_sheet=true para que llegue a escribir en la hoja
+# externa real `NoticiasPatron` (si no, solo escribe las tabs internas propias
+# 11/12/13/15, nunca la hoja del cliente).
+#
+# Secrets requeridos (Settings → Secrets and variables → Actions):
+#   SUPABASE_URL · SUPABASE_SERVICE_ROLE_KEY · GOOGLE_SERVICE_ACCOUNT_EMAIL ·
+#   GOOGLE_PRIVATE_KEY · GOOGLE_OUTPUT_SHEET_ID (fallback GOOGLE_SHEET_ID)
+# ============================================================================
+name: patron-no-pc-capture
+
+on:
+  workflow_dispatch:
+    inputs:
+      window_hours:
+        description: 'Tamaño de la ventana móvil en horas.'
+        required: false
+        default: '24'
+      dry_run:
+        description: 'Modo dry-run (true = no escribe nada, solo reporta).'
+        required: false
+        default: 'true'
+      output_sheet:
+        description: 'Escribir en Sheets (tabs propias 11/12/13/15). Ignorado si dry_run=true.'
+        required: false
+        default: 'false'
+      allow_final_sheet:
+        description: 'Escribir en la hoja EXTERNA real NoticiasPatron (requiere output_sheet=true y dry_run=false).'
+        required: false
+        default: 'false'
+      max_rows:
+        description: 'Tope de filas por paso del pipeline.'
+        required: false
+        default: '300'
+
+concurrency:
+  group: patron-no-pc-capture
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Patrón no-PC production capture (solo CLI-0002, sin envíos)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+      GOOGLE_OUTPUT_SHEET_ID: ${{ secrets.GOOGLE_OUTPUT_SHEET_ID }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      LOG_FORMAT: json
+      RUN_BY: github-actions-patron-no-pc-capture
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Patrón no-PC capture (solo CLI-0002, sin envíos, sin Jumex)
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+        run: |
+          WINDOW="${{ github.event.inputs.window_hours || '24' }}"
+          MAXROWS="${{ github.event.inputs.max_rows || '300' }}"
+          DRYRUN="${{ github.event.inputs.dry_run || 'true' }}"
+          OUTPUT="${{ github.event.inputs.output_sheet || 'false' }}"
+          ALLOWFINAL="${{ github.event.inputs.allow_final_sheet || 'false' }}"
+
+          ARGS="--window-hours=$WINDOW --max-rows=$MAXROWS --no-send --no-whatsapp --no-email"
+          if [ "$DRYRUN" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          else
+            if [ "$OUTPUT" = "true" ]; then
+              ARGS="$ARGS --output=sheet --allow-final-sheet=$ALLOWFINAL"
+            fi
+          fi
+
+          npm run patron:no-pc:capture -- $ARGS

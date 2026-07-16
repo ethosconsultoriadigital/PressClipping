@@ -93,6 +93,15 @@ const CLI0002 = {
     'botellas reutilizadas', 'metanol', 'alcohol metilico', 'licor adulterado', 'destilados adulterados',
     'destilado adulterado', 'mezcal adulterado', 'alcohol clandestino',
   ],
+  // Palabras SUELTAS (no frases) de alta señal de crisis, para detectar el tema en
+  // el TÍTULO real, donde suelen insertarse palabras entre términos ("tequila
+  // PRESUNTAMENTE adulterado") que rompen el match de frase exacta de crisisAlta.
+  crisisPalabrasTitulo: [
+    'adulterado', 'adulterada', 'adulterados', 'adulteradas',
+    'intoxicacion', 'intoxicaciones', 'intoxicado', 'intoxicados', 'intoxicada', 'intoxicadas',
+    'muerte', 'muertes', 'decomiso', 'decomisan', 'metanol', 'metilico',
+    'clandestino', 'clandestina', 'clandestinos', 'clandestinas', 'falsificado', 'falsificada',
+  ],
   marca: ['tequila patron', 'casa patron', 'bacardi'],
   sectorial: [
     'exportacion de tequila', 'exportaciones de tequila', 'denominacion de origen', 'agave',
@@ -150,8 +159,22 @@ function clasificarCli0002(keywordsFold: string[], tituloFold: string): Clasific
   const flags: string[] = [];
 
   // 1. Crisis directa: gana sobre todo (aunque haya ruido turístico en el mismo blob).
-  const crisis = algunPresente(blob, CLI0002.crisisAlta);
-  if (crisis) {
+  //
+  // Guard anti-FP (2026-07-16): el nombre de la keyword detectada (p.ej. la propia
+  // keyword_id "alcohol adulterado") ya contiene la palabra de crisis, así que
+  // buscarla en `blob` (keywords+título) pasa trivialmente aunque el TÍTULO no
+  // hable del tema — la keyword pudo matchear solo en el cuerpo de la noticia.
+  // Lección de la auditoría editorial GPT (2026-07-13): "Arriban a Topolobampo
+  // equipos de alta tecnología..." y otras 2 notas fueron clasificadas ALTA/crisis
+  // por esta razón, sin relación real con el tema. Fix: exigir la palabra de
+  // crisis en el TÍTULO para auto-aprobar (GO_ALTA); si solo viene por el nombre
+  // de la keyword (no aparece en el título), bajar a revisión humana (REVISAR),
+  // nunca auto-aprobar. Determinístico, sin IA — reglas, no classify-ia.
+  // Frase exacta en título (caso simple) O palabra suelta de alta señal en título
+  // (cubre "tequila PRESUNTAMENTE adulterado", "tras intoxicaciones", etc., donde
+  // se insertan palabras entre términos y rompen el match de frase exacta).
+  const crisisEnTitulo = algunPresente(tituloFold, CLI0002.crisisAlta) ?? algunPresente(tituloFold, CLI0002.crisisPalabrasTitulo);
+  if (crisisEnTitulo) {
     return {
       relevancia_editorial: 'ALTA_RELEVANCIA',
       grupo_tema: 'CRISIS_ALCOHOL_ADULTERADO',
@@ -159,7 +182,20 @@ function clasificarCli0002(keywordsFold: string[], tituloFold: string): Clasific
       valoracion: 'ALTA',
       fp_flags: flags,
       estado_editorial: 'GO_ALTA',
-      razon_clasificacion: `crisis directa: "${crisis}"`,
+      razon_clasificacion: `crisis directa en título: "${crisisEnTitulo}"`,
+    };
+  }
+  const crisisSoloEnKeyword = algunPresente(blob, CLI0002.crisisAlta);
+  if (crisisSoloEnKeyword) {
+    flags.push('crisis_solo_en_keyword_no_en_titulo');
+    return {
+      relevancia_editorial: 'MEDIA_RELEVANCIA',
+      grupo_tema: 'CRISIS_ALCOHOL_ADULTERADO',
+      sentimiento: 'negativo',
+      valoracion: 'MEDIA',
+      fp_flags: flags,
+      estado_editorial: 'REVISAR',
+      razon_clasificacion: `posible crisis (keyword "${crisisSoloEnKeyword}" no confirmada en título) — requiere revisión humana`,
     };
   }
 

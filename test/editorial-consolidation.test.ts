@@ -134,6 +134,44 @@ describe('clasificarConsolidado CLI-0002 (Patrón)', () => {
     expect(c.relevancia_editorial).toBe('MEDIA_RELEVANCIA');
     expect(c.grupo_tema).toBe('INDUSTRIA_TEQUILA');
   });
+
+  // ── Guard anti-FP: crisis solo por nombre de keyword, no confirmada en título ──
+  // Casos reales de la auditoría editorial GPT (2026-07-13): 3 notas se colaron
+  // como ALTA/crisis porque la keyword detectada (p.ej. "alcohol adulterado")
+  // matcheó en el CUERPO, sin que el título hablara del tema.
+
+  it('keyword "alcohol adulterado" sin esa palabra en el título = REVISAR, no GO_ALTA', () => {
+    const c = clasificarConsolidado('CLI-0002', ['alcohol adulterado'], 'Arriban a Topolobampo equipos de alta tecnología para la Planta de Fertilizantes');
+    expect(c.estado_editorial).toBe('REVISAR');
+    expect(c.relevancia_editorial).toBe('MEDIA_RELEVANCIA');
+    expect(c.fp_flags).toContain('crisis_solo_en_keyword_no_en_titulo');
+  });
+
+  it('keyword de crisis sin relación real con el título (Jardín Corona) = REVISAR', () => {
+    const c = clasificarConsolidado('CLI-0002', ['bebidas adulteradas'], 'Jardín Corona más de 55 años de tradición única en Irapuato; conoce uno de los pocos espacios solo para hombres en la ciudad');
+    expect(c.estado_editorial).toBe('REVISAR');
+  });
+
+  it('keyword de crisis sin relación real con el título (Gamesa/Sabritas/Turín) = REVISAR', () => {
+    const c = clasificarConsolidado('CLI-0002', ['tequila adulterado'], 'Gamesa, Sabritas y Turín: las 10 empresas mexicanas que ahora pertenecen a gigantes extranjeros');
+    expect(c.estado_editorial).toBe('REVISAR');
+  });
+
+  it('crisis SÍ confirmada en título (Rincón de Tamayo) sigue GO_ALTA', () => {
+    const c = clasificarConsolidado('CLI-0002', ['tequila adulterado'], 'Detectan tequila presuntamente adulterado en Rincón de Tamayo');
+    expect(c.estado_editorial).toBe('GO_ALTA');
+    expect(c.relevancia_editorial).toBe('ALTA_RELEVANCIA');
+  });
+
+  it('crisis SÍ confirmada en título (muertes/Salamanca) sigue GO_ALTA', () => {
+    const c = clasificarConsolidado('CLI-0002', ['alcohol adulterado'], 'Muertes por alcohol adulterado bajan un 30% la clientela en bares y cantinas de Salamanca');
+    expect(c.estado_editorial).toBe('GO_ALTA');
+  });
+
+  it('crisis SÍ confirmada en título (intoxicaciones/tequila Centenario) sigue GO_ALTA', () => {
+    const c = clasificarConsolidado('CLI-0002', ['tequila adulterado'], 'Caen ventas de tequila Centenario tras intoxicaciones en Guanajuato');
+    expect(c.estado_editorial).toBe('GO_ALTA');
+  });
 });
 
 // ─── CLI-0001 (Jumex) — reglas editoriales ───────────────────────────────────

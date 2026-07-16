@@ -1125,3 +1125,21 @@ de gasolina (keyword IEPS demasiado amplia). Refuerza NO-GO. Siguiente lote de m
 con `audit-media-sources`: 0/5 alta confianza (lección: no recomendar por catálogo sin auditar
 la fuente real primero). Detalle: `docs/PRODUCTION_READINESS_PLAN.md` §NO-PC OPERATION ADVANCE.
 983 tests, todos verdes.
+
+---
+
+## Patrón: ciclo de producción operativo (2026-07-16)
+
+**Escritura real autorizada y ejecutada:** 6 filas aprobadas escritas en `NoticiasPatron`.
+Nuevo comando único `npm run patron:no-pc:capture` orquesta el pipeline completo (detect →
+staging → consolidado → preview → escritura + revisión humana), reutilizando scripts
+existentes. Fix crítico: la clasificación aprobado/revisión dependía de una lista fija de 9
+títulos (no servía para notas nuevas) — reemplazada por `estado_editorial` determinístico, con
+un guard que exige la palabra de crisis en el TÍTULO (no solo en el nombre de la keyword
+detectada), replicando exactamente el criterio que la auditoría GPT aplicó manualmente.
+**Validación real:** el ciclo capturó y aprobó automáticamente 1 nota nueva
+("Cofepris... tequila falsificado y adulterado") — `NoticiasPatron` pasó de 6 a 7 filas. Segunda
+corrida confirmó dedupe perfecto (0 nuevas). Fix Jumex: keyword Profeco ya no matchea gasolina
+(quitado "IEPS" suelto del contexto). Workflow manual creado (`workflow_dispatch` únicamente,
+sin cron). 1033 tests, todos verdes. Detalle: `docs/PRODUCTION_READINESS_PLAN.md` §PATRÓN NO-PC
+PRODUCTION CAPTURE LOOP.
