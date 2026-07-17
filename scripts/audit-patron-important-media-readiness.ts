@@ -95,17 +95,50 @@ async function main() {
   const hace7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
   const { data: catalogo } = await sb.from('medios').select('medio_id, nombre_medio, url_base, region, estado, prioridad, activo, ultimo_estado');
-  const { data: noticiasRaw } = await sb
-    .from('noticias')
-    .select('medio_id, fecha_publicacion, texto_cuerpo_nota, texto_nota_limpia, texto_extraido')
-    .gte('fecha_publicacion', hace7d)
-    .limit(10000);
-  const { data: mencionesRaw } = await sb
-    .from('menciones')
-    .select('keyword, created_at, noticias(medio_id)')
-    .eq('cliente_id', CLI_ID)
-    .gte('created_at', hace7d)
-    .limit(5000);
+
+  // Resuelve primero los medio_id de los 35 medios curados y consulta noticias/menciones
+  // UN MEDIO A LA VEZ: la tabla noticias tiene >10k filas en 7d incluso acotada a estos
+  // 35 medios (>1000 en total), y PostgREST trunca silenciosamente cualquier .limit(N)
+  // por encima de su tope real de filas por página — un medio de bajo volumen histórico
+  // (recién agregado) puede quedar fuera del sub-conjunto devuelto por una consulta en
+  // bloque aunque SÍ tenga noticias reales en la ventana. Confirmado en vivo (2026-07-17):
+  // AM León/CRT con notas reales de ayer aparecían como noticias_7d=0 por este motivo,
+  // incluso ya acotando con .in('medio_id', [...]) a solo estos 35 medios.
+  const medioIdsRelevantes = Array.from(
+    new Set(
+      MEDIOS_IMPORTANTES
+        .map((imp) => resolverMedio(imp.nombre, catalogo ?? [])?.medio_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  );
+
+  const PAGINA = 1000;
+  const noticiasRaw: any[] = [];
+  for (const medioId of medioIdsRelevantes) {
+    let offset = 0;
+    for (;;) {
+      const { data, count } = await sb
+        .from('noticias')
+        .select('medio_id, fecha_publicacion, texto_cuerpo_nota, texto_nota_limpia, texto_extraido', { count: 'exact' })
+        .eq('medio_id', medioId)
+        .gte('fecha_publicacion', hace7d)
+        .range(offset, offset + PAGINA - 1);
+      if (data) noticiasRaw.push(...data);
+      offset += PAGINA;
+      if (!data || data.length < PAGINA || offset >= (count ?? 0)) break;
+    }
+  }
+  const mencionesRaw: any[] = [];
+  for (const medioId of medioIdsRelevantes) {
+    const { data } = await sb
+      .from('menciones')
+      .select('keyword, created_at, noticias!inner(medio_id)')
+      .eq('cliente_id', CLI_ID)
+      .eq('noticias.medio_id', medioId)
+      .gte('created_at', hace7d)
+      .limit(PAGINA);
+    if (data) mencionesRaw.push(...data);
+  }
 
   const noticiasPorMedio = new Map<string, any[]>();
   for (const n of (noticiasRaw ?? []) as any[]) {

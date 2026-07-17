@@ -183,12 +183,11 @@ Por autorización explícita del usuario ("avanzar con Patrón"):
   `dry_run=false/output_sheet=true/allow_final_sheet=true` (escritura real automática); el
   `workflow_dispatch` manual conserva sus defaults seguros sin cambios.
 - **Milenio, AM León y CRT ejecutados manualmente (sin esperar el cron):**
-  - Milenio: primer crawl real — 11 noticias nuevas, 0 errores, gate detect limpio (0
-    menciones nuevas esa corrida). Tras el fix de re-enrich reciente (ver abajo), pasó a
+  - Milenio: primer crawl real — 11 noticias nuevas, 0 errores, gate detect limpio.
     **LISTO_LEYENDO** (111 noticias/7d, 89.2% texto, 3 menciones sector).
-  - AM León: primer crawl real — 30 noticias nuevas, 0 duplicados, 0 errores. Aún
-    `EN_CRON_SIN_NOTICIAS` en la ventana 7d/24h (el sitemap trajo su página más reciente,
-    pero sin señal Patrón todavía — 0 menciones).
+  - AM León: primer crawl real — 30 noticias nuevas, 0 duplicados, 0 errores. **LISTO_LEYENDO**
+    (30 noticias/7d, 100% texto) — ver nota de bug de auditoría abajo: inicialmente se
+    reportó `noticias_7d=0` por un bug del script de auditoría, no del medio.
   - CRT: primer crawl real — 30 noticias nuevas, 0 duplicados, 0 errores, texto limpio
     100%. **Hallazgo:** el gate detect (dry-run) contó 84 menciones potenciales (83 reales
     para CLI-0002 tras el detect real) — la keyword amplia "tequila" (`contiene`) matchea
@@ -202,21 +201,37 @@ Por autorización explícita del usuario ("avanzar con Patrón"):
   ganaron `--recent-first` (ordena por `fecha_publicacion` descendente en vez de
   `created_at` ascendente) y `--window-days=N` (acota a los últimos N días), aditivos —
   el comportamiento default (oldest-first, sin ventana) no cambió. 34 tests nuevos/actualizados.
-  - **El Informador:** texto_ok_pct 7d **0% → 98.7%**. Pasó de NECESITA_REENRICH a
-    **LISTO_LEYENDO** (78 noticias/7d, 4 menciones sector).
-  - **El Economista:** texto_ok_pct 7d **0% → 100%**. Pasó de NECESITA_REENRICH a
-    **LISTO_LEYENDO** (64 noticias/7d, 5 menciones sector).
+  - **El Informador:** texto_ok_pct 7d **0% → 45.3%** (`EN_CRON_TEXTO_MALO`, no LISTO_LEYENDO
+    todavía). 1205 noticias reales en la ventana de 7d — el batch de 100 recientes mejoró
+    genuinamente la calidad pero es una fracción pequeña de un volumen mucho mayor de lo
+    estimado originalmente.
+  - **El Economista:** texto_ok_pct 7d **0% → 38.6%** (`EN_CRON_TEXTO_MALO`). 1105 noticias
+    reales en 7d, mismo patrón: mejora real pero parcial frente al volumen verdadero.
+- **BUG DE AUDITORÍA ENCONTRADO Y CORREGIDO (`audit-patron-important-media-readiness.ts`):**
+  las consultas de `noticias`/`menciones` no filtraban por `medio_id` y usaban un
+  `.limit(10000)` que PostgREST trunca silenciosamente a ~1000 filas por página. Con
+  >18,000 noticias reales en la ventana de 7 días (y 4 medios individuales con >1000 cada
+  uno: El Economista 1106, El Heraldo 1763, La Razón 1069, El Informador 1205), esto
+  producía números **incorrectos y no deterministas** para cualquier medio — incluyendo el
+  hallazgo inicial equivocado "AM León `noticias_7d=0`" (en realidad tenía 30 noticias
+  reales) y un reporte previo, también equivocado, de "El Informador/El Economista ya en
+  98.7%/100%". **Corregido:** ahora pagina por `medio_id` con `.range()` hasta traer TODAS
+  las filas reales de cada uno de los 35 medios curados, con un `logger.warn` si algún
+  medio individual llegase a superar la página (ninguno lo hace ya tras la paginación).
+  Los números de este documento (a partir de esta sección) están verificados con la
+  versión corregida del script.
 - **Captura Patrón post-cambios:** dry-run limpio → real capturó **1 nota nueva** de Milenio
   ("Guanajuato busca implementar Novoglass para evitar la reutilización de botellas",
   INDUSTRIA_TEQUILA/GO_MEDIA) → `NoticiasPatron` 8→9 filas. 0 duplicados, 0 Jumex,
   `headers_mismatch=false`. Confirma el ciclo completo (crawl→enrich→detect→consolidado→
   preview→escritura) funcionando end-to-end para un medio recién agregado, sin intervención
   manual en la clasificación.
-- **P1 listos:** 2 (Excélsior, Periódico Correo) → **4** (Excélsior, Milenio, El Economista,
-  El Informador). Periódico Correo bajó de LISTO_LEYENDO a EN_CRON_TEXTO_MALO (60%, 5
-  noticias/7d) — **no es efecto de esta fase**: es drift natural de la ventana rodante de 7
-  días (notas viejas de buena calidad salieron de la ventana, sin re-enrich propio reciente
-  en este medio). Top gaps restantes: El Universal/La Jornada (bloqueados 404/403),
-  Reforma/Mural (paywall, fuera por política), El Financiero (necesita re-enrich, aún no
-  tratado con el fix reciente), Periódico Correo (nuevo gap por drift de ventana).
+- **P1 listos (números verificados post-fix de auditoría):** 2 (Excélsior, Periódico Correo)
+  → **3** (Excélsior, Milenio, Periódico Correo — este último NUNCA bajó de LISTO_LEYENDO;
+  el "drift" reportado en un chequeo intermedio fue el bug de auditoría, no un cambio real).
+  El Informador y El Economista pasaron de `NECESITA_REENRICH` (0%) a `EN_CRON_TEXTO_MALO`
+  (45.3%/38.6%) — progreso real pero parcial. Top gaps restantes: El Universal/La Jornada
+  (bloqueados 404/403), Reforma/Mural (paywall, fuera por política), El Financiero/El
+  Heraldo/La Razón (`NECESITA_REENRICH`/`EN_CRON_TEXTO_MALO`, aún sin tratar con el fix
+  reciente — candidatos naturales para el próximo lote de re-enrich con `--recent-first`).
 - Jumex: sin cambios, NO-GO confirmado, sin export final, sin tocar hoja externa.
