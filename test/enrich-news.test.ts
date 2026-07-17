@@ -7,6 +7,7 @@ import {
 } from '../src/enrichers/enrichNews.js';
 import type { FetchExtractResult } from '../src/extractors/html.js';
 import { MARCADOR_TITULO_DESDE_URL } from '../src/extractors/titleFromUrl.js';
+import { parseArgs } from '../scripts/enrich-news.js';
 
 function noticia(over: Partial<NoticiaEnriquecibleRow> = {}): NoticiaEnriquecibleRow {
   return {
@@ -215,6 +216,88 @@ describe('construirActualizacion', () => {
     expect(fields.estado_extraccion).toBe('error');
     expect(fields.error_extraccion).toBe('timeout');
     expect(marcadores.some((m) => m.startsWith('enrich_error:'))).toBe(true);
+  });
+});
+
+describe('enrichNews — recentFirst / windowDays (prioriza recientes sobre backlog viejo)', () => {
+  it('sin recentFirst/windowDays: NO se pasan a fetchNoticias (conserva el default oldest-first)', async () => {
+    const fetchNoticias = vi.fn(async () => [noticia()]);
+    const { d } = deps({ fetchNoticias: fetchNoticias as unknown as EnrichDeps['fetchNoticias'] });
+    await enrichNews(d, { dryRun: true });
+    expect(fetchNoticias).toHaveBeenCalledWith(
+      expect.objectContaining({ recentFirst: undefined, windowDays: undefined }),
+    );
+  });
+
+  it('--recent-first se reenvía a fetchNoticias tal cual', async () => {
+    const fetchNoticias = vi.fn(async () => [noticia()]);
+    const { d } = deps({ fetchNoticias: fetchNoticias as unknown as EnrichDeps['fetchNoticias'] });
+    await enrichNews(d, { dryRun: true, recentFirst: true });
+    expect(fetchNoticias).toHaveBeenCalledWith(expect.objectContaining({ recentFirst: true }));
+  });
+
+  it('--window-days=N se reenvía a fetchNoticias tal cual', async () => {
+    const fetchNoticias = vi.fn(async () => [noticia()]);
+    const { d } = deps({ fetchNoticias: fetchNoticias as unknown as EnrichDeps['fetchNoticias'] });
+    await enrichNews(d, { dryRun: true, windowDays: 7 });
+    expect(fetchNoticias).toHaveBeenCalledWith(expect.objectContaining({ windowDays: 7 }));
+  });
+
+  it('respeta --limit junto con recentFirst/windowDays (no cambia el tope)', async () => {
+    const fetchNoticias = vi.fn(async () => [noticia()]);
+    const { d } = deps({ fetchNoticias: fetchNoticias as unknown as EnrichDeps['fetchNoticias'] });
+    await enrichNews(d, { dryRun: true, recentFirst: true, windowDays: 7, limit: 100 });
+    expect(fetchNoticias).toHaveBeenCalledWith(expect.objectContaining({ limit: 100 }));
+  });
+
+  it('only-missing-clean-text sigue sin pisar texto_nota_limpia ya existente, incluso con recentFirst', async () => {
+    const fetchNoticias = vi.fn(async () => [
+      noticia({
+        titulo: 'Ya',
+        resumen: 'Ya',
+        texto_extraido: 'Ya',
+        autor: 'Ya',
+        seccion: 'Ya',
+        imagen_principal: 'Ya',
+        texto_nota_limpia: 'Ya limpio',
+        extracto_nota_1300: 'Ya extracto',
+        calidad_extraccion: 'alta',
+        texto_limpio_chars: 9,
+      }),
+    ]);
+    const updateNoticia = vi.fn(async () => {});
+    const { d } = deps({
+      fetchNoticias: fetchNoticias as unknown as EnrichDeps['fetchNoticias'],
+      updateNoticia: updateNoticia as unknown as EnrichDeps['updateNoticia'],
+    });
+    const res = await enrichNews(d, { dryRun: false, recentFirst: true, onlyMissingCleanText: true });
+    expect(res.sinCambios).toBe(1);
+    expect(updateNoticia).not.toHaveBeenCalled();
+  });
+});
+
+describe('enrich-news CLI parseArgs — --recent-first / --window-days', () => {
+  it('default: recentFirst y windowDays quedan undefined', () => {
+    const args = parseArgs([]);
+    expect(args.recentFirst).toBeUndefined();
+    expect(args.windowDays).toBeUndefined();
+  });
+
+  it('--recent-first activa recentFirst=true', () => {
+    expect(parseArgs(['--recent-first']).recentFirst).toBe(true);
+  });
+
+  it('--window-days=7 parsea a windowDays=7', () => {
+    expect(parseArgs(['--window-days=7']).windowDays).toBe(7);
+  });
+
+  it('--medio-ids=MED-0017 --window-days=7 --recent-first --only-missing-clean-text --limit=100 (comando real de la fase)', () => {
+    const args = parseArgs(['--medio-ids=MED-0017', '--window-days=7', '--recent-first', '--only-missing-clean-text', '--limit=100']);
+    expect(args.medioIds).toEqual(['MED-0017']);
+    expect(args.windowDays).toBe(7);
+    expect(args.recentFirst).toBe(true);
+    expect(args.onlyMissingCleanText).toBe(true);
+    expect(args.limit).toBe(100);
   });
 });
 

@@ -67,16 +67,34 @@ describe('windowFlag', () => {
   });
 });
 
-describe('workflow patron-no-pc-capture.yml (manual, sin cron)', () => {
+describe('workflow patron-no-pc-capture.yml (schedule cada 2h + workflow_dispatch manual)', () => {
   const wf = readFileSync(
     join(process.cwd(), '.github/workflows/patron-no-pc-capture.yml'),
     'utf-8',
   );
 
-  it('solo tiene workflow_dispatch, NO tiene schedule (cron)', () => {
+  it('tiene workflow_dispatch Y schedule cada 2h (activado 2026-07-17 por autorización explícita)', () => {
     expect(wf).toContain('workflow_dispatch');
-    expect(wf).not.toMatch(/^\s*schedule:/m);
-    expect(wf).not.toContain('cron:');
+    expect(wf).toMatch(/schedule:/);
+    expect(wf).toContain("cron: '0 */2 * * *'");
+  });
+
+  it('el guard de github.event_name fuerza real SOLO en schedule (dry_run=false, output_sheet=true, allow_final_sheet=true)', () => {
+    expect(wf).toContain(`github.event_name`);
+    expect(wf).toMatch(/"\$\{\{ github\.event_name \}\}"\s*=\s*"schedule"/);
+    const bloqueSchedule = wf.slice(wf.indexOf('if [ "${{ github.event_name }}" = "schedule" ]'), wf.indexOf('else'));
+    expect(bloqueSchedule).toContain('DRYRUN="false"');
+    expect(bloqueSchedule).toContain('OUTPUT="true"');
+    expect(bloqueSchedule).toContain('ALLOWFINAL="true"');
+  });
+
+  it('el workflow_dispatch manual sigue con sus defaults seguros (rama else, inputs.*)', () => {
+    const elseIdx = wf.indexOf('else\n');
+    const fiIdx = wf.indexOf('\n          fi\n', elseIdx);
+    const bloqueElse = wf.slice(elseIdx, fiIdx);
+    expect(bloqueElse).toContain("github.event.inputs.dry_run || 'true'");
+    expect(bloqueElse).toContain("github.event.inputs.output_sheet || 'false'");
+    expect(bloqueElse).toContain("github.event.inputs.allow_final_sheet || 'false'");
   });
 
   it('default dry_run=true', () => {

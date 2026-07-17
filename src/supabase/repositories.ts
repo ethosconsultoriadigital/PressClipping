@@ -646,6 +646,19 @@ export interface EnriquecerOpts {
    * tras un fix del extractor (force-refresh). Se combina con medioIds.
    */
   forceRefreshCleanText?: boolean;
+  /**
+   * Ordena por fecha_publicacion DESCENDENTE (recientes primero) en vez del
+   * default (created_at ascendente, oldest-first). Pensado para que un cap de
+   * --limit acotado priorice la ventana de reporting (7d) en vez de backlog
+   * viejo. Default: false (conserva el comportamiento histórico).
+   */
+  recentFirst?: boolean;
+  /**
+   * Filtra a noticias con fecha_publicacion dentro de los últimos N días.
+   * Se combina con recentFirst para acotar el re-enrich a la ventana que
+   * realmente reporta la auditoría de readiness. Default: sin filtro.
+   */
+  windowDays?: number;
 }
 
 /**
@@ -661,11 +674,18 @@ export async function getNoticiasParaEnriquecer(
       'noticia_id, url_original, titulo, resumen, texto_extraido, autor, seccion, imagen_principal,' +
       ' texto_nota_limpia, extracto_nota_1300, calidad_extraccion, texto_limpio_chars,' +
       ' texto_cuerpo_nota, extracto_cuerpo_1300, cuerpo_nota_chars, tipo_nota',
-    )
-    .order('created_at', { ascending: true });
+    );
+
+  query = opts.recentFirst
+    ? query.order('fecha_publicacion', { ascending: false })
+    : query.order('created_at', { ascending: true });
 
   if (opts.medioIds && opts.medioIds.length > 0) {
     query = query.in('medio_id', opts.medioIds);
+  }
+  if (opts.windowDays && opts.windowDays > 0) {
+    const desde = new Date(Date.now() - opts.windowDays * 24 * 60 * 60 * 1000).toISOString();
+    query = query.gte('fecha_publicacion', desde);
   }
   if (opts.onlyMissingTitle) query = query.is('titulo', null);
   if (opts.onlyMissingText) query = query.is('texto_extraido', null);

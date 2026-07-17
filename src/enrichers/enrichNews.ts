@@ -76,6 +76,10 @@ export interface EnrichOpts {
    * ni 01/02/04, ni exportado_sheet_raw. Úsese siempre acotado por --medio-ids.
    */
   forceRefreshCleanText?: boolean;
+  /** Ordena por fecha_publicacion descendente (recientes primero). Default: oldest-first. */
+  recentFirst?: boolean;
+  /** Acota a noticias con fecha_publicacion dentro de los últimos N días. */
+  windowDays?: number;
   dryRun: boolean;
   maxChars?: number;
 }
@@ -90,6 +94,8 @@ export interface EnrichDeps {
     onlyPendingMentions?: boolean;
     medioIds?: string[];
     forceRefreshCleanText?: boolean;
+    recentFirst?: boolean;
+    windowDays?: number;
   }) => Promise<NoticiaEnriquecibleRow[]>;
   extract: (url: string) => Promise<FetchExtractResult>;
   updateNoticia: (id: string, fields: NoticiaEnriquecidaUpdate) => Promise<void>;
@@ -240,6 +246,8 @@ export async function enrichNews(
     onlyPendingMentions: opts.onlyPendingMentions,
     medioIds: opts.medioIds,
     forceRefreshCleanText: opts.forceRefreshCleanText,
+    recentFirst: opts.recentFirst,
+    windowDays: opts.windowDays,
   });
 
   const detalle: EnrichItemResult[] = [];

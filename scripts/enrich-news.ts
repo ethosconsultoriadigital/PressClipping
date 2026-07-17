@@ -15,11 +15,13 @@
  *   npm run enrich-news -- --limit=50 --only-pending-mentions --only-missing-clean-text --dry-run
  *   npm run enrich-news -- --medio-ids=MED-0030,MED-0008 --limit=500 --only-pending-mentions --only-missing-clean-text  # aislado por medio
  *   npm run enrich-news -- --medio-ids=MED-0171 --limit=500 --force-refresh-clean-text   # re-extrae y sobrescribe texto tras fix del extractor
+ *   npm run enrich-news -- --medio-ids=MED-0017 --window-days=7 --recent-first --only-missing-clean-text --limit=100  # recientes primero (prioriza ventana 7d en vez de backlog viejo)
  *   npm run enrich-news -- --url=https://medio.mx/nota/x          # diagnóstico 1 URL
  *   npm run enrich-news -- --url=https://medio.mx/nota/x --dry-run
  *
  * En modo --url NUNCA escribe en Supabase: solo descarga y muestra lo extraído.
  */
+import { pathToFileURL } from 'node:url';
 import {
   getNoticiasParaEnriquecer,
   updateNoticiaEnriquecida,
@@ -76,6 +78,12 @@ function parseArgs(argv: string[]): EnrichArgs {
         break;
       case 'force-refresh-clean-text':
         out.forceRefreshCleanText = true;
+        break;
+      case 'recent-first':
+        out.recentFirst = true;
+        break;
+      case 'window-days':
+        out.windowDays = parseIntOrNull(value) ?? undefined;
         break;
       case 'limit':
         out.limit = parseIntOrNull(value) ?? undefined;
@@ -151,6 +159,8 @@ async function main() {
       onlyMissingBodyText: args.onlyMissingBodyText,
       onlyPendingMentions: args.onlyPendingMentions,
       forceRefreshCleanText: args.forceRefreshCleanText,
+      recentFirst: args.recentFirst ?? false,
+      windowDays: args.windowDays ?? null,
       medioIds: args.medioIds ?? null,
     },
     'Iniciando enrich-news',
@@ -210,7 +220,17 @@ async function main() {
   );
 }
 
-main().catch((err) => {
-  logger.error(err, 'Error fatal en enrich-news.');
-  process.exit(1);
-});
+function esEntrypointCli(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  return import.meta.url === pathToFileURL(entry).href;
+}
+
+if (esEntrypointCli()) {
+  main().catch((err) => {
+    logger.error(err, 'Error fatal en enrich-news.');
+    process.exit(1);
+  });
+}
+
+export { parseArgs };

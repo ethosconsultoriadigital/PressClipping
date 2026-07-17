@@ -1,17 +1,20 @@
 # ============================================================================
-# PATRÓN NO-PC PRODUCTION CAPTURE — MANUAL, NO CRON TODAVÍA
+# PATRÓN NO-PC PRODUCTION CAPTURE — SCHEDULE AUTOMÁTICO CADA 2H (2026-07-17)
 # ----------------------------------------------------------------------------
 # Ejecuta scripts/run-patron-no-pc-production-capture.ts: SOLO CLI-0002
 # (Patrón/Bacardí/Bebidas alcohólicas). Nunca toca Jumex. Nunca envía nada
 # (email/WhatsApp/Twilio/SMTP). Nunca usa classify-ia/generate-xml/export-results.
 #
-# SOLO `workflow_dispatch` — sin `schedule` (cron) todavía, a propósito: se
-# ejecuta manualmente varios días antes de considerar programarlo. Defaults
-# seguros: dry_run=true, output_sheet=false — hay que cambiar EXPLÍCITAMENTE
-# ambos inputs a false/true respectivamente para que escriba en Sheets, y
-# ADEMÁS pasar allow_final_sheet=true para que llegue a escribir en la hoja
-# externa real `NoticiasPatron` (si no, solo escribe las tabs internas propias
-# 11/12/13/15, nunca la hoja del cliente).
+# `schedule` activado por autorización explícita del usuario tras validación
+# manual (escritura real confirmada en NoticiasPatron, dedupe verificado,
+# 1067 tests verdes). El `schedule` SIEMPRE corre real (dry_run=false,
+# output_sheet=true, allow_final_sheet=true) — el pipeline interno sigue
+# siendo append+dedupe en cada capa, así que una corrida sin novedades escribe
+# 0 filas nuevas (no rompe nada). El `workflow_dispatch` manual CONSERVA sus
+# defaults seguros (dry_run=true, output_sheet=false, allow_final_sheet=false)
+# — solo el trigger `schedule` fuerza el modo real, vía guard por
+# `github.event_name` en el paso de ejecución (los `github.event.inputs.*` no
+# existen en eventos `schedule`).
 #
 # Secrets requeridos (Settings → Secrets and variables → Actions):
 #   SUPABASE_URL · SUPABASE_SERVICE_ROLE_KEY · GOOGLE_SERVICE_ACCOUNT_EMAIL ·
@@ -20,6 +23,8 @@
 name: patron-no-pc-capture
 
 on:
+  schedule:
+    - cron: '0 */2 * * *'   # cada 2 horas, en punto — captura real automática (ver guard event_name abajo)
   workflow_dispatch:
     inputs:
       window_hours:
@@ -76,11 +81,21 @@ jobs:
         env:
           NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
         run: |
-          WINDOW="${{ github.event.inputs.window_hours || '24' }}"
-          MAXROWS="${{ github.event.inputs.max_rows || '300' }}"
-          DRYRUN="${{ github.event.inputs.dry_run || 'true' }}"
-          OUTPUT="${{ github.event.inputs.output_sheet || 'false' }}"
-          ALLOWFINAL="${{ github.event.inputs.allow_final_sheet || 'false' }}"
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            # El schedule SIEMPRE corre real: dry_run/output_sheet/allow_final_sheet no
+            # existen como inputs en eventos `schedule` (solo aplican a workflow_dispatch).
+            WINDOW="24"
+            MAXROWS="300"
+            DRYRUN="false"
+            OUTPUT="true"
+            ALLOWFINAL="true"
+          else
+            WINDOW="${{ github.event.inputs.window_hours || '24' }}"
+            MAXROWS="${{ github.event.inputs.max_rows || '300' }}"
+            DRYRUN="${{ github.event.inputs.dry_run || 'true' }}"
+            OUTPUT="${{ github.event.inputs.output_sheet || 'false' }}"
+            ALLOWFINAL="${{ github.event.inputs.allow_final_sheet || 'false' }}"
+          fi
 
           ARGS="--window-hours=$WINDOW --max-rows=$MAXROWS --no-send --no-whatsapp --no-email"
           if [ "$DRYRUN" = "true" ]; then
