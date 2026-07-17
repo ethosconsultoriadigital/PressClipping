@@ -739,3 +739,19 @@ Captura Patrón encontró 1 candidato nuevo GO_MEDIA (escrito solo en tab 13 int
 confirmación para escribir en `NoticiasPatron` real). Cron de `patron-no-pc-capture.yml`
 sigue `workflow_dispatch`-only (no se activó `schedule`). Detalle completo en
 `docs/PATRON_IMPORTANT_MEDIA_READINESS.md` §7. Jumex sin cambios (NO-GO). 1067 tests verdes.
+
+## ETHOS NEWS LAKE — ALL MEDIA CLEAN CAPTURE FOUNDATION (2026-07-17)
+
+Confirmado que la arquitectura YA separa captura general (crawl/enrich,
+keyword-agnóstica) de detección por cliente (detect-mentions, escribe en
+`menciones` sin tocar `noticias`) — no se necesitó rediseño. Nuevo script
+`scripts/audit-all-media-clean-capture-readiness.ts` audita los 173 medios
+del catálogo (no solo los 35 de Patrón): 42 en cron, 121 catálogo-sin-cron,
+14 LISTO_LEYENDO. Re-enrich reciente aplicado a El Heraldo/La Razón/El
+Financiero (300 notas, 298 con texto limpio). Jumex: staging confirma NO-GO
+reforzado — de 16 menciones/30d, ~0-1 son cobertura de marca real (6 Museo
+Jumex correctamente excluidas, 7 son ruido sectorial genérico de "bebidas
+azucaradas" sin mención de marca, 2 son residuo pre-fix de Profeco/gasolina).
+Detalle completo en `docs/ETHOS_NEWS_LAKE_MEDIA_READINESS.md` y
+`docs/JUMEX_STAGING_READINESS.md`. Patrón sin cambios de comportamiento
+(cron cada 2h sigue activo, 0 filas nuevas en esta corrida — steady state).

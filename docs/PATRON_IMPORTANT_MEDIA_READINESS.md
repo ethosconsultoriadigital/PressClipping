@@ -235,3 +235,10 @@ Por autorización explícita del usuario ("avanzar con Patrón"):
   Heraldo/La Razón (`NECESITA_REENRICH`/`EN_CRON_TEXTO_MALO`, aún sin tratar con el fix
   reciente — candidatos naturales para el próximo lote de re-enrich con `--recent-first`).
 - Jumex: sin cambios, NO-GO confirmado, sin export final, sin tocar hoja externa.
+
+## 9. ETHOS NEWS LAKE follow-up (2026-07-17, continuación)
+
+El Financiero, El Heraldo de México y La Razón de México (los 3 gaps restantes
+listados arriba) recibieron el mismo re-enrich reciente (100 notas c/u,
+298/300 con texto limpio). Ver matriz completa de los 173 medios del catálogo
+(no solo los 35 curados aquí) en `docs/ETHOS_NEWS_LAKE_MEDIA_READINESS.md`.
