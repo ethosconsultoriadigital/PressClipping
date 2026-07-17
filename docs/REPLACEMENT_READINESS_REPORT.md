@@ -1156,3 +1156,14 @@ Hallazgo estructural: el cron base no enriquece → backlog de cuerpo vacío per
 captura de Patrón por título). Reforma/Milenio/Mural = paywall/política, no candidatos. Matriz en
 `docs/PATRON_IMPORTANT_MEDIA_READINESS.md`. Cron NO activado (requiere autorización explícita para
 automatización recurrente a hoja externa). 1057 tests, todos verdes.
+
+## PATRON P1 MEDIA GAP CLOSURE (2026-07-17)
+
+Milenio agregado al tier nacional B (revierte exclusión "ruido/volumen", autorización
+explícita del usuario); El Informador/El Economista re-enriquecidos (100 notas c/u — backlog
+real >700 notas c/u por medio, la métrica 7d no se mueve con ese cap, confirma hallazgo
+estructural); AM León (MED-0172) y CRT/Consejo Regulador del Tequila (MED-0173) catalogados
+y agregados al tier daily-validated. 1 candidato nuevo GO_MEDIA capturado en tab 13 interna,
+pendiente confirmación para escritura real en `NoticiasPatron`. Cron de captura Patrón sigue
+`workflow_dispatch`-only. Detalle en `docs/PATRON_IMPORTANT_MEDIA_READINESS.md` §7. 1067
+tests, todos verdes.

@@ -728,3 +728,14 @@ dirigido El Economista + El Informador, evaluar catalogar AM León. Requiere aut
 
 **Prohibido sin autorización:** activar cron. Agregar Reforma/Milenio/Mural al cron (paywall/
 política). Tocar Jumex final. Ejecutar el lote de medios sin aprobación.
+
+## PATRON P1 MEDIA GAP CLOSURE (2026-07-17)
+
+Lote ejecutado por autorización explícita: Milenio agregado a `SHADOW_MEDIOS_NACIONALES_B`
+(revierte exclusión previa "ruido/volumen"), El Informador + El Economista re-enriquecidos
+(100 notas c/u, backlog real >700 notas c/u impide que la métrica 7d se mueva con ese cap),
+AM León (MED-0172) y CRT (MED-0173) catalogados y agregados a `SHADOW_MEDIOS_DAILY_VALIDATED`.
+Captura Patrón encontró 1 candidato nuevo GO_MEDIA (escrito solo en tab 13 interna, pendiente
+confirmación para escribir en `NoticiasPatron` real). Cron de `patron-no-pc-capture.yml`
+sigue `workflow_dispatch`-only (no se activó `schedule`). Detalle completo en
+`docs/PATRON_IMPORTANT_MEDIA_READINESS.md` §7. Jumex sin cambios (NO-GO). 1067 tests verdes.

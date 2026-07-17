@@ -1,6 +1,8 @@
 /**
  * Tests del TIER NACIONAL B sombra:
- *   - config contiene solo Uno TV y Publimetro (no Milenio/Aristegui).
+ *   - config contiene Uno TV, Publimetro y Milenio (alta 2026-07-17, lote PATRON
+ *     P1 MEDIA GAP CLOSURE — revierte la exclusión previa "ruido/volumen"). Aristegui
+ *     sigue sin entrar.
  *   - prefiltro bloquea deportes/espectáculos pero NO señales de alto valor.
  *   - flags prohibidos siguen bloqueados por la guarda sombra.
  *   - el workflow nacional existe, comparte concurrency y no usa comandos prohibidos.
@@ -16,14 +18,13 @@ import { decidirPrefiltro } from '../src/shadow/nationalPrefilter.js';
 import { verificarFlagsSombra } from '../src/utils/shadowGuard.js';
 
 describe('config Tier Nacional B', () => {
-  it('contiene exactamente Uno TV (MED-0025) y Publimetro (MED-0053)', () => {
+  it('contiene exactamente Uno TV (MED-0025), Publimetro (MED-0053) y Milenio (MED-0030)', () => {
     const ids = SHADOW_MEDIOS_NACIONALES_B.map((m) => m.medio_id).sort();
-    expect(ids).toEqual(['MED-0025', 'MED-0053']);
+    expect(ids).toEqual(['MED-0025', 'MED-0030', 'MED-0053']);
   });
 
-  it('NO incluye Milenio (MED-0030) ni Aristegui (MED-0008)', () => {
+  it('NO incluye Aristegui (MED-0008)', () => {
     const ids = SHADOW_MEDIOS_NACIONALES_B.map((m) => m.medio_id);
-    expect(ids).not.toContain('MED-0030');
     expect(ids).not.toContain('MED-0008');
   });
 
@@ -38,8 +39,16 @@ describe('config Tier Nacional B', () => {
     expect(pub.frecuencia_shadow).toBe('6h');
   });
 
+  it('Milenio con prefiltro (max 30, 6h) — alta 2026-07-17, revierte exclusión ruido/volumen', () => {
+    const mil = SHADOW_MEDIOS_NACIONALES_B.find((m) => m.medio_id === 'MED-0030')!;
+    expect(mil.prefiltro_titulo).toBe(true);
+    expect(mil.max_notas_shadow).toBe(30);
+    expect(mil.frecuencia_shadow).toBe('6h');
+    expect(mil.activo_shadow).toBe(true);
+  });
+
   it('mediosNacionalesActivos(B) devuelve solo activos', () => {
-    expect(mediosNacionalesActivos('B').map((m) => m.medio_id).sort()).toEqual(['MED-0025', 'MED-0053']);
+    expect(mediosNacionalesActivos('B').map((m) => m.medio_id).sort()).toEqual(['MED-0025', 'MED-0030', 'MED-0053']);
   });
 });
 

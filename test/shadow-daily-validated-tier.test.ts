@@ -20,9 +20,9 @@ import {
 import { evaluarGateDaily } from '../src/matching/shadowDailyGate.js';
 
 describe('config Tier Daily Validated — dedupe', () => {
-  it('la lista contiene Zeta, Revista Espejo, marcomares, Paralelo 19, lado.mx (MED-0005), Telediario Monterrey (MED-0049), Excelsior (MED-0028), Frontera (MED-0084) y Noroeste (MED-0055)', () => {
+  it('la lista contiene Zeta, Revista Espejo, marcomares, Paralelo 19, lado.mx (MED-0005), Telediario Monterrey (MED-0049), Excelsior (MED-0028), Frontera (MED-0084), Noroeste (MED-0055), AM León (MED-0172) y CRT (MED-0173)', () => {
     const ids = SHADOW_MEDIOS_DAILY_VALIDATED.map((m) => m.medio_id).sort();
-    expect(ids).toEqual(['MED-0005', 'MED-0006', 'MED-0012', 'MED-0028', 'MED-0049', 'MED-0055', 'MED-0066', 'MED-0083', 'MED-0084']);
+    expect(ids).toEqual(['MED-0005', 'MED-0006', 'MED-0012', 'MED-0028', 'MED-0049', 'MED-0055', 'MED-0066', 'MED-0083', 'MED-0084', 'MED-0172', 'MED-0173']);
   });
 
   it('NO incluye boilerplate MED-0118 (El Respetable)', () => {
@@ -44,8 +44,8 @@ describe('config Tier Daily Validated — dedupe', () => {
     }
   });
 
-  it('net-new actual = Zeta + Revista Espejo + marcomares + Paralelo 19 + lado.mx + Telediario Monterrey + Excelsior + Frontera + Noroeste (todos net-new)', () => {
-    expect(mediosDailyNetNew().map((m) => m.medio_id).sort()).toEqual(['MED-0005', 'MED-0006', 'MED-0012', 'MED-0028', 'MED-0049', 'MED-0055', 'MED-0066', 'MED-0083', 'MED-0084']);
+  it('net-new actual = Zeta + Revista Espejo + marcomares + Paralelo 19 + lado.mx + Telediario Monterrey + Excelsior + Frontera + Noroeste + AM León + CRT (todos net-new)', () => {
+    expect(mediosDailyNetNew().map((m) => m.medio_id).sort()).toEqual(['MED-0005', 'MED-0006', 'MED-0012', 'MED-0028', 'MED-0049', 'MED-0055', 'MED-0066', 'MED-0083', 'MED-0084', 'MED-0172', 'MED-0173']);
   });
 
   it('respeta max_notas por medio (<=30) y fuente auto', () => {

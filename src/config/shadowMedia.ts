@@ -41,9 +41,20 @@ export const SHADOW_MEDIOS: readonly string[] = [
 // ----------------------------------------------------------------------------
 // Bloque SEPARADO de la lista base (SHADOW_MEDIOS). NO modifica el cron base de
 // 25 medios. Solo entran medios nacionales con señal real validada (Reforma
-// laboral) y precisión alta. Milenio y Aristegui NO entran todavía.
+// laboral) y precisión alta. Aristegui NO entra todavía.
 //   - Uno TV  (MED-0025): ~4.5 menciones útiles/100, sin prefiltro.
 //   - Publimetro (MED-0053): ~3.0/100 pero 46% deportes/espectáculos → prefiltro título.
+//   - Milenio (MED-0030): alta 2026-07-17 (lote PATRON P1 MEDIA GAP CLOSURE),
+//     REVIERTE la exclusión previa "NO_TOCAR (ruido/volumen)" de
+//     `docs/MEDIA_PARITY_MATRIX.md`/`docs/PATRON_IMPORTANT_MEDIA_READINESS.md` §4,
+//     por autorización explícita del usuario informada por auditoría editorial
+//     externa (P1 crítico para Patrón, CATALOGO_NO_CRON). Viabilidad técnica
+//     reconfirmada (`audit-media-sources`: READY_SITEMAP_INDEX, conf=1.0, sin
+//     proxy/JS). El hallazgo previo de ruido (~230 notas/lote, 7 menciones,
+//     "crimen/FIFA") es de VOLUMEN de `01_Noticias_Raw`, no de falsos positivos
+//     de detección (las menciones siguen gateadas por keyword real); se acota
+//     con prefiltro_titulo=true (bloquea mundial/fútbol/deportes existentes en
+//     `nationalPrefilter.ts`) y max_notas_shadow=30 (por debajo de Publimetro).
 // ============================================================================
 
 export type FrecuenciaShadow = '2h' | '6h' | 'diario';
@@ -73,6 +84,14 @@ export const SHADOW_MEDIOS_NACIONALES_B: readonly ShadowMedioNacional[] = [
     nombre: 'Publimetro',
     frecuencia_shadow: '6h',
     max_notas_shadow: 40,
+    prefiltro_titulo: true,
+    activo_shadow: true,
+  },
+  {
+    medio_id: 'MED-0030',
+    nombre: 'Milenio',
+    frecuencia_shadow: '6h',
+    max_notas_shadow: 30,
     prefiltro_titulo: true,
     activo_shadow: true,
   },
@@ -286,6 +305,30 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED: readonly ShadowMedioDaily[] = [
     nombre: 'Noroeste',
     fuente: 'auto',
     max_notas_shadow: 30,
+    activo_shadow: true,
+  },
+  {
+    // Lote PATRON P1 MEDIA GAP CLOSURE (2026-07-17): NO_CATALOGADO → catalogado vía
+    // `scripts/catalog-patron-p1-gap-media.ts` (MED-0172). P2 Guanajuato (zona de
+    // crisis tequilera), news-sitemap.xml (Yoast/Jetpack) verificado en vivo con
+    // artículos recientes. Sin proxy/JS. Net-new (no cubierto por ningún otro cron).
+    medio_id: 'MED-0172',
+    nombre: 'AM León',
+    fuente: 'auto',
+    max_notas_shadow: 30,
+    activo_shadow: true,
+  },
+  {
+    // Lote PATRON P1 MEDIA GAP CLOSURE (2026-07-17): NO_CATALOGADO → catalogado vía
+    // `scripts/catalog-patron-p1-gap-media.ts` (MED-0173). Fuente primaria sectorial
+    // (Consejo Regulador del Tequila, boletines/comunicados oficiales) — NO es
+    // "CRT tech" (ver guard editorial en `consolidation.ts`). Sitemap de posts
+    // verificado en vivo (wp-sitemap-posts-post-1.xml). Volumen bajo (institucional):
+    // max_notas_shadow reducido. Sin proxy/JS. Net-new.
+    medio_id: 'MED-0173',
+    nombre: 'Consejo Regulador del Tequila (CRT)',
+    fuente: 'auto',
+    max_notas_shadow: 20,
     activo_shadow: true,
   },
 ] as const;

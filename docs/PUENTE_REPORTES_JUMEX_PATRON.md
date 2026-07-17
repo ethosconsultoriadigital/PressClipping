@@ -293,3 +293,14 @@ defaults seguros (dry_run=true, output_sheet=false, allow_final_sheet=false).
 
 **Siguiente paso:** correr el ciclo manualmente (dry-run, luego real) 1-2 veces al día por
 24-48h antes de considerar programarlo con cron.
+
+## PATRON P1 MEDIA GAP CLOSURE (2026-07-17)
+
+Cobertura reforzada antes del siguiente ciclo: Milenio (tier nacional B, revierte exclusión
+previa), El Informador/El Economista re-enriquecidos (backlog real >700 notas c/u por medio
+limita el efecto visible del cap de 100), AM León (MED-0172) y CRT (MED-0173) catalogados y
+agregados al tier daily-validated. Captura Patrón post-cambios: 1 candidato nuevo GO_MEDIA
+sectorial, escrito solo en tab 13 interna — pendiente confirmación explícita para escribir
+en `NoticiasPatron` real (el comando de captura no incluyó `--allow-final-sheet=true`). Cron
+de `patron-no-pc-capture.yml` sigue `workflow_dispatch`-only. Detalle en
+`docs/PATRON_IMPORTANT_MEDIA_READINESS.md` §7.

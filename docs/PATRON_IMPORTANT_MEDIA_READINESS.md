@@ -126,3 +126,48 @@ Máximo 5, evidence-based (excluyendo paywall/política):
 
 No se ejecuta ninguna hasta autorización. Reforma/Milenio/Mural quedan **fuera** por
 paywall/política (no son candidatos técnicos válidos).
+
+## 7. PATRON P1 MEDIA GAP CLOSURE — ejecutado (2026-07-17)
+
+Por autorización explícita del usuario (informada por auditoría editorial externa), se
+ejecutó el lote de 5 acciones #3/#4/#5 de arriba **más Milenio** (que la auditoría externa
+pidió reconsiderar pese a la exclusión previa):
+
+- **Milenio (MED-0030):** agregado a `SHADOW_MEDIOS_NACIONALES_B` (prefiltro_titulo=true,
+  max_notas_shadow=30, 6h) — **REVIERTE** la exclusión "NO_TOCAR (ruido/volumen)" de §4/
+  `MEDIA_PARITY_MATRIX.md` por decisión explícita del usuario. Viabilidad técnica
+  reconfirmada (`audit-media-sources`: READY_SITEMAP_INDEX, conf=1.0, sin proxy/JS). Nota
+  importante: el hallazgo previo de "ruido" era de **volumen** en `01_Noticias_Raw`
+  (~230 notas/lote, mayoría crimen/FIFA), no de falsos positivos de detección (las
+  menciones siguen gateadas por keyword real). El tier nacional B ya tiene `schedule`
+  activo cada 6h — Milenio se crawleará automáticamente en la próxima corrida programada,
+  sin paso manual adicional. Estado inmediatamente después del cambio: `EN_CRON_SIN_NOTICIAS`
+  (aún no corre el cron).
+- **El Informador (MED-0017):** re-enrich controlado (100 notas, only-missing-clean-text,
+  sin force-refresh). 88 actualizadas, 87 con texto limpio, 1 fallida. **Backlog real: 735
+  notas pendientes desde 2026-06-26** — el batch de 100 despejó backlog viejo (oldest-first),
+  no las de la ventana 7d. `texto_ok_pct` de 7d se mantiene en 0%. Reconfirma el hallazgo
+  estructural §5: el cap de 100 no alcanza a mover la métrica visible dado el tamaño real
+  del backlog.
+- **El Economista (MED-0001):** mismo patrón. 99/100 actualizadas, 99 con texto limpio, 1
+  fallida. Backlog real: 737 notas pendientes desde 2026-06-29. `texto_ok_pct` 7d también
+  se mantiene en 0% por la misma razón.
+- **AM León (nuevo MED-0172):** catalogado vía `scripts/catalog-patron-p1-gap-media.ts`.
+  `news-sitemap.xml` (Yoast/Jetpack, formato Google News) verificado en vivo con artículos
+  recientes (2026-07-16/17). Sin proxy/JS. Agregado a `SHADOW_MEDIOS_DAILY_VALIDATED`
+  (max_notas_shadow=30, fuente=auto). Ese tier también tiene `schedule` diario activo
+  (12:45 UTC) — se crawleará en la próxima corrida (hasta 24h). 0 noticias aún.
+- **CRT / Consejo Regulador del Tequila (nuevo MED-0173):** catalogado como fuente primaria
+  **sectorial** (boletines/comunicados oficiales del organismo — denominación de origen,
+  certificaciones — **NO** "CRT tech"). Sitemap de posts (`wp-sitemap-posts-post-1.xml`,
+  no el índice, para evitar páginas/taxonomías/usuarios) verificado en vivo. Agregado a
+  `SHADOW_MEDIOS_DAILY_VALIDATED` (max_notas_shadow=20, volumen institucional bajo). 0
+  noticias aún.
+- **Captura Patrón post-cambios:** dry-run limpio; la corrida real encontró 1 candidato
+  nuevo `GO_MEDIA` sectorial (Periódico Correo, "Hacienda de Jaral de Berrios..."),
+  escrito en la tab interna `13_Patron_Final_Preview`. **NO escrito en `NoticiasPatron`
+  real** — el comando de captura no incluyó `--allow-final-sheet=true`; pendiente
+  confirmación explícita del usuario para completar esa escritura externa.
+- **Cron de `patron-no-pc-capture.yml`:** sigue en `workflow_dispatch` únicamente. NO se
+  activó su `schedule` en esta fase (requiere confirmación explícita separada).
+- Jumex: sin cambios, NO-GO, sin conexión a hoja final. 1067 tests, todos verdes.

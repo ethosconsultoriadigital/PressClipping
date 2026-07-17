@@ -43,6 +43,7 @@
     "simulate-patron-brand-mentions": "tsx scripts/simulate-patron-brand-mentions.ts",
     "tune-patron-brand-keywords": "tsx scripts/tune-patron-brand-keywords.ts",
     "audit-patron-important-media-readiness": "tsx scripts/audit-patron-important-media-readiness.ts",
+    "catalog-patron-p1-gap-media": "tsx scripts/catalog-patron-p1-gap-media.ts",
     "simulate-keywords-shadow": "tsx scripts/simulate-keywords-shadow.ts",
     "export-operational-news-no-pc": "tsx scripts/export-operational-news-no-pc.ts",
     "export-operational-news-consolidated-no-pc": "tsx scripts/export-operational-news-consolidated-no-pc.ts",
