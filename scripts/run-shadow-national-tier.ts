@@ -191,9 +191,12 @@ async function main(): Promise<void> {
     // 2. Prefiltro de título (no borra; marca procesadas las irrelevantes frescas).
     await aplicarPrefiltro(medios, desde, false);
 
-    // 3. Enrich AISLADO por medio (no toca backlog global).
+    // 3. Enrich AISLADO por medio (no toca backlog global). --recent-first
+    // prioriza notas recientes: con Milenio/Aristegui/El Universal ya en este
+    // tier (alto volumen), oldest-first dejaría sin cupo a las notas de la
+    // ventana de reporte (ver fix equivalente en run-live-comparison.ts).
     await runStep('3. enrich aislado', 'scripts/enrich-news.ts',
-      [`--medio-ids=${medioIds}`, `--limit=${args.enrichLimit}`, '--only-pending-mentions', '--only-missing-clean-text']);
+      [`--medio-ids=${medioIds}`, `--limit=${args.enrichLimit}`, '--recent-first', '--only-pending-mentions', '--only-missing-clean-text']);
 
     // 4. Detect dry-run AISLADO (gate de seguridad).
     const dry = await runStep('4. detect dry-run aislado', 'scripts/detect-mentions.ts',

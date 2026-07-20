@@ -248,9 +248,19 @@ async function main(): Promise<void> {
     resumen['crawl_procesados'] = findNum(crawl.jsonLines, 'procesados');
     resumen['promovidas_diagnostico'] = findLastNum(crawl.jsonLines, 'promovidas_diagnostico') ?? 0;
 
-    // 3. Enrich pendientes
+    // 3. Enrich pendientes — ACOTADO a los medios de este ciclo (no la cola
+    // global) y `--recent-first` (prioriza notas recientes en vez de
+    // oldest-first). Antes de este fix, `--limit=250` sin acotar por medio y
+    // sin recent-first se repartía sobre la cola GLOBAL más antigua entre
+    // TODOS los medios alguna vez crawleados, así que un medio de alto
+    // volumen (El Heraldo, El Informador, El Economista, La Razón — todos en
+    // SHADOW_MEDIOS) nunca alcanzaba a limpiarse: su backlog crecía más
+    // rápido de lo que un cupo compartido de 250 podía cubrir. Confirmado en
+    // vivo (fase ETHOS 200 MEDIA NEWS LAKE, 2026-07-20): 3 rondas de re-enrich
+    // manual degradaban de nuevo en días — la causa real no era "falta de
+    // encadenamiento" (ya estaba encadenado) sino este reparto injusto.
     const enrich = await runStep('3. enrich-news', 'scripts/enrich-news.ts',
-      [`--limit=${args.enrichLimit}`, '--only-pending-mentions', '--only-missing-clean-text']);
+      [`--limit=${args.enrichLimit}`, `--medio-ids=${args.crawlMedioIds}`, '--recent-first', '--only-pending-mentions', '--only-missing-clean-text']);
     resumen['enrich'] = enrich.code === 0;
     resumen['enrich_actualizadas'] = findNum(enrich.jsonLines, 'actualizadas');
 

@@ -364,6 +364,44 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED: readonly ShadowMedioDaily[] = [
     max_notas_shadow: 20,
     activo_shadow: true,
   },
+  // ── Lote ETHOS 200 MEDIA NEWS LAKE (2026-07-20) ────────────────────────────
+  // 10 de 12 medios catalogados en `scripts/catalog-national-expansion-lote1.ts`
+  // entran a cron inmediato (máx. 10 por fase, per la regla de esta fase).
+  // Merca2.0 (MED-0184) y El CEO (MED-0185) quedan catalogados pero SIN cron
+  // (prioridad baja para Jumex/Patrón) — candidatos a un lote futuro.
+  // Todos verificados en vivo (sitemap real, artículos recientes) antes de
+  // catalogar. Validación de FP pendiente del primer ciclo real (gate detect
+  // dry-run de este mismo tier), igual que todos los altas anteriores.
+  {
+    medio_id: 'MED-0175', nombre: 'SDP Noticias', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true,
+  },
+  {
+    medio_id: 'MED-0176', nombre: 'Bloomberg Línea México', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true,
+  },
+  {
+    medio_id: 'MED-0177', nombre: 'DPL News', fuente: 'auto', max_notas_shadow: 20, activo_shadow: true,
+  },
+  {
+    medio_id: 'MED-0178', nombre: 'N+', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true,
+  },
+  {
+    medio_id: 'MED-0179', nombre: 'ADN40', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true,
+  },
+  {
+    medio_id: 'MED-0180', nombre: 'TV Azteca Noticias', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true,
+  },
+  {
+    medio_id: 'MED-0181', nombre: 'MVS Noticias', fuente: 'auto', max_notas_shadow: 20, activo_shadow: true,
+  },
+  {
+    medio_id: 'MED-0182', nombre: 'Diario de Yucatán', fuente: 'auto', max_notas_shadow: 20, activo_shadow: true,
+  },
+  {
+    medio_id: 'MED-0183', nombre: 'Contralínea', fuente: 'auto', max_notas_shadow: 20, activo_shadow: true,
+  },
+  {
+    medio_id: 'MED-0174', nombre: 'Alto Nivel', fuente: 'auto', max_notas_shadow: 20, activo_shadow: true,
+  },
 ] as const;
 
 /**

@@ -770,3 +770,33 @@ editorial Jumex de 4 categorías implementado y probado
 (<3 MARCA_DIRECTA = NO-GO automático). Se encontró y corrigió un SEGUNDO bug
 de paginación (fetch global capado en 50,000 filas). Detalle completo en
 `docs/NATIONAL_MEDIA_COVERAGE_MASTER.md`. 1111 tests verdes.
+
+## ETHOS 200 MEDIA NEWS LAKE + AUTO ENRICH CHAIN (2026-07-20)
+
+**Corrección importante:** la afirmación repetida en 3 fases anteriores ("el
+cron base no encadena enrich") era imprecisa — SÍ lo encadenaba
+(`run-live-comparison.ts` paso 3), pero con `--limit=250` **global** (sin
+acotar por medio) y **oldest-first**, compartido entre los ~26 medios de
+`SHADOW_MEDIOS`. Los medios de alto volumen (El Heraldo, El Informador, El
+Economista, La Razón, El Financiero) nunca alcanzaban su cupo porque su
+backlog crecía más rápido que el cupo compartido. **Corregido:** el enrich
+encadenado ahora se acota a `--medio-ids=${crawlMedioIds}` (los medios de
+ESE ciclo) y usa `--recent-first`, en el scheduler base y los 3 tiers
+aislados (nacional B, daily-validated, crisis). Prueba real controlada:
+los 5 medios problemáticos pasaron de 27-34% a **49-54% texto limpio en un
+solo ciclo** de 500 notas.
+
+**Bug adicional encontrado y corregido durante la prueba:** un timeout de
+escritura puntual en `enrich-news.ts` (una sola nota) tiraba todo el proceso
+de enrich, perdiendo el resto del cupo del ciclo. Ahora aislado por nota
+(try/catch, cuenta como fallida, sigue con la siguiente) — confirmado con
+prueba real y test de regresión.
+
+**Expansión de catálogo:** 173 → **185 medios** (+12: SDP Noticias, Bloomberg
+Línea México, DPL News, N+, ADN40, TV Azteca Noticias, MVS Noticias, Diario
+de Yucatán, Contralínea, Alto Nivel, Merca2.0, El CEO — todos verificados en
+vivo con sitemap real antes de catalogar). En cron: 44 → **54** (+10, Merca2.0
+y El CEO catalogados sin cron por prioridad baja). Matriz completa de acceso
+(A/B/C/D/E) en `docs/NATIONAL_MEDIA_ACCESS_MATRIX.md`. Jumex sin cambios
+(NO-GO, 1 MARCA_DIRECTA en 30d). Patrón estable (cron cada 2h, `approved_rows`
+creciendo orgánicamente 9→12, 0 Jumex, 0 filas nuevas en esta corrida).

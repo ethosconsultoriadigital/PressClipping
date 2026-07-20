@@ -20,9 +20,23 @@ import {
 import { evaluarGateDaily } from '../src/matching/shadowDailyGate.js';
 
 describe('config Tier Daily Validated — dedupe', () => {
-  it('la lista contiene Zeta, Revista Espejo, marcomares, Paralelo 19, lado.mx (MED-0005), Telediario Monterrey (MED-0049), Excelsior (MED-0028), Frontera (MED-0084), Noroeste (MED-0055), AM León (MED-0172) y CRT (MED-0173)', () => {
+  const IDS_ESPERADOS = [
+    'MED-0005', 'MED-0006', 'MED-0012', 'MED-0028', 'MED-0049', 'MED-0055', 'MED-0066', 'MED-0083', 'MED-0084',
+    'MED-0172', 'MED-0173',
+    // Lote ETHOS 200 MEDIA NEWS LAKE (2026-07-20): 10 de 12 nuevos catalogados
+    // entran a cron (Merca2.0 MED-0184 y El CEO MED-0185 quedan sin cron).
+    'MED-0174', 'MED-0175', 'MED-0176', 'MED-0177', 'MED-0178', 'MED-0179', 'MED-0180', 'MED-0181', 'MED-0182', 'MED-0183',
+  ].sort();
+
+  it('la lista contiene Zeta, Revista Espejo, marcomares, Paralelo 19, lado.mx (MED-0005), Telediario Monterrey (MED-0049), Excelsior (MED-0028), Frontera (MED-0084), Noroeste (MED-0055), AM León (MED-0172), CRT (MED-0173) y el lote nacional de 10 (MED-0174..0183 excepto Merca2.0/El CEO)', () => {
     const ids = SHADOW_MEDIOS_DAILY_VALIDATED.map((m) => m.medio_id).sort();
-    expect(ids).toEqual(['MED-0005', 'MED-0006', 'MED-0012', 'MED-0028', 'MED-0049', 'MED-0055', 'MED-0066', 'MED-0083', 'MED-0084', 'MED-0172', 'MED-0173']);
+    expect(ids).toEqual(IDS_ESPERADOS);
+  });
+
+  it('NO incluye Merca2.0 (MED-0184) ni El CEO (MED-0185) — catalogados, sin cron por prioridad baja', () => {
+    const ids = SHADOW_MEDIOS_DAILY_VALIDATED.map((m) => m.medio_id);
+    expect(ids).not.toContain('MED-0184');
+    expect(ids).not.toContain('MED-0185');
   });
 
   it('NO incluye boilerplate MED-0118 (El Respetable)', () => {
@@ -44,8 +58,8 @@ describe('config Tier Daily Validated — dedupe', () => {
     }
   });
 
-  it('net-new actual = Zeta + Revista Espejo + marcomares + Paralelo 19 + lado.mx + Telediario Monterrey + Excelsior + Frontera + Noroeste + AM León + CRT (todos net-new)', () => {
-    expect(mediosDailyNetNew().map((m) => m.medio_id).sort()).toEqual(['MED-0005', 'MED-0006', 'MED-0012', 'MED-0028', 'MED-0049', 'MED-0055', 'MED-0066', 'MED-0083', 'MED-0084', 'MED-0172', 'MED-0173']);
+  it('net-new actual = todos los medios activos del tier (ninguno colisiona con base/nacional B/crisis)', () => {
+    expect(mediosDailyNetNew().map((m) => m.medio_id).sort()).toEqual(IDS_ESPERADOS);
   });
 
   it('respeta max_notas por medio (<=30) y fuente auto', () => {

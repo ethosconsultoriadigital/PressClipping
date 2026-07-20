@@ -475,4 +475,26 @@ describe('enrichNews', () => {
     expect(res.fallidas).toBe(1);
     expect(extract).not.toHaveBeenCalled();
   });
+
+  it('si updateNoticia falla (p.ej. timeout) en una nota, NO tira el batch — sigue con las siguientes (caso real 2026-07-20: "statement timeout" mataba el proceso completo)', async () => {
+    const fetchNoticias = vi.fn(async () => [
+      noticia({ noticia_id: 'n1', url_original: 'https://medio.mx/nota/1' }),
+      noticia({ noticia_id: 'n2', url_original: 'https://medio.mx/nota/2' }),
+      noticia({ noticia_id: 'n3', url_original: 'https://medio.mx/nota/3' }),
+    ]);
+    const updateNoticia = vi.fn(async (id: string) => {
+      if (id === 'n2') throw new Error('canceling statement due to statement timeout');
+    });
+    const { d } = deps({
+      fetchNoticias: fetchNoticias as unknown as EnrichDeps['fetchNoticias'],
+      updateNoticia: updateNoticia as unknown as EnrichDeps['updateNoticia'],
+    });
+    const res = await enrichNews(d, { dryRun: false });
+    // n1 y n3 se actualizan correctamente pese al fallo puntual de n2.
+    expect(updateNoticia).toHaveBeenCalledTimes(3);
+    expect(res.actualizadas).toBe(2);
+    expect(res.fallidas).toBe(1);
+    const fallaN2 = res.detalle.find((d) => d.noticia_id === 'n2');
+    expect(fallaN2?.error).toMatch(/statement timeout/);
+  });
 });

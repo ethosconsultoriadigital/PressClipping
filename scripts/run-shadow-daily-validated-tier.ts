@@ -194,9 +194,10 @@ async function main(): Promise<void> {
     const crawl = await runStep('1. crawl dirigido', 'scripts/crawl.ts', crawlArgs);
     if (crawl.code !== 0) logger.warn({ code: crawl.code }, 'Crawl daily terminó con código no-cero (continuamos).');
 
-    // 2. Enrich AISLADO por medio (no toca backlog global).
+    // 2. Enrich AISLADO por medio (no toca backlog global). --recent-first
+    // prioriza notas recientes (ver fix equivalente en run-live-comparison.ts).
     await runStep('2. enrich aislado', 'scripts/enrich-news.ts',
-      [`--medio-ids=${medioIds}`, `--limit=${args.enrichLimit}`, '--only-pending-mentions', '--only-missing-clean-text']);
+      [`--medio-ids=${medioIds}`, `--limit=${args.enrichLimit}`, '--recent-first', '--only-pending-mentions', '--only-missing-clean-text']);
 
     // 3. Detect dry-run AISLADO (gate de seguridad).
     const dry = await runStep('3. detect dry-run aislado', 'scripts/detect-mentions.ts',

@@ -296,7 +296,17 @@ export async function enrichNews(
     }
 
     if (!opts.dryRun) {
-      await deps.updateNoticia(noticia.noticia_id, fields);
+      try {
+        await deps.updateNoticia(noticia.noticia_id, fields);
+      } catch (err) {
+        // Un timeout/error puntual de escritura NO debe tirar todo el batch —
+        // se cuenta como fallida y se sigue con la siguiente nota (confirmado
+        // en vivo 2026-07-20: "statement timeout" en una sola nota mataba el
+        // proceso completo, perdiendo el resto del cupo de enrich del ciclo).
+        if (!item.error) item.error = err instanceof Error ? err.message : String(err);
+        if (extracto.ok) fallidas += 1;
+        continue;
+      }
     }
     if (campos.length > 0) actualizadas += 1;
     else sinCambios += 1;
