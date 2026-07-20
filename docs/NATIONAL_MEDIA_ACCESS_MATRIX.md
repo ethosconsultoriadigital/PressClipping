@@ -18,7 +18,7 @@ cada medio por **categoría de acceso**, no solo por si está o no en cron._
 | medio | medio_id | dominio | categoría_acceso | en_cron | acción |
 |---|---|---|---|---|---|
 | SDP Noticias | MED-0175 | sdpnoticias.com | A_PUBLICO_FACIL | sí | mantener |
-| Bloomberg Línea México | MED-0176 | bloomberglinea.com | A_PUBLICO_FACIL | sí | mantener |
+| Bloomberg Línea México | MED-0176 | bloomberglinea.com | A_PUBLICO_FACIL | sí | mantener — 1er crawl real falló (`sin_fuente`); corregido: la URL de robots.txt es RSS real mal etiquetada como "Sitemap:", cambiado metodo_extraccion a RSS, verificado con 2do crawl (20/20) |
 | DPL News | MED-0177 | dplnews.com | A_PUBLICO_FACIL | sí | mantener |
 | N+ | MED-0178 | nmas.com.mx | A_PUBLICO_FACIL | sí | mantener |
 | ADN40 | MED-0179 | adn40.mx | A_PUBLICO_FACIL | sí | mantener |

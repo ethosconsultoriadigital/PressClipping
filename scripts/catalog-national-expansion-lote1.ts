@@ -49,11 +49,17 @@ const NUEVOS_MEDIOS: Medio[] = [
     medio_id: 'MED-0176', nombre_medio: 'Bloomberg Línea México', grupo_medio: 'Bloomberg Línea',
     url_base: 'https://www.bloomberglinea.com', pais: 'MX', estado: 'Nacional', municipio: null,
     region: 'Nacional', categoria: 'Negocios', prioridad: 'Alta', activo: true,
-    metodo_extraccion: 'SITEMAP', rss_url: null,
-    sitemap_url: 'https://www.bloomberglinea.com/arc/outboundfeeds/google-news-feed-latam/?outputType=xml',
+    // CORREGIDO 2026-07-20: la URL bajo "Sitemap:" en robots.txt es en realidad
+    // un feed RSS 2.0 real (<rss><channel><item>), no un urlset/sitemapindex —
+    // el primer crawl real falló con "sin_fuente" porque el parser de sitemap
+    // no reconoció el formato. metodo_extraccion=RSS + rss_url (no sitemap_url)
+    // es lo correcto; verificado con un 2do crawl real (20/20, 0 errores).
+    metodo_extraccion: 'RSS',
+    rss_url: 'https://www.bloomberglinea.com/arc/outboundfeeds/google-news-feed-latam/?outputType=xml',
+    sitemap_url: null,
     secciones_urls: null, buscador_url: null, requiere_javascript: false, requiere_proxy: false,
     frecuencia_minutos: 120,
-    notas_tecnicas: 'Alta 2026-07-20. Feed Arc Publishing (Google News LatAm) verificado en vivo.',
+    notas_tecnicas: 'Alta 2026-07-20, corregido el mismo día: es RSS real (Arc Publishing lo lista bajo "Sitemap:" mal etiquetado), no sitemap XML. Verificado con crawl real tras el fix.',
   },
   {
     medio_id: 'MED-0177', nombre_medio: 'DPL News', grupo_medio: null,
