@@ -76,7 +76,37 @@ esté disponible o su costo.
 
 | métrica | antes (2026-07-17) | después (2026-07-20) |
 |---|---|---|
-| Total catálogo | 173 | **185** |
-| En cron | 44 | **54** |
+| Total catálogo | 173 | **187** |
+| En cron | 44 | **56** |
+| LISTO_LEYENDO | 14 | **22** |
 | Auto-enrich encadenado correctamente (recent-first, acotado por medio) | No (oldest-first, cupo compartido global) | **Sí** — cron base + 3 tiers aislados |
 | Error de un timeout puntual tira todo el batch de enrich | Sí (bug confirmado en vivo) | **No** — aislado por nota, cuenta como fallida y continúa |
+
+## 5. Segunda expansión (2026-07-20, continuación de la misma fase)
+
+**Validación real del primer crawl del lote 1 (384 notas, 21 medios):** 49.3%
+con texto limpio, mediana 1941 caracteres. 9 de 10 medios nuevos funcionaron
+a la primera (30/30 cada uno); Bloomberg Línea falló (`sin_fuente`) por un
+error de clasificación de fuente — corregido (ver commit `84d2f01`).
+**Hallazgo adicional:** el cupo de enrich del tier daily-validated
+(`--limit=200`) no había escalado con el crecimiento del tier (11→21
+medios) — varios de los 10 medios nuevos quedaron en 0% texto tras su
+primer ciclo real. Subido a 500 (proporcional al nuevo tamaño del tier) y
+verificado: los 6 medios afectados pasaron a ~100% tras un enrich dirigido.
+
+**2 medios más catalogados** (de ~30 candidatos revisados — la mayoría ya
+estaban catalogados con otro nombre o ya se habían descartado la fase
+anterior): Político MX (MED-0186, feed Arc Publishing) y AF Medios
+(MED-0187, sitemap Yoast, Jalisco). Ambos verificados con crawl real
+(20/20 cada uno, 0 errores) y enrich (40/40 con texto limpio).
+
+**SAT y DOF investigados, NO catalogados:** portales gubernamentales
+complejos sin feed público fácilmente identificable (mismo patrón que
+COFEPRIS) — no se fuerza sin una investigación dedicada.
+
+**Nota honesta sobre la meta de ~200:** no se llegó a 200 exactos (187) — la
+mayoría de los medios mexicanos relevantes y técnicamente viables sin
+proxy/bypass ya estaban catalogados tras dos rondas de expansión. Forzar
+más candidatos solo para llegar a un número violaría "no agregar basura".
+El catálogo actual (187, 56 en cron) representa la cobertura viable real,
+no una cifra arbitraria.

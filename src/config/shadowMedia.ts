@@ -402,6 +402,16 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED: readonly ShadowMedioDaily[] = [
   {
     medio_id: 'MED-0174', nombre: 'Alto Nivel', fuente: 'auto', max_notas_shadow: 20, activo_shadow: true,
   },
+  // ── Lote ETHOS 200 MEDIA NEWS LAKE — 2da expansión (2026-07-20) ────────────
+  // Solo 2 candidatos nuevos pasaron viabilidad limpia esta vez (la mayoría de
+  // los ~30 candidatos revisados ya estaban catalogados con otro nombre o ya
+  // se habían descartado en la fase anterior). Ambos verificados en vivo.
+  {
+    medio_id: 'MED-0186', nombre: 'Político MX', fuente: 'auto', max_notas_shadow: 20, activo_shadow: true,
+  },
+  {
+    medio_id: 'MED-0187', nombre: 'AF Medios', fuente: 'auto', max_notas_shadow: 20, activo_shadow: true,
+  },
 ] as const;
 
 /**

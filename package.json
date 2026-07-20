@@ -48,6 +48,7 @@
     "repair-el-universal-source": "tsx scripts/repair-el-universal-source.ts",
     "report-jumex-staging-categorized": "tsx scripts/report-jumex-staging-categorized.ts",
     "catalog-national-expansion-lote1": "tsx scripts/catalog-national-expansion-lote1.ts",
+    "catalog-national-expansion-lote2": "tsx scripts/catalog-national-expansion-lote2.ts",
     "simulate-keywords-shadow": "tsx scripts/simulate-keywords-shadow.ts",
     "export-operational-news-no-pc": "tsx scripts/export-operational-news-no-pc.ts",
     "export-operational-news-consolidated-no-pc": "tsx scripts/export-operational-news-consolidated-no-pc.ts",

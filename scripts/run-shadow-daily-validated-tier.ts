@@ -52,7 +52,12 @@ function parseArgs(argv: string[]): DailyArgs {
     xmlUrl: DEFAULT_XML_URL,
     windowHours: 48,
     maxNotas: 30,
-    enrichLimit: 200,
+    // Subido de 200 a 500 (2026-07-20, ETHOS 200 MEDIA NEWS LAKE segunda expansión):
+    // el tier creció de 11 a 21 medios (hasta ~30 notas/medio = ~630 notas/ciclo
+    // posibles); un cupo de 200 compartido dejaba la mayoría de los 10 medios
+    // nuevos sin enriquecer en su primer ciclo real (confirmado en vivo: Alto
+    // Nivel/Bloomberg/DPL News/Contralínea en 0% texto tras el primer crawl).
+    enrichLimit: 500,
     detectLimit: 300,
     output: 'sheet',
     appendMetricsHistory: false,

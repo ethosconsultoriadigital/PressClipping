@@ -800,3 +800,21 @@ y El CEO catalogados sin cron por prioridad baja). Matriz completa de acceso
 (A/B/C/D/E) en `docs/NATIONAL_MEDIA_ACCESS_MATRIX.md`. Jumex sin cambios
 (NO-GO, 1 MARCA_DIRECTA en 30d). Patrón estable (cron cada 2h, `approved_rows`
 creciendo orgánicamente 9→12, 0 Jumex, 0 filas nuevas en esta corrida).
+
+## ETHOS 200 MEDIA NEWS LAKE — segunda expansión (2026-07-20, continuación)
+
+Validado en vivo: las 384 notas del primer crawl del lote 1 quedaron 49.3%
+con texto limpio (mediana 1941 chars); 9/10 medios nuevos ok a la primera,
+Bloomberg Línea corregido (RSS mal etiquetado como sitemap). Encontrado y
+corregido un hallazgo adicional: el cupo de enrich del tier daily-validated
+no había escalado con su crecimiento (11→21 medios) — subido de 200 a 500,
+verificado (6 medios afectados pasaron a ~100% tras un enrich dirigido).
+2 medios más catalogados (Político MX, AF Medios) tras revisar ~30
+candidatos — la mayoría ya estaban catalogados o descartados. Catálogo
+173→**187**, en cron 44→**56**, LISTO_LEYENDO 14→**22**. Los 5 medios de
+alto volumen corregidos la fase pasada (Heraldo/Informador/Economista/
+Razón/Financiero) sostienen 50-58% texto limpio, confirmando que el fix es
+durable, no un pico puntual. No se llegó a 200 exactos (187) — se documentó
+honestamente por qué (candidatos viables agotados, no se agrega basura).
+Jumex sin cambios (NO-GO). Patrón estable (cron cada 2h, `approved_rows`=12,
+0 Jumex). Commits `f74eadc`, `84d2f01` y este ciclo.
