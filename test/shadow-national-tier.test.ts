@@ -1,8 +1,10 @@
 /**
  * Tests del TIER NACIONAL B sombra:
- *   - config contiene Uno TV, Publimetro y Milenio (alta 2026-07-17, lote PATRON
- *     P1 MEDIA GAP CLOSURE — revierte la exclusión previa "ruido/volumen"). Aristegui
- *     sigue sin entrar.
+ *   - config contiene Uno TV, Publimetro, Milenio (alta 2026-07-17, lote PATRON P1
+ *     MEDIA GAP CLOSURE), Aristegui Noticias (alta 2026-07-20, lote NATIONAL MEDIA
+ *     COVERAGE RAMP — único de 4 candidatos que pasó viabilidad técnica limpia) y
+ *     El Universal (alta 2026-07-20, mismo lote — reparado de BLOQUEADO/404 con
+ *     un feed alterno real de Arc Publishing).
  *   - prefiltro bloquea deportes/espectáculos pero NO señales de alto valor.
  *   - flags prohibidos siguen bloqueados por la guarda sombra.
  *   - el workflow nacional existe, comparte concurrency y no usa comandos prohibidos.
@@ -18,14 +20,25 @@ import { decidirPrefiltro } from '../src/shadow/nationalPrefilter.js';
 import { verificarFlagsSombra } from '../src/utils/shadowGuard.js';
 
 describe('config Tier Nacional B', () => {
-  it('contiene exactamente Uno TV (MED-0025), Publimetro (MED-0053) y Milenio (MED-0030)', () => {
+  it('contiene exactamente Uno TV (MED-0025), Publimetro (MED-0053), Milenio (MED-0030), Aristegui (MED-0008) y El Universal (MED-0011)', () => {
     const ids = SHADOW_MEDIOS_NACIONALES_B.map((m) => m.medio_id).sort();
-    expect(ids).toEqual(['MED-0025', 'MED-0030', 'MED-0053']);
+    expect(ids).toEqual(['MED-0008', 'MED-0011', 'MED-0025', 'MED-0030', 'MED-0053']);
   });
 
-  it('NO incluye Aristegui (MED-0008)', () => {
-    const ids = SHADOW_MEDIOS_NACIONALES_B.map((m) => m.medio_id);
-    expect(ids).not.toContain('MED-0008');
+  it('El Universal con prefiltro (max 30, 6h) — reparado de BLOQUEADO con feed alterno Arc Publishing', () => {
+    const eu = SHADOW_MEDIOS_NACIONALES_B.find((m) => m.medio_id === 'MED-0011')!;
+    expect(eu.prefiltro_titulo).toBe(true);
+    expect(eu.max_notas_shadow).toBe(30);
+    expect(eu.frecuencia_shadow).toBe('6h');
+    expect(eu.activo_shadow).toBe(true);
+  });
+
+  it('Aristegui con prefiltro (max 30, 6h) — alta 2026-07-20, único candidato viable del sub-lote de 4', () => {
+    const ar = SHADOW_MEDIOS_NACIONALES_B.find((m) => m.medio_id === 'MED-0008')!;
+    expect(ar.prefiltro_titulo).toBe(true);
+    expect(ar.max_notas_shadow).toBe(30);
+    expect(ar.frecuencia_shadow).toBe('6h');
+    expect(ar.activo_shadow).toBe(true);
   });
 
   it('Uno TV sin prefiltro (max 50); Publimetro con prefiltro (max 40); ambos 6h', () => {
@@ -48,7 +61,7 @@ describe('config Tier Nacional B', () => {
   });
 
   it('mediosNacionalesActivos(B) devuelve solo activos', () => {
-    expect(mediosNacionalesActivos('B').map((m) => m.medio_id).sort()).toEqual(['MED-0025', 'MED-0030', 'MED-0053']);
+    expect(mediosNacionalesActivos('B').map((m) => m.medio_id).sort()).toEqual(['MED-0008', 'MED-0011', 'MED-0025', 'MED-0030', 'MED-0053']);
   });
 });
 

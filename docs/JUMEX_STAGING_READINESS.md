@@ -81,3 +81,22 @@ cobertura de marca.
 **Export generado:** tab interna `12_Operacion_Consolidada_Sin_PressClipping`
 (`--clients=CLI-0001 --window-days=30`), 9 filas nuevas, 7 duplicados, 0
 escritura en ninguna hoja final. Solo para revisión interna.
+
+## 5. Criterio editorial de 4 categorías (2026-07-20)
+
+Implementado en `src/editorial/jumexCriteria.ts` (13 tests), reutilizando el
+`keyword_id` de cada mención ya gateada por contexto (no reinterpreta texto):
+
+| categoría | keywords | regla de producción propuesta |
+|---|---|---|
+| MARCA_DIRECTA | KEY-0001 (Jumex/Grupo Jumex/Jugos Jumex) | candidata a producción Jumex |
+| SECTOR_REGULATORIO_ALTO | KEY-0065/66/67/68 (IEPS, etiquetado frontal, retiro de producto, Profeco) | revisión humana / sección sectorial, nunca mezclada como marca |
+| SECTOR_GENERAL | KEY-0009 (bebidas azucaradas genérico) | solo observación/staging |
+| EXCLUIR | KEY-0002 (Museo/Fundación Jumex) | nunca sale de staging |
+
+**Resultado real (30d, `npm run report-jumex-staging-categorized`):** 17
+menciones — 1 MARCA_DIRECTA, 2 SECTOR_REGULATORIO_ALTO, 8 SECTOR_GENERAL, 6
+EXCLUIR. Veredicto automático: **NO-GO** ("solo 1 mención MARCA_DIRECTA —
+insuficiente para producción estable, requiere autorización editorial
+expresa"). Regla codificada: <3 menciones MARCA_DIRECTA en la ventana =
+NO-GO automático, salvo autorización editorial explícita del usuario.

@@ -161,3 +161,14 @@ intervención.
 3. Evaluar catalogar COFEPRIS y CNIT como fuentes institucionales primarias
    (mismo patrón que CRT: verificar sitemap/RSS público antes de dar de alta).
 4. Reparar El Universal (404) y La Jornada (403).
+
+## 8. NATIONAL MEDIA COVERAGE RAMP — seguimiento (2026-07-20)
+
+Ejecutado: Aristegui Noticias agregada a cron (único viable de 4 candidatos
+evaluados), El Universal reparado (feed alterno real encontrado y
+verificado), 5 medios más con re-enrich reciente. **Segundo bug de
+paginación encontrado y corregido** en este mismo script (fetch global capado
+en 50,000 filas sin error — corregido a paginación por medio_id). Detalle
+completo, incluyendo la recomendación estructural más importante de la fase
+(el re-enrich manual no es durable para medios >1000 notas/semana), en
+`docs/NATIONAL_MEDIA_COVERAGE_MASTER.md`.

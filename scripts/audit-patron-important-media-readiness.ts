@@ -122,6 +122,7 @@ async function main() {
         .select('medio_id, fecha_publicacion, texto_cuerpo_nota, texto_nota_limpia, texto_extraido', { count: 'exact' })
         .eq('medio_id', medioId)
         .gte('fecha_publicacion', hace7d)
+        .order('noticia_id', { ascending: true })
         .range(offset, offset + PAGINA - 1);
       if (data) noticiasRaw.push(...data);
       offset += PAGINA;

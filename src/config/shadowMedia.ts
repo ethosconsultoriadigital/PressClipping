@@ -41,7 +41,7 @@ export const SHADOW_MEDIOS: readonly string[] = [
 // ----------------------------------------------------------------------------
 // Bloque SEPARADO de la lista base (SHADOW_MEDIOS). NO modifica el cron base de
 // 25 medios. Solo entran medios nacionales con señal real validada (Reforma
-// laboral) y precisión alta. Aristegui NO entra todavía.
+// laboral) y precisión alta.
 //   - Uno TV  (MED-0025): ~4.5 menciones útiles/100, sin prefiltro.
 //   - Publimetro (MED-0053): ~3.0/100 pero 46% deportes/espectáculos → prefiltro título.
 //   - Milenio (MED-0030): alta 2026-07-17 (lote PATRON P1 MEDIA GAP CLOSURE),
@@ -55,6 +55,17 @@ export const SHADOW_MEDIOS: readonly string[] = [
 //     de detección (las menciones siguen gateadas por keyword real); se acota
 //     con prefiltro_titulo=true (bloquea mundial/fútbol/deportes existentes en
 //     `nationalPrefilter.ts`) y max_notas_shadow=30 (por debajo de Publimetro).
+//   - Aristegui Noticias (MED-0008): alta 2026-07-20 (lote NATIONAL MEDIA
+//     COVERAGE RAMP), sub-lote de 4 candidatos evaluado (Animal Político,
+//     Aristegui, 24 Horas, NTR Guadalajara) — solo Aristegui pasó viabilidad
+//     técnica limpia (`news-sitemap.xml` verificado en vivo, artículos del
+//     mismo día, sin proxy/JS, ya READY en catálogo). Los otros 3 NO se
+//     agregaron: 24 Horas sigue bloqueada (403, confirmado otra vez), Animal
+//     Político devuelve una página "offline"/placeholder en su sitemap (no
+//     confirmable sin más investigación), NTR Guadalajara solo tiene secciones
+//     en su sitemap.xml (no URLs de artículos — requeriría extracción directa,
+//     no el patrón estándar). Mismo perfil que Milenio: sitio nacional
+//     político de alto volumen → prefiltro_titulo=true, max_notas_shadow=30.
 // ============================================================================
 
 export type FrecuenciaShadow = '2h' | '6h' | 'diario';
@@ -90,6 +101,28 @@ export const SHADOW_MEDIOS_NACIONALES_B: readonly ShadowMedioNacional[] = [
   {
     medio_id: 'MED-0030',
     nombre: 'Milenio',
+    frecuencia_shadow: '6h',
+    max_notas_shadow: 30,
+    prefiltro_titulo: true,
+    activo_shadow: true,
+  },
+  {
+    medio_id: 'MED-0008',
+    nombre: 'Aristegui Noticias',
+    frecuencia_shadow: '6h',
+    max_notas_shadow: 30,
+    prefiltro_titulo: true,
+    activo_shadow: true,
+  },
+  {
+    // Lote NATIONAL MEDIA COVERAGE RAMP (2026-07-20): El Universal estaba
+    // BLOQUEADO (404 en /sitemap.xml, activo=false) desde hace semanas.
+    // Reparado vía `scripts/repair-el-universal-source.ts`: robots.txt expone
+    // el feed real de Arc Publishing (`/arc/outboundfeeds/news/?outputType=xml`),
+    // verificado en vivo y con crawl real (20/20 notas nuevas, 0 errores).
+    // Sin proxy/JS. Mismo perfil que Milenio/Aristegui (nacional alto volumen).
+    medio_id: 'MED-0011',
+    nombre: 'El Universal',
     frecuencia_shadow: '6h',
     max_notas_shadow: 30,
     prefiltro_titulo: true,

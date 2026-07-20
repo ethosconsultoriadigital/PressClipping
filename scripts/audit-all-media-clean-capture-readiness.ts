@@ -56,8 +56,20 @@ function cronInfo(): Map<string, string> {
   return m;
 }
 
-/** Trae TODAS las filas de `noticias` con fecha_publicacion >= desde, paginando (sin truncar). */
-async function fetchNoticiasCompletas(desde: string): Promise<NoticiaLite[]> {
+/**
+ * Trae TODAS las filas de `noticias` de UN medio con fecha_publicacion >=
+ * desde, paginando por medio_id (no en un fetch global). Un fetch global
+ * paginado sobre toda la tabla (173 medios, decenas de miles de filas en 30d)
+ * resultó CAPADO en ~50,000 filas en una corrida real (2026-07-20) — sin error
+ * visible, probablemente un límite de tiempo/tamaño del lado de PostgREST/
+ * Supabase para queries muy largas. Paginar por medio_id (como ya hace
+ * `audit-patron-important-media-readiness.ts`, corregido antes) es más lento
+ * en round-trips pero cada consulta es acotada y confiable. También ordena
+ * por `noticia_id` (clave estable): sin ORDER BY, PostgREST no garantiza el
+ * mismo orden entre llamadas sucesivas de .range() contra una tabla con
+ * escrituras concurrentes del cron en vivo.
+ */
+async function fetchNoticiasDeMedio(medioId: string, desde: string): Promise<NoticiaLite[]> {
   const sb = getSupabase();
   const out: NoticiaLite[] = [];
   let offset = 0;
@@ -65,7 +77,9 @@ async function fetchNoticiasCompletas(desde: string): Promise<NoticiaLite[]> {
     const { data, count } = await sb
       .from('noticias')
       .select('medio_id, fecha_publicacion, texto_cuerpo_nota, texto_nota_limpia, texto_limpio_chars', { count: 'exact' })
+      .eq('medio_id', medioId)
       .gte('fecha_publicacion', desde)
+      .order('noticia_id', { ascending: true })
       .range(offset, offset + PAGINA - 1);
     if (data) out.push(...(data as unknown as NoticiaLite[]));
     offset += PAGINA;
@@ -74,22 +88,19 @@ async function fetchNoticiasCompletas(desde: string): Promise<NoticiaLite[]> {
   return out;
 }
 
-async function fetchMencionesCompletas(desde: string): Promise<{ medio_id: string; cliente_id: string }[]> {
+async function fetchMencionesDeMedio(medioId: string, desde: string): Promise<{ cliente_id: string }[]> {
   const sb = getSupabase();
-  const out: { medio_id: string; cliente_id: string }[] = [];
+  const out: { cliente_id: string }[] = [];
   let offset = 0;
   for (;;) {
     const { data, count } = await sb
       .from('menciones')
-      .select('cliente_id, noticias!inner(medio_id)', { count: 'exact' })
+      .select('mencion_id, cliente_id, noticias!inner(medio_id)', { count: 'exact' })
+      .eq('noticias.medio_id', medioId)
       .gte('created_at', desde)
+      .order('mencion_id', { ascending: true })
       .range(offset, offset + PAGINA - 1);
-    if (data) {
-      for (const m of data as any[]) {
-        const medioId = m.noticias?.medio_id;
-        if (medioId) out.push({ medio_id: medioId, cliente_id: m.cliente_id });
-      }
-    }
+    if (data) out.push(...(data as any[]).map((m) => ({ cliente_id: m.cliente_id })));
     offset += PAGINA;
     if (!data || data.length < PAGINA || offset >= (count ?? 0)) break;
   }
@@ -131,20 +142,26 @@ async function main() {
   logger.info({ total_catalogo: catalogo.length }, 'Catálogo cargado');
 
   const cron = cronInfo();
-  const noticias30d = await fetchNoticiasCompletas(hace30d);
-  const menciones30d = await fetchMencionesCompletas(hace30d);
-  logger.info({ noticias_30d_totales: noticias30d.length, menciones_30d_totales: menciones30d.length }, 'Ventanas cargadas (paginado completo, sin truncar)');
 
+  // Solo se consulta noticias/menciones para medios EN CRON: un medio fuera
+  // de cron no puede tener noticias reales, así que se ahorra el round-trip.
   const noticiasPorMedio = new Map<string, NoticiaLite[]>();
-  for (const n of noticias30d) {
-    const arr = noticiasPorMedio.get(n.medio_id) ?? []; arr.push(n); noticiasPorMedio.set(n.medio_id, arr);
-  }
   const mencionesPorMedio = new Map<string, { total: number; porCliente: Record<string, number> }>();
-  for (const m of menciones30d) {
-    const cur = mencionesPorMedio.get(m.medio_id) ?? { total: 0, porCliente: {} };
-    cur.total += 1; cur.porCliente[m.cliente_id] = (cur.porCliente[m.cliente_id] ?? 0) + 1;
+  const mediosEnCron = catalogo.filter((m) => cron.has(m.medio_id));
+  let totalNoticias = 0;
+  let totalMenciones = 0;
+  for (const m of mediosEnCron) {
+    const notas = await fetchNoticiasDeMedio(m.medio_id, hace30d);
+    noticiasPorMedio.set(m.medio_id, notas);
+    totalNoticias += notas.length;
+
+    const menciones = await fetchMencionesDeMedio(m.medio_id, hace30d);
+    const cur = { total: menciones.length, porCliente: {} as Record<string, number> };
+    for (const men of menciones) cur.porCliente[men.cliente_id] = (cur.porCliente[men.cliente_id] ?? 0) + 1;
     mencionesPorMedio.set(m.medio_id, cur);
+    totalMenciones += menciones.length;
   }
+  logger.info({ medios_en_cron: mediosEnCron.length, noticias_30d_totales: totalNoticias, menciones_30d_totales: totalMenciones }, 'Ventanas cargadas por medio (paginado completo, sin truncar)');
 
   const filas: any[] = [];
   for (const m of catalogo) {

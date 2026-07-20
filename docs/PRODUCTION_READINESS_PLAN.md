@@ -755,3 +755,18 @@ azucaradas" sin mención de marca, 2 son residuo pre-fix de Profeco/gasolina).
 Detalle completo en `docs/ETHOS_NEWS_LAKE_MEDIA_READINESS.md` y
 `docs/JUMEX_STAGING_READINESS.md`. Patrón sin cambios de comportamiento
 (cron cada 2h sigue activo, 0 filas nuevas en esta corrida — steady state).
+
+## NATIONAL MEDIA COVERAGE RAMP + JUMEX STAGING CRITERIA (2026-07-20)
+
+Cron Patrón confirmado estable (múltiples corridas automáticas exitosas
+durante 2 días vía `gh run list`). Aristegui Noticias agregada a cron
+(único viable de 4 candidatos); El Universal reparado (BLOQUEADO→activo,
+feed alterno real verificado con crawl). 5 medios más recibieron re-enrich
+reciente; el patrón de degradación repetida en medios de alto volumen
+(El Heraldo, El Informador) confirma que la fase estructural pendiente
+(encadenar enrich al cron base) ya no puede seguir posponiéndose. Criterio
+editorial Jumex de 4 categorías implementado y probado
+(`src/editorial/jumexCriteria.ts`) — NO-GO reforzado con regla explícita
+(<3 MARCA_DIRECTA = NO-GO automático). Se encontró y corrigió un SEGUNDO bug
+de paginación (fetch global capado en 50,000 filas). Detalle completo en
+`docs/NATIONAL_MEDIA_COVERAGE_MASTER.md`. 1111 tests verdes.
