@@ -34,9 +34,10 @@ export const MEDIO_ID = 'MED-0191';
 export const BASE_URL = 'https://lasillarota.com';
 export const HOME_URL = 'https://lasillarota.com/';
 
-// Artículos con fecha en ruta, ID numérico al final:
-//   https://lasillarota.com/SECCION/YYYY/M/DD/slug-NUMERO.html
-export const URL_PATTERN = /href="(https:\/\/lasillarota\.com\/[a-z][a-z0-9-]*\/20\d{2}\/\d{1,2}\/\d{1,2}\/[a-z0-9-]+-\d+\.html)"/g;
+// La homepage sirve URLs RELATIVAS (igual que LatinUS). Patrón:
+//   /SECCION/YYYY/M/DD/slug-ID.html  (ID numérico grande, ej. 609602)
+// Se construye la URL absoluta anteponiéndole BASE_URL.
+export const URL_PATTERN = /href="(\/[a-z][a-z0-9-]*\/20\d{2}\/\d{1,2}\/\d{1,2}\/[a-z0-9-]+-\d+\.html)"/g;
 
 export function parseArgs(argv: string[]): { dryRun: boolean; limit: number } {
   let limit = 10;
@@ -51,7 +52,7 @@ export function parseArgs(argv: string[]): { dryRun: boolean; limit: number } {
 export function extraerUrlsDeHomepage(html: string): string[] {
   const urls = new Set<string>();
   for (const m of html.matchAll(URL_PATTERN)) {
-    if (m[1]) urls.add(m[1]);
+    if (m[1]) urls.add(`${BASE_URL}${m[1]}`);
   }
   return [...urls];
 }

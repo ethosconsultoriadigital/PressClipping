@@ -33,9 +33,12 @@ describe('config Tier Daily Validated — dedupe', () => {
     'MED-0184', 'MED-0185',
     // PorEsto (MED-0189) — A_PUBLICO_FACIL RSS, alta catálogo + cron simultáneos (2026-07-22).
     'MED-0189',
+    // 200 MEDIA MILESTONE (2026-07-22): 8 nuevos A_PUBLICO_FACIL RSS.
+    // Eje Central (MED-0200) NO en daily-validated — alto volumen, evaluar primero.
+    'MED-0192', 'MED-0193', 'MED-0194', 'MED-0195', 'MED-0196', 'MED-0197', 'MED-0198', 'MED-0199',
   ].sort();
 
-  it('la lista contiene todos los medios activos del tier incluyendo Merca2.0 (MED-0184), El CEO (MED-0185) y PorEsto (MED-0189) activados en NEWS LAKE 200 FINAL PUSH (2026-07-22)', () => {
+  it('la lista contiene todos los medios activos del tier incluyendo los lotes NEWS LAKE 200 FINAL PUSH + 200 MEDIA MILESTONE (2026-07-22)', () => {
     const ids = SHADOW_MEDIOS_DAILY_VALIDATED.map((m) => m.medio_id).sort();
     expect(ids).toEqual(IDS_ESPERADOS);
   });

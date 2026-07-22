@@ -52,6 +52,7 @@
     "catalog-cnit": "tsx scripts/catalog-cnit.ts",
     "crawl-direct-cnit": "tsx scripts/crawl-direct-cnit.ts",
     "catalog-direct-lote3": "tsx scripts/catalog-direct-lote3.ts",
+    "catalog-lote4-200": "tsx scripts/catalog-lote4-200.ts",
     "crawl-direct-latinus": "tsx scripts/crawl-direct-latinus.ts",
     "crawl-direct-lasillarota": "tsx scripts/crawl-direct-lasillarota.ts",
     "simulate-keywords-shadow": "tsx scripts/simulate-keywords-shadow.ts",

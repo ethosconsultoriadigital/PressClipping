@@ -38,15 +38,16 @@ describe('crawl-direct-lasillarota — parseArgs', () => {
 });
 
 describe('crawl-direct-lasillarota — extraerUrlsDeHomepage', () => {
+  // La homepage sirve hrefs RELATIVOS — el extractor los convierte a absolutos con BASE_URL.
   const htmlConArticulos = `
     <html>
-      <a href="https://lasillarota.com/nacional/2026/7/22/sheinbaum-anuncia-plan-energetico-54321.html">Nota 1</a>
-      <a href="https://lasillarota.com/politica/2026/7/21/senado-aprueba-reforma-99999.html">Nota 2</a>
-      <a href="https://lasillarota.com/economia/2026/7/20/pib-mexico-crece-11111.html">Nota 3</a>
+      <a href="/nacional/2026/7/22/sheinbaum-anuncia-plan-energetico-54321.html">Nota 1</a>
+      <a href="/politica/2026/7/21/senado-aprueba-reforma-99999.html">Nota 2</a>
+      <a href="/economia/2026/7/20/pib-mexico-crece-11111.html">Nota 3</a>
     </html>
   `;
 
-  it('extrae URLs absolutas del dominio lasillarota.com', () => {
+  it('extrae URLs relativas y las convierte a absolutas con BASE_URL', () => {
     const urls = extraerUrlsDeHomepage(htmlConArticulos);
     expect(urls).toContain('https://lasillarota.com/nacional/2026/7/22/sheinbaum-anuncia-plan-energetico-54321.html');
     expect(urls).toContain('https://lasillarota.com/politica/2026/7/21/senado-aprueba-reforma-99999.html');
@@ -57,32 +58,26 @@ describe('crawl-direct-lasillarota — extraerUrlsDeHomepage', () => {
     expect(extraerUrlsDeHomepage(htmlConArticulos)).toHaveLength(3);
   });
 
-  it('deduplicación: misma URL dos veces → una sola', () => {
+  it('deduplicación: misma URL relativa dos veces → una sola absoluta', () => {
     const htmlDuplex = `
-      <a href="https://lasillarota.com/nacional/2026/7/22/nota-repetida-77777.html">A</a>
-      <a href="https://lasillarota.com/nacional/2026/7/22/nota-repetida-77777.html">B (dup)</a>
+      <a href="/nacional/2026/7/22/nota-repetida-77777.html">A</a>
+      <a href="/nacional/2026/7/22/nota-repetida-77777.html">B (dup)</a>
     `;
     expect(extraerUrlsDeHomepage(htmlDuplex)).toHaveLength(1);
   });
 
   it('no extrae URLs de páginas de sección (sin fecha ni ID numérico)', () => {
     const htmlSecciones = `
-      <a href="https://lasillarota.com/nacional/">Sección Nacional</a>
-      <a href="https://lasillarota.com/politica/">Política</a>
+      <a href="/nacional/">Sección Nacional</a>
+      <a href="/politica/">Política</a>
     `;
     expect(extraerUrlsDeHomepage(htmlSecciones)).toHaveLength(0);
   });
 
-  it('no extrae URLs de rutas relativas (patrón exige URL absoluta lasillarota.com)', () => {
-    const htmlRelativo = `
-      <a href="/nacional/2026/7/22/nota-relativa-55555.html">Relativa</a>
-    `;
-    expect(extraerUrlsDeHomepage(htmlRelativo)).toHaveLength(0);
-  });
-
-  it('no extrae URLs de otros dominios', () => {
+  it('no extrae URLs absolutas de otros dominios (patrón solo acepta rutas relativas /SEC/...)', () => {
     const htmlExterno = `
       <a href="https://otro.com/nacional/2026/7/22/nota-ajena-12345.html">Otro</a>
+      <a href="https://lasillarota.com/nacional/2026/7/22/nota-abs-12345.html">Abs lasillarota</a>
     `;
     expect(extraerUrlsDeHomepage(htmlExterno)).toHaveLength(0);
   });

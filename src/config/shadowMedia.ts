@@ -429,6 +429,19 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED: readonly ShadowMedioDaily[] = [
   {
     medio_id: 'MED-0189', nombre: 'PorEsto', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true,
   },
+  // ── 200 MEDIA MILESTONE (2026-07-22) ────────────────────────────────────────
+  // 8 nuevos en cron: ZonaDocs, Pie de Página, Chiapas Paralelo, Quadratín
+  // Nacional, Tabasco Hoy, El Imparcial Oaxaca, 8 Columnas, DesInformémonos.
+  // Todos A_PUBLICO_FACIL RSS verificados en vivo. Eje Central (MED-0200)
+  // NO se incluye aquí — ALTO VOLUMEN (1357+/mes), evaluar antes de activar.
+  { medio_id: 'MED-0192', nombre: 'ZonaDocs', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0193', nombre: 'Pie de Página', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0194', nombre: 'Chiapas Paralelo', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0195', nombre: 'Quadratín Nacional', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0196', nombre: 'Tabasco Hoy', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0197', nombre: 'El Imparcial Oaxaca', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0198', nombre: '8 Columnas', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0199', nombre: 'DesInformémonos', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
 ] as const;
 
 /**
