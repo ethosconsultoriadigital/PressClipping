@@ -38,7 +38,7 @@ _Fase "NATIONAL MEDIA COVERAGE RAMP + JUMEX STAGING PRODUCTION CRITERIA"
 | Proceso | sí | sí | sí | parcial (20.3%) | no | candidato próximo lote |
 | Animal Político | sí | no | no | no | sitemap devuelve página "offline" (no confiable) | requiere investigación adicional |
 | Aristegui Noticias | sí | **sí (nuevo)** | sí | sí | no | mantener, alta reciente |
-| LatinUS | no | no | — | — | — | evaluar alta (B_PUBLICO_DIRECT — investigación DIRECT en curso) |
+| LatinUS | **sí (MED-0190)** | no (script DIRECT propio) | pendiente crawl | — | B_PUBLICO_DIRECT | **CATALOGADO 2026-07-22** — extractor DIRECT `crawl-direct-latinus.ts`, pendiente crawl inicial |
 | Uno TV | sí | sí | sí | sí | no | mantener |
 | Publimetro | sí | sí | sí | sí | no | mantener |
 | El Sol de México | sí | sí | sí | parcial (34.6%) | no | re-enrich reciente aplicado |
@@ -123,11 +123,15 @@ artículos reales, como AM León/CRT la fase pasada):
 | El CEO (MED-0185) | Activado en cron daily-validated (estaba catalogado sin cron) | 15 noticias, 0 errores, texto limpio OK |
 | CNIT (MED-0188) | Catalogado, extractor DIRECT creado | Pendiente primer crawl real |
 | Jumex staging | Rerun post-activación | 21 menciones/30d — **NO-GO** (1 MARCA_DIRECTA) |
+| PorEsto (MED-0189) | Catalogado A_PUBLICO_FACIL + activado en cron daily-validated (fuente: rss) | Pendiente primer crawl real |
+| LatinUS (MED-0190) | Catalogado B_PUBLICO_DIRECT + extractor DIRECT `crawl-direct-latinus.ts` | Pendiente primer crawl real |
+| La Silla Rota (MED-0191) | Catalogado B_PUBLICO_DIRECT + extractor DIRECT `crawl-direct-lasillarota.ts` (prioridad Alta, P2) | Pendiente primer crawl real |
 
-**Conteo real (2026-07-22):**
-- Catálogo: **188 medios** (sin cambio desde CNIT, alta 2026-07-22)
-- En cron estándar: **58** (+2 Merca2.0 + El CEO; sin contar CNIT que usa script DIRECT)
-- Catálogo sin cron: 130
+**Conteo real (2026-07-22 — lote3 final):**
+- Catálogo: **191 medios** (MED-0189 PorEsto, MED-0190 LatinUS, MED-0191 La Silla Rota)
+- En cron estándar: **59** (+3 vs. pre-push: Merca2.0 + El CEO + PorEsto; CNIT/LatinUS/LSR usan scripts DIRECT fuera del cron estándar)
+- Extractores DIRECT implementados: **3** (CNIT `crawl-direct-cnit.ts`, LatinUS `crawl-direct-latinus.ts`, La Silla Rota `crawl-direct-lasillarota.ts`)
+- Catálogo sin cron: 132
 
 ## 8. Recomendación estructural (la más importante de esta fase)
 
