@@ -50,7 +50,7 @@ Catálogo: 173 → **185** medios (+12). En cron: 44 → **54** (+10).
 | Fortune en Español | E_NO_VIABLE_ACTUAL | dominio no resuelve |
 | Imagen Radio | E_NO_VIABLE_ACTUAL | robots.txt mal configurado (apunta a Excelsior) — no confiable |
 | COFEPRIS | E_NO_VIABLE_ACTUAL (por ahora) | portal gob.mx sin sitemap específico identificable |
-| CNIT | B_PUBLICO_DIRECT | blog público real, muy relevante para Patrón, pero sin sitemap — candidato a extractor DIRECT dedicado |
+| CNIT | B_PUBLICO_DIRECT → **CATALOGADO** | MED-0188 — extractor DIRECT implementado (`scripts/crawl-direct-cnit.ts`), catalogado en Supabase via `catalog-cnit.ts`, 16 tests verdes. Prioridad Alta para Patrón (denominación de origen, normativa tequilera). NO va por cron estándar — script independiente. |
 
 Ya cataloged previamente bajo otro nombre (no duplicados): Reporte Índigo
 (MED-0045/0054), Eje Central (MED-0033), Notisistema (MED-0112/0129),
@@ -74,13 +74,14 @@ esté disponible o su costo.
 
 ## 4. Resumen de impacto
 
-| métrica | antes (2026-07-17) | después (2026-07-20) |
-|---|---|---|
-| Total catálogo | 173 | **187** |
-| En cron | 44 | **56** |
-| LISTO_LEYENDO | 14 | **22** |
-| Auto-enrich encadenado correctamente (recent-first, acotado por medio) | No (oldest-first, cupo compartido global) | **Sí** — cron base + 3 tiers aislados |
-| Error de un timeout puntual tira todo el batch de enrich | Sí (bug confirmado en vivo) | **No** — aislado por nota, cuenta como fallida y continúa |
+| métrica | antes (2026-07-17) | después (2026-07-20) | después (2026-07-22) |
+|---|---|---|---|
+| Total catálogo | 173 | **187** | **188** (CNIT MED-0188) |
+| En cron estándar | 44 | **56** | **56** (CNIT usa script DIRECT propio) |
+| LISTO_LEYENDO | 14 | **22** | **22** |
+| Extractores DIRECT implementados | 0 | 0 | **1** (CNIT — script+catalog+tests) |
+| Auto-enrich encadenado correctamente (recent-first, acotado por medio) | No (oldest-first, cupo compartido global) | **Sí** — cron base + 3 tiers aislados | Sí |
+| Error de un timeout puntual tira todo el batch de enrich | Sí (bug confirmado en vivo) | **No** — aislado por nota, cuenta como fallida y continúa | No |
 
 ## 5. Segunda expansión (2026-07-20, continuación de la misma fase)
 
