@@ -16,6 +16,7 @@
 
 export type CategoriaJumex =
   | 'MARCA_DIRECTA'
+  | 'PRODUCTO_CATEGORIA'
   | 'SECTOR_REGULATORIO_ALTO'
   | 'SECTOR_GENERAL'
   | 'EXCLUIR';
@@ -25,6 +26,14 @@ export type CategoriaJumex =
  * contexto en la tabla `keywords` (ver docs/JUMEX_STAGING_READINESS.md §1) —
  * este mapeo solo decide en qué categoría cae el resultado YA gateado, no
  * vuelve a evaluar el texto.
+ *
+ * Categorías (5):
+ *   MARCA_DIRECTA         → nombre de la marca directamente (Jumex, Grupo Jumex, Jugos Jumex).
+ *   PRODUCTO_CATEGORIA    → categoría de producto Jumex sin nombre de marca (néctares, jugos envasados,
+ *                           industria de jugos); requieren contexto Jumex en su gate.
+ *   SECTOR_REGULATORIO_ALTO → riesgo regulatorio/fiscal alto (IEPS, etiquetado frontal, Profeco, retiro).
+ *   SECTOR_GENERAL        → sector bebidas azucaradas sin mención de marca ni regulación específica.
+ *   EXCLUIR               → Museo/Fundación Jumex, ruido no relevante para PR de marca.
  */
 const CATEGORIA_POR_KEYWORD_ID: Record<string, CategoriaJumex> = {
   'KEY-0001': 'MARCA_DIRECTA', // Jumex / Grupo Jumex / Jugos Jumex
@@ -34,6 +43,8 @@ const CATEGORIA_POR_KEYWORD_ID: Record<string, CategoriaJumex> = {
   'KEY-0066': 'SECTOR_REGULATORIO_ALTO', // etiquetado frontal
   'KEY-0067': 'SECTOR_REGULATORIO_ALTO', // retiro de producto
   'KEY-0068': 'SECTOR_REGULATORIO_ALTO', // Profeco (ya excluye gasolina en su contexto_excluir)
+  // PRODUCTO_CATEGORIA — keywords a agregar tras aprobación editorial (audit-jumex-keyword-discovery)
+  // Ejemplo: 'KEY-0069': 'PRODUCTO_CATEGORIA', // industria de jugos / néctares de fruta
 };
 
 /** Clasifica por keyword_id (fuente de verdad — evita reinterpretar texto libre). */
@@ -47,17 +58,38 @@ export function clasificarCategoriaJumexPorId(keywordId: string): CategoriaJumex
  * mapeo por nombre exacto conocido.
  */
 const CATEGORIA_POR_NOMBRE: { nombre: string; categoria: CategoriaJumex }[] = [
+  // EXCLUIR — debe ir primero para evitar que 'jumex' solo lo clasifique como MARCA_DIRECTA
   { nombre: 'museo jumex', categoria: 'EXCLUIR' },
   { nombre: 'fundacion jumex', categoria: 'EXCLUIR' },
   { nombre: 'fundación jumex', categoria: 'EXCLUIR' },
-  { nombre: 'jumex', categoria: 'MARCA_DIRECTA' },
+  // MARCA_DIRECTA
   { nombre: 'grupo jumex', categoria: 'MARCA_DIRECTA' },
   { nombre: 'jugos jumex', categoria: 'MARCA_DIRECTA' },
+  { nombre: 'néctares jumex', categoria: 'MARCA_DIRECTA' },
+  { nombre: 'néctar jumex', categoria: 'MARCA_DIRECTA' },
+  { nombre: 'jugo jumex', categoria: 'MARCA_DIRECTA' },
+  { nombre: 'jumex holding', categoria: 'MARCA_DIRECTA' },
+  { nombre: 'jumex', categoria: 'MARCA_DIRECTA' },
+  // PRODUCTO_CATEGORIA
+  { nombre: 'industria de jugos', categoria: 'PRODUCTO_CATEGORIA' },
+  { nombre: 'jugos y néctares', categoria: 'PRODUCTO_CATEGORIA' },
+  { nombre: 'néctares de fruta', categoria: 'PRODUCTO_CATEGORIA' },
+  { nombre: 'jugos envasados', categoria: 'PRODUCTO_CATEGORIA' },
+  // SECTOR_REGULATORIO_ALTO
   { nombre: 'ieps bebidas azucaradas', categoria: 'SECTOR_REGULATORIO_ALTO' },
   { nombre: 'etiquetado frontal', categoria: 'SECTOR_REGULATORIO_ALTO' },
   { nombre: 'retiro de producto', categoria: 'SECTOR_REGULATORIO_ALTO' },
   { nombre: 'profeco', categoria: 'SECTOR_REGULATORIO_ALTO' },
+  { nombre: 'cofepris bebidas', categoria: 'SECTOR_REGULATORIO_ALTO' },
+  { nombre: 'nom bebidas', categoria: 'SECTOR_REGULATORIO_ALTO' },
+  { nombre: 'impuesto refrescos', categoria: 'SECTOR_REGULATORIO_ALTO' },
+  { nombre: 'reforma fiscal bebidas', categoria: 'SECTOR_REGULATORIO_ALTO' },
+  // SECTOR_GENERAL
   { nombre: 'bebidas azucaradas', categoria: 'SECTOR_GENERAL' },
+  { nombre: 'industria refresquera', categoria: 'SECTOR_GENERAL' },
+  { nombre: 'bebidas no alcohólicas', categoria: 'SECTOR_GENERAL' },
+  { nombre: 'industria de bebidas', categoria: 'SECTOR_GENERAL' },
+  { nombre: 'agua embotellada', categoria: 'SECTOR_GENERAL' },
 ];
 
 export function clasificarCategoriaJumexPorNombre(keywordNombre: string): CategoriaJumex {
@@ -69,15 +101,17 @@ export function clasificarCategoriaJumexPorNombre(keywordNombre: string): Catego
 export interface ResumenCategoriasJumex {
   total: number;
   marca_directa: number;
+  producto_categoria: number;
   sector_regulatorio_alto: number;
   sector_general: number;
   excluir: number;
 }
 
 export function resumirCategoriasJumex(categorias: CategoriaJumex[]): ResumenCategoriasJumex {
-  const r: ResumenCategoriasJumex = { total: categorias.length, marca_directa: 0, sector_regulatorio_alto: 0, sector_general: 0, excluir: 0 };
+  const r: ResumenCategoriasJumex = { total: categorias.length, marca_directa: 0, producto_categoria: 0, sector_regulatorio_alto: 0, sector_general: 0, excluir: 0 };
   for (const c of categorias) {
     if (c === 'MARCA_DIRECTA') r.marca_directa += 1;
+    else if (c === 'PRODUCTO_CATEGORIA') r.producto_categoria += 1;
     else if (c === 'SECTOR_REGULATORIO_ALTO') r.sector_regulatorio_alto += 1;
     else if (c === 'SECTOR_GENERAL') r.sector_general += 1;
     else r.excluir += 1;
