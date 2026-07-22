@@ -412,6 +412,18 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED: readonly ShadowMedioDaily[] = [
   {
     medio_id: 'MED-0187', nombre: 'AF Medios', fuente: 'auto', max_notas_shadow: 20, activo_shadow: true,
   },
+  // ── NEWS LAKE 200 FINAL PUSH (2026-07-22) ──────────────────────────────────
+  // Merca2.0 y El CEO estaban catalogados desde el lote 2026-07-20 pero SIN
+  // cron (prioridad baja). Se activan ahora para ampliar cobertura operativa.
+  // Catálogo NO aumenta (ya eran MED-0184 / MED-0185); solo aumentan medios
+  // leídos por cron. Límite bajo (15 notas) para validar calidad antes de
+  // subir. sitemap_index.xml verificado en vivo, sin proxy, sin JavaScript.
+  {
+    medio_id: 'MED-0184', nombre: 'Merca2.0', fuente: 'auto', max_notas_shadow: 15, activo_shadow: true,
+  },
+  {
+    medio_id: 'MED-0185', nombre: 'El CEO', fuente: 'auto', max_notas_shadow: 15, activo_shadow: true,
+  },
 ] as const;
 
 /**

@@ -23,22 +23,19 @@ describe('config Tier Daily Validated — dedupe', () => {
   const IDS_ESPERADOS = [
     'MED-0005', 'MED-0006', 'MED-0012', 'MED-0028', 'MED-0049', 'MED-0055', 'MED-0066', 'MED-0083', 'MED-0084',
     'MED-0172', 'MED-0173',
-    // Lote ETHOS 200 MEDIA NEWS LAKE (2026-07-20): 10 de 12 nuevos catalogados
-    // entran a cron (Merca2.0 MED-0184 y El CEO MED-0185 quedan sin cron).
+    // Lote ETHOS 200 MEDIA NEWS LAKE (2026-07-20): 10 medios.
     'MED-0174', 'MED-0175', 'MED-0176', 'MED-0177', 'MED-0178', 'MED-0179', 'MED-0180', 'MED-0181', 'MED-0182', 'MED-0183',
     // 2da expansión (2026-07-20): Político MX y AF Medios.
     'MED-0186', 'MED-0187',
+    // NEWS LAKE 200 FINAL PUSH (2026-07-22): Merca2.0 y El CEO activados en cron.
+    // Estaban catalogados desde 2026-07-20 (MED-0184 / MED-0185) pero sin cron.
+    // Se activan ahora para ampliar cobertura. Catálogo no aumenta.
+    'MED-0184', 'MED-0185',
   ].sort();
 
-  it('la lista contiene Zeta, Revista Espejo, marcomares, Paralelo 19, lado.mx (MED-0005), Telediario Monterrey (MED-0049), Excelsior (MED-0028), Frontera (MED-0084), Noroeste (MED-0055), AM León (MED-0172), CRT (MED-0173), el lote nacional de 10 (MED-0174..0183 excepto Merca2.0/El CEO) y la 2da expansión (Político MX, AF Medios)', () => {
+  it('la lista contiene todos los medios activos del tier incluyendo Merca2.0 (MED-0184) y El CEO (MED-0185) activados en NEWS LAKE 200 FINAL PUSH (2026-07-22)', () => {
     const ids = SHADOW_MEDIOS_DAILY_VALIDATED.map((m) => m.medio_id).sort();
     expect(ids).toEqual(IDS_ESPERADOS);
-  });
-
-  it('NO incluye Merca2.0 (MED-0184) ni El CEO (MED-0185) — catalogados, sin cron por prioridad baja', () => {
-    const ids = SHADOW_MEDIOS_DAILY_VALIDATED.map((m) => m.medio_id);
-    expect(ids).not.toContain('MED-0184');
-    expect(ids).not.toContain('MED-0185');
   });
 
   it('NO incluye boilerplate MED-0118 (El Respetable)', () => {
