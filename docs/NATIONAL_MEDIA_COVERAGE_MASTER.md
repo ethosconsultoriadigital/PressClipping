@@ -38,7 +38,7 @@ _Fase "NATIONAL MEDIA COVERAGE RAMP + JUMEX STAGING PRODUCTION CRITERIA"
 | Proceso | sí | sí | sí | parcial (20.3%) | no | candidato próximo lote |
 | Animal Político | sí | no | no | no | sitemap devuelve página "offline" (no confiable) | requiere investigación adicional |
 | Aristegui Noticias | sí | **sí (nuevo)** | sí | sí | no | mantener, alta reciente |
-| LatinUS | no | no | — | — | — | evaluar alta |
+| LatinUS | no | no | — | — | — | evaluar alta (B_PUBLICO_DIRECT — investigación DIRECT en curso) |
 | Uno TV | sí | sí | sí | sí | no | mantener |
 | Publimetro | sí | sí | sí | sí | no | mantener |
 | El Sol de México | sí | sí | sí | parcial (34.6%) | no | re-enrich reciente aplicado |
@@ -47,7 +47,7 @@ _Fase "NATIONAL MEDIA COVERAGE RAMP + JUMEX STAGING PRODUCTION CRITERIA"
 | NTR Guadalajara | sí | no | no | no | sitemap solo tiene secciones, no artículos | requiere extracción directa (no quick win) |
 | Milenio Jalisco/Guanajuato | sí | sí | sí | sí | — | resuelve a Milenio nacional (sin ediciones separadas) |
 | Quadratín Jalisco | sí | no | — | — | — | candidato a cron |
-| AF Medios | no | no | — | — | — | evaluar alta |
+| AF Medios | **sí (MED-0187)** | **sí** | sí | 77%+ | no | **alta 2026-07-20 — LISTO** |
 | Líder Informativo | sí | no | — | — | — | candidato a cron |
 | Periódico Correo | sí | sí | sí | sí | no | mantener (caballo de batalla Patrón) |
 | El Sol de Irapuato | sí | sí | sí | sí | no | mantener |
@@ -57,7 +57,7 @@ _Fase "NATIONAL MEDIA COVERAGE RAMP + JUMEX STAGING PRODUCTION CRITERIA"
 | Revista Espejo | sí | sí | sí | sí | no | mantener |
 | COFEPRIS | no | no | — | — | gob.mx portal complejo, sin sitemap COFEPRIS-específico identificable | NO catalogado — requiere investigación dedicada |
 | CRT | sí | sí | sí | sí | no | mantener (alta reciente) |
-| CNIT | no | no | — | — | blog público real, pero requiere extracción DIRECT (sin sitemap) | NO catalogado — candidato a fase dedicada |
+| CNIT | **sí (MED-0188)** | no (script DIRECT propio) | pendiente crawl | — | B_PUBLICO_DIRECT | **CATALOGADO 2026-07-22** — extractor DIRECT implementado (`crawl-direct-cnit.ts`), pendiente crawl inicial |
 
 ## 3. Sub-lote nacional ejecutado (máx. 4 candidatos evaluados, solo 1 viable + 1 reparado)
 
@@ -115,7 +115,21 @@ artículos reales, como AM León/CRT la fase pasada):
   método más complejo que merece su propia fase de verificación, no un
   intento apurado.
 
-## 7. Recomendación estructural (la más importante de esta fase)
+## 7. Actualizaciones NEWS LAKE 200 FINAL PUSH (2026-07-22)
+
+| medio | acción | resultado |
+|---|---|---|
+| Merca2.0 (MED-0184) | Activado en cron daily-validated (estaba catalogado sin cron) | 15 noticias, 0 errores, texto limpio OK |
+| El CEO (MED-0185) | Activado en cron daily-validated (estaba catalogado sin cron) | 15 noticias, 0 errores, texto limpio OK |
+| CNIT (MED-0188) | Catalogado, extractor DIRECT creado | Pendiente primer crawl real |
+| Jumex staging | Rerun post-activación | 21 menciones/30d — **NO-GO** (1 MARCA_DIRECTA) |
+
+**Conteo real (2026-07-22):**
+- Catálogo: **188 medios** (sin cambio desde CNIT, alta 2026-07-22)
+- En cron estándar: **58** (+2 Merca2.0 + El CEO; sin contar CNIT que usa script DIRECT)
+- Catálogo sin cron: 130
+
+## 8. Recomendación estructural (la más importante de esta fase)
 
 Con 3 rondas de re-enrich acumuladas sobre los mismos medios de alto volumen
 (El Heraldo, El Informador, El Economista, La Razón) y degradación repetida

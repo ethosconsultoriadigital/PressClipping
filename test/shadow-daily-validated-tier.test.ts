@@ -31,9 +31,11 @@ describe('config Tier Daily Validated — dedupe', () => {
     // Estaban catalogados desde 2026-07-20 (MED-0184 / MED-0185) pero sin cron.
     // Se activan ahora para ampliar cobertura. Catálogo no aumenta.
     'MED-0184', 'MED-0185',
+    // PorEsto (MED-0189) — A_PUBLICO_FACIL RSS, alta catálogo + cron simultáneos (2026-07-22).
+    'MED-0189',
   ].sort();
 
-  it('la lista contiene todos los medios activos del tier incluyendo Merca2.0 (MED-0184) y El CEO (MED-0185) activados en NEWS LAKE 200 FINAL PUSH (2026-07-22)', () => {
+  it('la lista contiene todos los medios activos del tier incluyendo Merca2.0 (MED-0184), El CEO (MED-0185) y PorEsto (MED-0189) activados en NEWS LAKE 200 FINAL PUSH (2026-07-22)', () => {
     const ids = SHADOW_MEDIOS_DAILY_VALIDATED.map((m) => m.medio_id).sort();
     expect(ids).toEqual(IDS_ESPERADOS);
   });
@@ -61,10 +63,11 @@ describe('config Tier Daily Validated — dedupe', () => {
     expect(mediosDailyNetNew().map((m) => m.medio_id).sort()).toEqual(IDS_ESPERADOS);
   });
 
-  it('respeta max_notas por medio (<=30) y fuente auto', () => {
+  it('respeta max_notas por medio (<=30) y fuente válida (auto/rss/sitemap)', () => {
+    const FUENTES_VALIDAS = new Set<string>(['auto', 'rss', 'sitemap']);
     for (const m of mediosDailyValidatedActivos()) {
       expect(m.max_notas_shadow).toBeLessThanOrEqual(30);
-      expect(m.fuente).toBe('auto');
+      expect(FUENTES_VALIDAS.has(m.fuente)).toBe(true);
     }
   });
 

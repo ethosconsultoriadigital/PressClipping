@@ -96,7 +96,32 @@ Implementado en `src/editorial/jumexCriteria.ts` (13 tests), reutilizando el
 
 **Resultado real (30d, `npm run report-jumex-staging-categorized`):** 17
 menciones — 1 MARCA_DIRECTA, 2 SECTOR_REGULATORIO_ALTO, 8 SECTOR_GENERAL, 6
-EXCLUIR. Veredicto automático: **NO-GO** ("solo 1 mención MARCA_DIRECTA —
-insuficiente para producción estable, requiere autorización editorial
-expresa"). Regla codificada: <3 menciones MARCA_DIRECTA en la ventana =
-NO-GO automático, salvo autorización editorial explícita del usuario.
+EXCLUIR. Veredicto automático: **NO-GO**. Regla codificada: <3 menciones
+MARCA_DIRECTA en la ventana = NO-GO automático.
+
+---
+
+## 6. Rerun staging (2026-07-22 — NEWS LAKE 200 FINAL PUSH)
+
+Después de activar Merca2.0 (MED-0184) y El CEO (MED-0185) en cron y ejecutar
+crawl + enrich de ambos (30 noticias nuevas, 77% texto limpio):
+
+| ventana | menciones |
+|---|---|
+| 24h | 4 |
+| 7d | 6 |
+| 30d | 21 |
+
+**Por categoría (30d):** 1 MARCA_DIRECTA, 4 SECTOR_REGULATORIO_ALTO, 10
+SECTOR_GENERAL, 6 EXCLUIR.
+
+**Único titular MARCA_DIRECTA:** "Diecisiete toneladas de mango iban a
+desperdiciarse..." — El Imparcial Sonora. Sigue siendo el mismo caso
+borderline (donación de mango, Jumex probablemente involucrado indirectamente).
+
+**Medios que aportaron menciones:** Excelsior, El Informador, Aristegui,
+El Heraldo de México, El Sol de México, La Razón, El Diario de Chihuahua,
+Vanguardia, Revista Espejo, Zócalo, Coolhuntermx, Xataka México.
+
+**Veredicto: NO-GO mantenido.** 1 MARCA_DIRECTA / 30d — umbral sigue sin
+alcanzarse. Hoja final Jumex no tocada. Ningún dato escrito en Sheets.

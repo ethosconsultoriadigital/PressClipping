@@ -424,6 +424,11 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED: readonly ShadowMedioDaily[] = [
   {
     medio_id: 'MED-0185', nombre: 'El CEO', fuente: 'auto', max_notas_shadow: 15, activo_shadow: true,
   },
+  // PorEsto (MED-0189) — A_PUBLICO_FACIL, RSS verificado en vivo 2026-07-22.
+  // Cobertura: Yucatán/Sureste. Catálogo AUMENTA en 1 (lote3 + cron simultáneo).
+  {
+    medio_id: 'MED-0189', nombre: 'PorEsto', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true,
+  },
 ] as const;
 
 /**
