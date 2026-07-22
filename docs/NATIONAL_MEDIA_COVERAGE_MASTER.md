@@ -125,13 +125,23 @@ artículos reales, como AM León/CRT la fase pasada):
 | Jumex staging | Rerun post-activación | 21 menciones/30d — **NO-GO** (1 MARCA_DIRECTA) |
 | PorEsto (MED-0189) | Catalogado A_PUBLICO_FACIL + activado en cron daily-validated (fuente: rss) | Pendiente primer crawl real |
 | LatinUS (MED-0190) | Catalogado B_PUBLICO_DIRECT + extractor DIRECT `crawl-direct-latinus.ts` | Pendiente primer crawl real |
-| La Silla Rota (MED-0191) | Catalogado B_PUBLICO_DIRECT + extractor DIRECT `crawl-direct-lasillarota.ts` (prioridad Alta, P2) | Pendiente primer crawl real |
+| La Silla Rota (MED-0191) | Catalogado B_PUBLICO_DIRECT + extractor DIRECT `crawl-direct-lasillarota.ts` (prioridad Alta, P2) | **10 noticias, 10 enriquecidas, 0 fallidas** |
+| ZonaDocs (MED-0192) | Catalogado A_PUBLICO_FACIL RSS, activado en daily-validated | 15 noticias lote4 crawl |
+| Pie de Página (MED-0193) | Catalogado A_PUBLICO_FACIL RSS, activado en daily-validated | 15 noticias lote4 crawl |
+| Chiapas Paralelo (MED-0194) | Catalogado A_PUBLICO_FACIL RSS, activado en daily-validated | 15 noticias lote4 crawl |
+| Quadratín Nacional (MED-0195) | Catalogado A_PUBLICO_FACIL RSS, activado en daily-validated | 15 noticias lote4 crawl |
+| Tabasco Hoy (MED-0196) | Catalogado A_PUBLICO_FACIL RSS, activado en daily-validated | 15 noticias lote4 crawl |
+| El Imparcial Oaxaca (MED-0197) | Catalogado A_PUBLICO_FACIL RSS, activado en daily-validated | 15 noticias lote4 crawl |
+| 8 Columnas (MED-0198) | Catalogado A_PUBLICO_FACIL RSS, activado en daily-validated | 10 noticias lote4 crawl |
+| DesInformémonos (MED-0199) | Catalogado A_PUBLICO_FACIL RSS, activado en daily-validated | 10 noticias lote4 crawl |
+| Eje Central (MED-0200) | Catalogado A_PUBLICO_FACIL SITEMAP mensual (1357+/mes), sin cron | **HITO 200 MEDIOS** — evaluar volumen antes de activar cron |
 
-**Conteo real (2026-07-22 — lote3 final):**
-- Catálogo: **191 medios** (MED-0189 PorEsto, MED-0190 LatinUS, MED-0191 La Silla Rota)
-- En cron estándar: **59** (+3 vs. pre-push: Merca2.0 + El CEO + PorEsto; CNIT/LatinUS/LSR usan scripts DIRECT fuera del cron estándar)
-- Extractores DIRECT implementados: **3** (CNIT `crawl-direct-cnit.ts`, LatinUS `crawl-direct-latinus.ts`, La Silla Rota `crawl-direct-lasillarota.ts`)
-- Catálogo sin cron: 132
+**Conteo real (2026-07-22 — HITO 200 MEDIOS):**
+- Catálogo: **200 medios** (MED-0001 a MED-0200)
+- En cron estándar (daily-validated): **67** (+8 del lote4: ZonaDocs, Pie de Página, Chiapas Paralelo, Quadratín Nacional, Tabasco Hoy, El Imparcial Oaxaca, 8 Columnas, DesInformémonos)
+- Extractores DIRECT implementados: **3** (CNIT, LatinUS, La Silla Rota)
+- Eje Central (MED-0200): catalogado, sin cron (ALTO VOLUMEN — evaluar primero)
+- Catálogo sin cron: 133 (incluye MED-0200)
 
 ## 8. Recomendación estructural (la más importante de esta fase)
 
