@@ -1,0 +1,86 @@
+# ============================================================================
+# MERY POZOS NO-PC CAPTURE — MANUAL ONLY (workflow_dispatch)
+# ----------------------------------------------------------------------------
+# Exporta menciones de CLI-MERY-TEST a tabs 16/17/18 de la Output Sheet.
+# Solo lectura de Supabase; escribe en Google Sheets internos.
+#
+# NO envía email, WhatsApp, Twilio ni SMTP.
+# NO activa alertas_activas — permanece false en Supabase.
+# NO toca hoja final Jumex.
+# NO usa export-results, generate-xml, classify-ia.
+#
+# Default seguro: dry_run=true, output_sheet=false.
+# Para escritura real: dry_run=false + output_sheet=true (requiere intención explícita).
+#
+# Secrets requeridos (Settings → Secrets and variables → Actions):
+#   SUPABASE_URL · SUPABASE_SERVICE_ROLE_KEY · GOOGLE_SERVICE_ACCOUNT_EMAIL ·
+#   GOOGLE_PRIVATE_KEY · GOOGLE_OUTPUT_SHEET_ID (fallback GOOGLE_SHEET_ID)
+# ============================================================================
+name: mery-no-pc-capture
+
+on:
+  workflow_dispatch:
+    inputs:
+      window_days:
+        description: 'Ventana de menciones en días (default 30).'
+        required: false
+        default: '30'
+      dry_run:
+        description: 'Modo dry-run (true = solo reporta, no escribe en Sheets).'
+        required: false
+        default: 'true'
+      output_sheet:
+        description: 'Escribir en Sheets tabs 16/17/18. Ignorado si dry_run=true.'
+        required: false
+        default: 'false'
+      max_rows:
+        description: 'Tope de artículos deduplicados a procesar.'
+        required: false
+        default: '200'
+
+concurrency:
+  group: mery-no-pc-capture
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Mery Pozos export (CLI-MERY-TEST, sin envíos, alertas_activas intacto)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+      GOOGLE_OUTPUT_SHEET_ID: ${{ secrets.GOOGLE_OUTPUT_SHEET_ID }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      LOG_FORMAT: json
+      RUN_BY: github-actions-mery-no-pc-capture
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Mery Pozos export (CLI-MERY-TEST, tabs 16/17/18)
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+        run: |
+          DAYS="${{ github.event.inputs.window_days || '30' }}"
+          MAXROWS="${{ github.event.inputs.max_rows || '200' }}"
+          DRYRUN="${{ github.event.inputs.dry_run || 'true' }}"
+          OUTPUT="${{ github.event.inputs.output_sheet || 'false' }}"
+
+          ARGS="--window-days=$DAYS --max-rows=$MAXROWS"
+          if [ "$DRYRUN" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          elif [ "$OUTPUT" = "true" ]; then
+            ARGS="$ARGS --output=sheet"
+          fi
+
+          npm run mery:no-pc:capture -- $ARGS

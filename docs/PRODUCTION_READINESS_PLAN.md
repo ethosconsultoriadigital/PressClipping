@@ -845,3 +845,13 @@ durable, no un pico puntual. No se llegó a 200 exactos (187) — se documentó
 honestamente por qué (candidatos viables agotados, no se agrega basura).
 Jumex sin cambios (NO-GO). Patrón estable (cron cada 2h, `approved_rows`=12,
 0 Jumex). Commits `f74eadc`, `84d2f01` y este ciclo.
+
+## MERY POZOS CONTROLLED PRODUCTION OUTPUT (2026-07-23)
+
+**Estado: CONTROLLED_PRODUCTION_OUTPUT implementado.** `alertas_activas=false` sin cambio. Sin envíos.
+
+Creados: `src/editorial/meryCriteria.ts` (clasificación editorial en 5 categorías),
+`scripts/export-mery-final-preview-no-pc.ts` (exportador menciones → tabs 16/17/18),
+`.github/workflows/mery-no-pc-capture.yml` (solo workflow_dispatch, dry_run=true default),
+`npm run mery:no-pc:capture`. Tests: 1262/1262 verdes (+43 nuevos).
+Detalle: `docs/MERY_POZOS_STAGING_READINESS.md` §10.

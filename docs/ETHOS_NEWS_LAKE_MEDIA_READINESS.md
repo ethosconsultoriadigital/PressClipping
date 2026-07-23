@@ -189,3 +189,15 @@ Detalle: `docs/MERY_POZOS_STAGING_READINESS.md`.
 - Jumex (CLI-0001): staging NO-GO (1 MARCA_DIRECTA / 30d), sin tocar hoja final.
 - 5-categoría editorial Jumex implementada (PRODUCTO_CATEGORIA añadida).
 - 1219/1219 tests verdes.
+
+## 10. MERY POZOS CONTROLLED PRODUCTION OUTPUT (2026-07-23)
+
+**Producción controlada interna activada.** alertas_activas=false — sin envíos.
+
+Clasificación editorial en 5 categorías (meryCriteria.ts): MENCION_DIRECTA,
+CONTEXTO_POLITICO, TEMA_RELACIONADO, POSIBLE_FP, EXCLUIR. Salida a tres tabs:
+16_Mery_Final_Preview (GO_DIRECTA/GO_CONTEXTO), 17_Mery_Revision_Humana,
+18_Mery_Excluidas. Deduplicación por noticia_id. Grupo temático auto-detectado.
+"La Tremenda Corte" → POSIBLE_FP → REVISION_HUMANA.
+
+1262/1262 tests verdes. Typecheck limpio. Workflow solo manual (no schedule).

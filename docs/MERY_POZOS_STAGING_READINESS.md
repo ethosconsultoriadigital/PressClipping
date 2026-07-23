@@ -215,12 +215,51 @@ El siguiente ciclo de enrich + detect procesará las 500 noticias actuales.
 
 ---
 
-## 10. Siguiente paso recomendado
+## 10. Producción controlada interna (2026-07-23)
 
-**GO condicionado.** Para avanzar a producción controlada:
-1. Leer manualmente "La Tremenda Corte" (Milenio, 2026-07-20) para confirmar
-   que la mención es real — si es legítima, el set es limpio.
-2. Autorizar `alertas_activas=true` para CLI-MERY-TEST.
-3. Definir formato de salida (Sheets / report interno).
+**Estado: CONTROLLED_PRODUCTION_OUTPUT IMPLEMENTADO.**
 
-**No activar sin autorización explícita.**
+`alertas_activas=false` — sin cambio. Sin envíos reales.
+
+### Artefactos creados
+
+| artefacto | descripción |
+|---|---|
+| `src/editorial/meryCriteria.ts` | Lógica de clasificación editorial (sin dependencias externas) |
+| `scripts/export-mery-final-preview-no-pc.ts` | Exportador: menciones → tabs 16/17/18 |
+| `.github/workflows/mery-no-pc-capture.yml` | Workflow manual (solo workflow_dispatch) |
+| `test/mery-criteria.test.ts` | 43 tests de clasificación + parseArgs safety |
+| `npm run mery:no-pc:capture` | Comando con default `--dry-run` (console output) |
+
+### Tabs de salida
+
+| tab | contenido | estado_editorial |
+|---|---|---|
+| `16_Mery_Final_Preview` | MENCION_DIRECTA + CONTEXTO_POLITICO | GO_DIRECTA / GO_CONTEXTO |
+| `17_Mery_Revision_Humana` | TEMA_RELACIONADO + POSIBLE_FP | REVISION_HUMANA |
+| `18_Mery_Excluidas` | EXCLUIR | EXCLUIDA |
+
+### Clasificación editorial
+
+- **MENCION_DIRECTA**: Tier 1/2 (KEY-0040..0047) + nombre en título → `GO_DIRECTA`
+- **CONTEXTO_POLITICO**: Tier 1/2 + nombre solo en cuerpo → `GO_CONTEXTO`
+- **TEMA_RELACIONADO**: Tier 3 (KEY-0048..0051) → `REVISION_HUMANA`
+- **POSIBLE_FP**: título "La Tremenda Corte" u otros patrones → `REVISION_HUMANA`
+- **EXCLUIR**: falsos positivos confirmados → `EXCLUIDA`
+
+### Comandos
+
+```bash
+# Dry-run seguro (default)
+npm run mery:no-pc:capture -- --window-days=30 --dry-run
+
+# Escritura real a Sheets (requiere autorización explícita)
+npm run mery:no-pc:capture -- --window-days=30 --output=sheet
+```
+
+### Pendientes
+
+1. Verificar manualmente "La Tremenda Corte" (Milenio, 2026-07-20/21) — 1–2 artículos.
+2. Autorizar `alertas_activas=true` si se desea integrar con el pipeline shadow.
+
+**No activar `alertas_activas=true` sin autorización explícita.**
