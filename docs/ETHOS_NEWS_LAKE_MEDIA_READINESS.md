@@ -172,3 +172,20 @@ en 50,000 filas sin error — corregido a paginación por medio_id). Detalle
 completo, incluyendo la recomendación estructural más importante de la fase
 (el re-enrich manual no es durable para medios >1000 notas/semana), en
 `docs/NATIONAL_MEDIA_COVERAGE_MASTER.md`.
+
+
+## 9. NEWS LAKE 200 FINAL PUSH + MERY POZOS BACKTEST (2026-07-22)
+
+**Hito 200 medios alcanzado.** Catálogo: 200 medios (MED-0001–MED-0200),
+67 en cron diario, 3 extractores DIRECT (CNIT, LatinUS, La Silla Rota).
+
+**CLI-MERY-TEST — GO CONDICIONADO.** 29 menciones / 30d sobre base de 200
+medios. Tema: crisis del agua en Jalisco/Guadalajara. Medios: El Informador,
+Milenio, Telediario, El Heraldo, Político MX. FP ~10%, señal sostenida.
+Detalle: `docs/MERY_POZOS_STAGING_READINESS.md`.
+
+**Salud del sistema (2026-07-22):**
+- Patrón (CLI-0002): cron cada 2h, activo, sin cambios.
+- Jumex (CLI-0001): staging NO-GO (1 MARCA_DIRECTA / 30d), sin tocar hoja final.
+- 5-categoría editorial Jumex implementada (PRODUCTO_CATEGORIA añadida).
+- 1219/1219 tests verdes.

@@ -377,6 +377,33 @@ el pipeline de detección, sí lo es para la métrica formal de comparación.
 `GO_ENVIO_INTERNO_LIMITADO` para CLI-0002 se estima en días, no en 30 días — sujeto a
 reparar el feed XML y correr 2-3 ciclos más de `shadow-alerts` sin mismatch.
 
+### CLI-MERY-TEST — 200-media backtest (2026-07-22)
+
+Fase "MERY POZOS STAGING ALERT — 200 MEDIA BACKTEST" completada sobre el lago de 200 medios.
+
+| ventana | menciones |
+|---|---|
+| 24h | 2 |
+| 7d | 26 |
+| 30d | **29** |
+| 90d | 29 (toda actividad en 30d) |
+
+**Tema dominante:** crisis del agua en Jalisco/Guadalajara (plomo y mercurio, SIAPA,
+privatización, Consejo Consultivo). Mery Pozos actúa como vocera federal de Morena.
+
+**Medios:** El Informador (~17 menciones), Milenio (~7), Telediario Monterrey (~4),
+El Heraldo de México (2), Político MX (2).
+
+**Clasificación:** ~60–80% MENCION_DIRECTA (nombre en título), ~20–30% CONTEXTO_POLITICO
+(cuerpo político), ~10% POSIBLE_FP a verificar ("La Tremenda Corte" Milenio).
+
+**FP confirmados de "Pozos" genérico:** 0 — exclusiones funcionando.
+
+**Veredicto: GO CONDICIONADO** (29 menciones / 30d, 5 medios, FP bajo, signal sostenida).
+Pendiente: verificar "La Tremenda Corte" manualmente + autorización para `alertas_activas=true`.
+
+Ver detalle completo: `docs/MERY_POZOS_STAGING_READINESS.md`.
+
 ---
 
 ## EMERGENCIA — PressClipping cancelado: Ethos como servicio principal (2026-07-11)
