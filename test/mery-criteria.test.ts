@@ -9,10 +9,17 @@ import {
   TIER_BAJA_IDS,
   PRIORIDAD_CAT,
 } from '../src/editorial/meryCriteria.js';
-import { parseArgs } from '../scripts/export-mery-final-preview-no-pc.js';
+import {
+  parseArgs,
+  cleanTextForSheet,
+  buildNotaCompletaLimpia,
+  buildExtractLimpio,
+  selectBestText,
+  HEADERS,
+} from '../scripts/export-mery-final-preview-no-pc.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// clasificarMery
+// clasificarMery — Tier 1/2
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('clasificarMery — Tier 1/2 (KEY-0040..0047)', () => {
@@ -32,7 +39,7 @@ describe('clasificarMery — Tier 1/2 (KEY-0040..0047)', () => {
     expect(clasificarMery('Mery Gómez Pozos participa en debate legislativo', 'KEY-0042')).toBe('MENCION_DIRECTA');
   });
 
-  it('título sin nombre (cuerpo match) + Tier 1 → CONTEXTO_POLITICO', () => {
+  it('título sin nombre + Tier 1 → CONTEXTO_POLITICO', () => {
     expect(clasificarMery('Crisis del agua en Jalisco expone divisiones en Morena', 'KEY-0040')).toBe('CONTEXTO_POLITICO');
   });
 
@@ -94,7 +101,7 @@ describe('estadoEditorialMery', () => {
     expect(estadoEditorialMery('TEMA_RELACIONADO')).toBe('REVISION_HUMANA');
   });
 
-  it('POSIBLE_FP → REVISION_HUMANA', () => {
+  it('POSIBLE_FP → REVISION_HUMANA (La Tremenda Corte no se excluye, va a revisión)', () => {
     expect(estadoEditorialMery('POSIBLE_FP')).toBe('REVISION_HUMANA');
   });
 
@@ -120,7 +127,7 @@ describe('tabDestinoMery', () => {
     expect(tabDestinoMery('TEMA_RELACIONADO')).toBe('17_Mery_Revision_Humana');
   });
 
-  it('POSIBLE_FP → 17_Mery_Revision_Humana', () => {
+  it('POSIBLE_FP → 17_Mery_Revision_Humana (no excluida)', () => {
     expect(tabDestinoMery('POSIBLE_FP')).toBe('17_Mery_Revision_Humana');
   });
 
@@ -185,6 +192,237 @@ describe('detectGrupoTemaMery', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// cleanTextForSheet
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('cleanTextForSheet', () => {
+  it('elimina tabs', () => {
+    expect(cleanTextForSheet('texto\tcon\ttabs')).toBe('texto con tabs');
+  });
+
+  it('normaliza saltos de línea múltiples a máximo dos', () => {
+    const raw = 'párrafo uno\n\n\n\n\npárrafo dos';
+    expect(cleanTextForSheet(raw)).toBe('párrafo uno\n\npárrafo dos');
+  });
+
+  it('colapsa espacios múltiples', () => {
+    expect(cleanTextForSheet('texto  con   espacios')).toBe('texto con espacios');
+  });
+
+  it('trim de cada línea', () => {
+    const raw = '  línea con espacio   \n  otra línea  ';
+    const result = cleanTextForSheet(raw);
+    expect(result).toBe('línea con espacio\notra línea');
+  });
+
+  it('null/undefined → string vacío', () => {
+    expect(cleanTextForSheet(null)).toBe('');
+    expect(cleanTextForSheet(undefined)).toBe('');
+    expect(cleanTextForSheet('')).toBe('');
+  });
+
+  it('CRLF normalizado a LF', () => {
+    expect(cleanTextForSheet('línea\r\notro')).toBe('línea\notro');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// buildNotaCompletaLimpia
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('buildNotaCompletaLimpia', () => {
+  it('elimina "MÁS SOBRE ESTE TEMA"', () => {
+    const raw = 'Cuerpo de la nota.\nMÁS SOBRE ESTE TEMA: Agua en Jalisco\nOtro párrafo.';
+    const { texto } = buildNotaCompletaLimpia(raw);
+    expect(texto).not.toMatch(/más sobre este tema/i);
+    expect(texto).toContain('Cuerpo de la nota');
+    expect(texto).toContain('Otro párrafo');
+  });
+
+  it('elimina "Ver más en"', () => {
+    const raw = 'Contenido real.\nVer más en: elinfomador.com\nMás contenido.';
+    const { texto } = buildNotaCompletaLimpia(raw);
+    expect(texto).not.toMatch(/ver más en/i);
+  });
+
+  it('elimina "Únete a nuestro canal"', () => {
+    const raw = 'Nota política.\nÚnete a nuestro canal de WhatsApp\nSiguiente párrafo.';
+    const { texto } = buildNotaCompletaLimpia(raw);
+    expect(texto).not.toMatch(/únete a nuestro canal/i);
+  });
+
+  it('elimina "Publicidad"', () => {
+    const raw = 'Párrafo uno.\nPublicidad\nPárrafo dos.';
+    const { texto } = buildNotaCompletaLimpia(raw);
+    expect(texto).not.toMatch(/\bPublicidad\b/i);
+  });
+
+  it('elimina "Suscríbete"', () => {
+    const raw = 'Nota real.\nSuscríbete a nuestro newsletter\nFin.';
+    const { texto } = buildNotaCompletaLimpia(raw);
+    expect(texto).not.toMatch(/suscr[íi]bete/i);
+  });
+
+  it('preserva párrafos legítimos con saltos de línea simples', () => {
+    const raw = 'Párrafo uno.\n\nPárrafo dos.\n\nPárrafo tres.';
+    const { texto } = buildNotaCompletaLimpia(raw);
+    expect(texto).toBe('Párrafo uno.\n\nPárrafo dos.\n\nPárrafo tres.');
+  });
+
+  it('texto vacío → truncada=false, texto vacío', () => {
+    const { texto, truncada } = buildNotaCompletaLimpia('');
+    expect(texto).toBe('');
+    expect(truncada).toBe(false);
+  });
+
+  it('texto corto → no truncado', () => {
+    const { truncada } = buildNotaCompletaLimpia('Texto corto.');
+    expect(truncada).toBe(false);
+  });
+
+  it('texto largo → truncado=true, texto termina en "…"', () => {
+    const largo = 'a'.repeat(5000);
+    const { texto, truncada } = buildNotaCompletaLimpia(largo, 4000);
+    expect(truncada).toBe(true);
+    expect(texto.endsWith('…')).toBe(true);
+    expect(texto.length).toBeLessThanOrEqual(4010);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// buildExtractLimpio
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('buildExtractLimpio', () => {
+  it('texto corto → sale completo, sin saltos de línea', () => {
+    const result = buildExtractLimpio('Mery Pozos habló sobre el agua.', 'Mery Pozos');
+    expect(result).toBe('Mery Pozos habló sobre el agua.');
+    expect(result).not.toContain('\n');
+  });
+
+  it('saltos de línea se convierten en espacios', () => {
+    const raw = 'Primera línea.\nSegunda línea.\nTercera.';
+    const result = buildExtractLimpio(raw, 'línea', 600);
+    expect(result).not.toContain('\n');
+  });
+
+  it('texto largo → se trunca a maxChars', () => {
+    const largo = 'x'.repeat(1000);
+    const result = buildExtractLimpio(largo, 'y', 600);
+    expect(result.length).toBeLessThanOrEqual(605); // +elipsis
+  });
+
+  it('keyword al centro: extracto incluye la keyword', () => {
+    const inicio = 'a'.repeat(400);
+    const fin = 'b'.repeat(400);
+    const raw = `${inicio}Mery Pozos${fin}`;
+    const result = buildExtractLimpio(raw, 'Mery Pozos', 200);
+    expect(result.toLowerCase()).toContain('mery pozos');
+  });
+
+  it('sin keyword match → trunca desde el inicio', () => {
+    const raw = 'texto sin keyword '.repeat(50);
+    const result = buildExtractLimpio(raw, 'XYZ_NO_EXISTE', 100);
+    expect(result.length).toBeLessThanOrEqual(105);
+  });
+
+  it('null → string vacío', () => {
+    expect(buildExtractLimpio(null, 'Mery Pozos')).toBe('');
+    expect(buildExtractLimpio(undefined, 'Mery Pozos')).toBe('');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// selectBestText
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('selectBestText', () => {
+  it('prioriza texto_nota_limpia sobre todo', () => {
+    const result = selectBestText({
+      texto_nota_limpia: 'limpia',
+      texto_cuerpo_nota: 'cuerpo',
+      texto_extraido: 'extraido',
+      resumen: 'resumen',
+    }, 'match');
+    expect(result).toBe('limpia');
+  });
+
+  it('cae a texto_cuerpo_nota si nota_limpia es null', () => {
+    const result = selectBestText({
+      texto_nota_limpia: null,
+      texto_cuerpo_nota: 'cuerpo',
+      texto_extraido: 'extraido',
+      resumen: 'resumen',
+    }, 'match');
+    expect(result).toBe('cuerpo');
+  });
+
+  it('cae a texto_extraido si cuerpo_nota es null', () => {
+    const result = selectBestText({
+      texto_nota_limpia: null,
+      texto_cuerpo_nota: null,
+      texto_extraido: 'extraido',
+      resumen: 'resumen',
+    }, 'match');
+    expect(result).toBe('extraido');
+  });
+
+  it('cae a resumen si extraido es null', () => {
+    const result = selectBestText({
+      texto_nota_limpia: null,
+      texto_cuerpo_nota: null,
+      texto_extraido: null,
+      resumen: 'resumen',
+    }, 'match');
+    expect(result).toBe('resumen');
+  });
+
+  it('último fallback: texto_match', () => {
+    const result = selectBestText({
+      texto_nota_limpia: null,
+      texto_cuerpo_nota: null,
+      texto_extraido: null,
+      resumen: null,
+    }, 'match');
+    expect(result).toBe('match');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HEADERS — columnas requeridas
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('HEADERS — columnas operativas', () => {
+  it('incluye nota_completa_limpia', () => {
+    expect(HEADERS).toContain('nota_completa_limpia');
+  });
+
+  it('incluye extracto_limpio', () => {
+    expect(HEADERS).toContain('extracto_limpio');
+  });
+
+  it('incluye nota_completa_chars', () => {
+    expect(HEADERS).toContain('nota_completa_chars');
+  });
+
+  it('incluye nota_completa_truncada', () => {
+    expect(HEADERS).toContain('nota_completa_truncada');
+  });
+
+  it('mantiene columnas legacy (dedupe_key, url_norm, extracto_match)', () => {
+    expect(HEADERS).toContain('dedupe_key');
+    expect(HEADERS).toContain('url_norm');
+    expect(HEADERS).toContain('extracto_match');
+  });
+
+  it('nota_completa_limpia aparece antes de campos legacy', () => {
+    const idxNota = HEADERS.indexOf('nota_completa_limpia');
+    const idxLegacy = HEADERS.indexOf('url_norm');
+    expect(idxNota).toBeLessThan(idxLegacy);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // parseArgs — seguridad de salida
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -219,7 +457,7 @@ describe('parseArgs — output safety', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Invariantes de clasificación para los 29 artículos conocidos del backtest
+// Casos reales del backtest 2026-07-22
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('clasificarMery — casos reales del backtest 2026-07-22', () => {
@@ -229,25 +467,28 @@ describe('clasificarMery — casos reales del backtest 2026-07-22', () => {
     )).toBe('MENCION_DIRECTA');
   });
 
-  it('Hay presencia de plomo y mercurio, denuncia diputada Mery Pozos (El Heraldo) → MENCION_DIRECTA', () => {
+  it('denuncia diputada Mery Pozos (El Heraldo) → MENCION_DIRECTA', () => {
     expect(clasificarMery(
       'Hay presencia de plomo y mercurio en agua potable en Guadalajara, denuncia diputada Mery Pozos', 'KEY-0045',
     )).toBe('MENCION_DIRECTA');
   });
 
-  it('SIAPA: Gobierno de Jalisco abierto al diálogo (El Informador) + KEY-0040 → CONTEXTO_POLITICO', () => {
+  it('SIAPA: Gobierno de Jalisco (El Informador) + KEY-0040 → CONTEXTO_POLITICO', () => {
     expect(clasificarMery(
       'SIAPA: Gobierno de Jalisco se dice abierto al diálogo ante propuesta de Consejo Consultivo del Agua', 'KEY-0040',
     )).toBe('CONTEXTO_POLITICO');
   });
 
-  it('La Tremenda Corte (Milenio) → POSIBLE_FP independientemente del keyword', () => {
+  it('La Tremenda Corte (Milenio) → POSIBLE_FP → sigue en REVISION_HUMANA, no excluida', () => {
     for (const id of ['KEY-0040', 'KEY-0041', 'KEY-0046', 'KEY-0048', 'KEY-0050', 'KEY-0051']) {
-      expect(clasificarMery('La Tremenda Corte', id)).toBe('POSIBLE_FP');
+      const cat = clasificarMery('La Tremenda Corte', id);
+      expect(cat).toBe('POSIBLE_FP');
+      expect(estadoEditorialMery(cat)).toBe('REVISION_HUMANA');
+      expect(tabDestinoMery(cat)).toBe('17_Mery_Revision_Humana');
     }
   });
 
-  it('POSIBLE_FP gana sobre MENCION_DIRECTA en prioridad de fusión', () => {
+  it('prioridad de categorías: POSIBLE_FP > MENCION_DIRECTA > CONTEXTO_POLITICO > TEMA_RELACIONADO > EXCLUIR', () => {
     expect(PRIORIDAD_CAT['POSIBLE_FP']).toBeGreaterThan(PRIORIDAD_CAT['MENCION_DIRECTA']);
     expect(PRIORIDAD_CAT['MENCION_DIRECTA']).toBeGreaterThan(PRIORIDAD_CAT['CONTEXTO_POLITICO']);
     expect(PRIORIDAD_CAT['CONTEXTO_POLITICO']).toBeGreaterThan(PRIORIDAD_CAT['TEMA_RELACIONADO']);

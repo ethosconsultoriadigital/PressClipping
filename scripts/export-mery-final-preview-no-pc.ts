@@ -40,12 +40,142 @@ const PREVIEW_TAB = '16_Mery_Final_Preview';
 const REVISION_TAB = '17_Mery_Revision_Humana';
 const EXCLUIDAS_TAB = '18_Mery_Excluidas';
 
-const HEADERS = [
+const NOTA_MAX_CHARS = 4000;
+const EXTRACTO_MAX_CHARS = 600;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Patrones de boilerplate que se eliminan del cuerpo de la nota
+// ─────────────────────────────────────────────────────────────────────────────
+
+const BOILERPLATE_PATTERNS: RegExp[] = [
+  /M[AÁ]S SOBRE ESTE TEMA[^\n]*/gi,
+  /Ver m[aá]s en[^\n]*/gi,
+  /[ÚU]nete a nuestro canal[^\n]*/gi,
+  /Suscr[íi]bete[^\n]*/gi,
+  /SUSCR[ÍI]BETE[^\n]*/gi,
+  /Publicidad[^\n]*/gi,
+  /PUBLICIDAD[^\n]*/gi,
+  /Seguir leyendo[^\n]*/gi,
+  /SEGUIR LEYENDO[^\n]*/gi,
+  /Leer m[aá]s[^\n]*/gi,
+  /LEE[R]? M[AÁ]S[^\n]*/gi,
+  /TAMBI[EÉ]N TE PUEDE INTERESAR[^\n]*/gi,
+  /Tambi[eé]n te puede interesar[^\n]*/gi,
+  /NOTICIAS RELACIONADAS[^\n]*/gi,
+  /Noticias relacionadas[^\n]*/gi,
+  /Lee tambi[eé]n[^\n]*/gi,
+  /Comparte este art[íi]culo[^\n]*/gi,
+  /COMPARTE[^\n]*/gi,
+  /Compartir[^\n]*/gi,
+  /Comentarios[^\n]*/gi,
+  /Haz clic[^\n]*/gi,
+  /Facebook[^\n]*/gi,
+  /Twitter[^\n]*/gi,
+  /WhatsApp[^\n]*/gi,
+  /Telegram[^\n]*/gi,
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers de limpieza de texto (exportados para tests)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Limpieza determinística base: normaliza espacios, saltos y caracteres raros.
+ * Preserva párrafos (máximo 2 saltos de línea consecutivos).
+ */
+export function cleanTextForSheet(text: string | null | undefined): string {
+  if (!text) return '';
+  return text
+    .replace(/\t/g, ' ')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ ]{2,}/g, ' ')
+    .trim();
+}
+
+/**
+ * Elimina boilerplate del cuerpo de nota y limpia párrafos resultantes.
+ * Sin IA — solo patrones determinísticos.
+ */
+export function buildNotaCompletaLimpia(
+  raw: string | null | undefined,
+  maxChars = NOTA_MAX_CHARS,
+): { texto: string; truncada: boolean } {
+  if (!raw) return { texto: '', truncada: false };
+  let text = cleanTextForSheet(raw);
+  for (const re of BOILERPLATE_PATTERNS) {
+    text = text.replace(re, '');
+  }
+  text = text.replace(/\n{3,}/g, '\n\n').trim();
+  if (text.length <= maxChars) return { texto: text, truncada: false };
+  const cortado = text.slice(0, maxChars).replace(/\s+\S*$/, '') + '…';
+  return { texto: cortado, truncada: true };
+}
+
+/**
+ * Extracto de una sola línea, centrado en la primera aparición del keyword.
+ * Máximo `maxChars` caracteres, sin saltos de línea.
+ */
+export function buildExtractLimpio(
+  raw: string | null | undefined,
+  keyword: string,
+  maxChars = EXTRACTO_MAX_CHARS,
+): string {
+  if (!raw) return '';
+  const oneLine = cleanTextForSheet(raw)
+    .replace(/\n+/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  if (oneLine.length <= maxChars) return oneLine;
+
+  const kwLower = (keyword ?? '').toLowerCase();
+  const pos = kwLower ? oneLine.toLowerCase().indexOf(kwLower) : -1;
+  if (pos === -1) return oneLine.slice(0, maxChars) + '…';
+
+  const half = Math.floor(maxChars / 2);
+  const start = Math.max(0, pos - half);
+  const end = Math.min(oneLine.length, start + maxChars);
+  const extract = oneLine.slice(start, end);
+  return (start > 0 ? '…' : '') + extract + (end < oneLine.length ? '…' : '');
+}
+
+/**
+ * Selecciona el mejor texto completo disponible para una noticia, siguiendo
+ * la prioridad: texto_nota_limpia > texto_cuerpo_nota > texto_extraido > resumen > texto_match.
+ */
+export function selectBestText(n: {
+  texto_nota_limpia?: string | null;
+  texto_cuerpo_nota?: string | null;
+  texto_extraido?: string | null;
+  resumen?: string | null;
+}, textoMatch: string): string {
+  return (
+    n?.texto_nota_limpia ||
+    n?.texto_cuerpo_nota ||
+    n?.texto_extraido ||
+    n?.resumen ||
+    textoMatch ||
+    ''
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Headers — orden operativo para revisión humana
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const HEADERS = [
   'fecha_export', 'run_id', 'cliente_id', 'cliente_nombre', 'medio', 'fecha_noticia',
-  'titulo', 'url', 'url_norm', 'keyword', 'keywords_detectadas',
-  'categoria_editorial', 'grupo_tema', 'sentimiento', 'valoracion',
-  'texto_limpio_chars', 'texto_limpio_ok', 'extracto_match',
-  'razon_clasificacion', 'estado_editorial', 'dedupe_key',
+  'titulo', 'url',
+  'categoria_editorial', 'estado_editorial', 'keyword', 'keywords_detectadas', 'grupo_tema',
+  'extracto_limpio', 'nota_completa_limpia', 'nota_completa_chars', 'nota_completa_truncada',
+  'texto_limpio_chars', 'texto_limpio_ok',
+  'razon_clasificacion', 'dedupe_key',
+  // campos legacy — mantenidos para compatibilidad con filas anteriores
+  'url_norm', 'sentimiento', 'valoracion', 'extracto_match',
 ];
 
 export interface Args {
@@ -92,7 +222,8 @@ async function main() {
     .select(
       `mencion_id, noticia_id, keyword_id, keyword, texto_match, score_relevancia, sentimiento, tema,
        noticias!inner(titulo, url_original, resumen, fecha_publicacion,
-                      texto_nota_limpia, texto_cuerpo_nota, medios(nombre_medio))`,
+                      texto_nota_limpia, texto_cuerpo_nota, texto_extraido,
+                      medios(nombre_medio))`,
     )
     .eq('cliente_id', CLI_ID)
     .gte('created_at', isoDesde)
@@ -104,7 +235,7 @@ async function main() {
   const menciones = (raw ?? []) as any[];
   logger.info({ total_menciones: menciones.length, desde: isoDesde }, 'Menciones cargadas desde DB');
 
-  // ── Dedupe por noticia_id (múltiples keywords por artículo) ───────────────
+  // ── Dedupe por noticia_id ─────────────────────────────────────────────────
   type Grupo = {
     noticia_id: string;
     titulo: string;
@@ -112,6 +243,7 @@ async function main() {
     url_norm: string;
     medio: string;
     fecha_noticia: string;
+    texto_raw: string;           // mejor texto completo disponible
     texto_limpio_chars: number;
     texto_limpio_ok: boolean;
     sentimiento: string;
@@ -119,7 +251,7 @@ async function main() {
     keywords_ids: string[];
     best_keyword: string;
     best_keyword_id: string;
-    best_extracto: string;
+    best_extracto_raw: string;  // texto_match original del mejor match
     categoria: CategoriaEditorialMery;
   };
 
@@ -132,24 +264,25 @@ async function main() {
     const urlNorm = normalizeUrl(url);
     const medio = txt(n?.medios?.nombre_medio);
     const fechaNoticia = txt(n?.fecha_publicacion);
-    const textoLimpio = txt(n?.texto_nota_limpia ?? n?.texto_cuerpo_nota);
+    const textoMatch = txt(m.texto_match);
+    const textoRaw = selectBestText(n, textoMatch);
     const keywordId = txt(m.keyword_id);
     const keyword = txt(m.keyword);
-    const extracto = txt(m.texto_match).slice(0, 200);
     const cat = clasificarMery(titulo, keywordId);
 
     if (!grupos.has(m.noticia_id)) {
       grupos.set(m.noticia_id, {
         noticia_id: m.noticia_id,
         titulo, url, url_norm: urlNorm, medio, fecha_noticia: fechaNoticia,
-        texto_limpio_chars: textoLimpio.length,
-        texto_limpio_ok: textoLimpio.length > 100,
+        texto_raw: textoRaw,
+        texto_limpio_chars: textoRaw.length,
+        texto_limpio_ok: textoRaw.length > 100,
         sentimiento: txt(m.sentimiento),
         tema: txt(m.tema),
         keywords_ids: [keywordId],
         best_keyword: keyword,
         best_keyword_id: keywordId,
-        best_extracto: extracto,
+        best_extracto_raw: textoMatch,
         categoria: cat,
       });
     } else {
@@ -159,8 +292,10 @@ async function main() {
         g.categoria = cat;
         g.best_keyword = keyword;
         g.best_keyword_id = keywordId;
-        g.best_extracto = extracto;
+        g.best_extracto_raw = textoMatch;
       }
+      // Use the richest text available across all mentions of the same article
+      if (textoRaw.length > g.texto_raw.length) g.texto_raw = textoRaw;
       if (!g.sentimiento && m.sentimiento) g.sentimiento = txt(m.sentimiento);
       if (!g.tema && m.tema) g.tema = txt(m.tema);
     }
@@ -169,7 +304,7 @@ async function main() {
   const articulos = Array.from(grupos.values()).slice(0, args.maxRows);
   logger.info({ articulos: articulos.length, menciones_raw: menciones.length }, 'Deduplicación por noticia_id');
 
-  // ── Construir filas por tab ───────────────────────────────────────────────
+  // ── Construir filas ───────────────────────────────────────────────────────
   const porTab = new Map<string, OutRow[]>([
     [PREVIEW_TAB, []],
     [REVISION_TAB, []],
@@ -177,6 +312,7 @@ async function main() {
   ]);
 
   const statsCat: Record<string, number> = {};
+  let conNota = 0, sinNota = 0;
 
   for (const g of articulos) {
     statsCat[g.categoria] = (statsCat[g.categoria] ?? 0) + 1;
@@ -184,6 +320,12 @@ async function main() {
     const estado = estadoEditorialMery(g.categoria);
     const razon = razonClasificacionMery(g.categoria, g.titulo, g.best_keyword_id);
     const dedupeKey = `${CLI_ID}::${g.url_norm}`;
+
+    // Texto limpio para salida
+    const extractoLimpio = buildExtractLimpio(g.texto_raw || g.best_extracto_raw, g.best_keyword);
+    const { texto: notaLimpia, truncada } = buildNotaCompletaLimpia(g.texto_raw);
+
+    if (notaLimpia.length > 100) conNota++; else sinNota++;
 
     const fila: OutRow = {
       fecha_export: fechaExport,
@@ -194,19 +336,24 @@ async function main() {
       fecha_noticia: g.fecha_noticia,
       titulo: g.titulo,
       url: g.url,
-      url_norm: g.url_norm,
+      categoria_editorial: g.categoria,
+      estado_editorial: estado,
       keyword: g.best_keyword,
       keywords_detectadas: g.keywords_ids.join(', '),
-      categoria_editorial: g.categoria,
       grupo_tema: grupoTema,
-      sentimiento: g.sentimiento,
-      valoracion: '',
+      extracto_limpio: extractoLimpio,
+      nota_completa_limpia: notaLimpia,
+      nota_completa_chars: String(notaLimpia.length),
+      nota_completa_truncada: String(truncada),
       texto_limpio_chars: String(g.texto_limpio_chars),
       texto_limpio_ok: String(g.texto_limpio_ok),
-      extracto_match: g.best_extracto,
       razon_clasificacion: razon,
-      estado_editorial: estado,
       dedupe_key: dedupeKey,
+      // legacy
+      url_norm: g.url_norm,
+      sentimiento: g.sentimiento,
+      valoracion: '',
+      extracto_match: g.best_extracto_raw.slice(0, 300),
     };
 
     const tab = tabDestinoMery(g.categoria);
@@ -220,19 +367,29 @@ async function main() {
       preview_tab: porTab.get(PREVIEW_TAB)!.length,
       revision_tab: porTab.get(REVISION_TAB)!.length,
       excluidas_tab: porTab.get(EXCLUIDAS_TAB)!.length,
+      con_nota_completa: conNota,
+      sin_nota_completa: sinNota,
     },
     args.dryRun ? '[dry-run] Clasificación Mery — nada escrito' : 'Clasificación Mery',
   );
 
   for (const f of [...porTab.get(PREVIEW_TAB)!, ...porTab.get(REVISION_TAB)!].slice(0, 12)) {
     logger.info(
-      { medio: f.medio, titulo: String(f.titulo).slice(0, 80), cat: f.categoria_editorial, estado: f.estado_editorial, kws: f.keywords_detectadas },
+      {
+        medio: f.medio,
+        titulo: String(f.titulo).slice(0, 70),
+        cat: f.categoria_editorial,
+        estado: f.estado_editorial,
+        extracto_limpio_chars: String(f.extracto_limpio ?? '').length,
+        nota_completa_chars: f.nota_completa_chars,
+        nota_truncada: f.nota_completa_truncada,
+      },
       '[preview] fila Mery',
     );
   }
 
   if (args.dryRun || args.output === 'console') {
-    logger.info({ listo: articulos.length > 0 }, '=== FIN dry-run — NADA ESCRITO EN SHEETS ===');
+    logger.info({ listo: articulos.length > 0, con_nota_completa: conNota }, '=== FIN dry-run — NADA ESCRITO EN SHEETS ===');
     return;
   }
 
