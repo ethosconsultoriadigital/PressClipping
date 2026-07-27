@@ -40,21 +40,35 @@ const FP_TITULO_RE = /\bla tremenda corte\b/i;
 const NOMBRE_EN_TITULO_RE =
   /mery pozos|merilyn g[oó]mez\b|mery g[oó]mez pozos|diputada mery/i;
 
+/** Patrones que validan la presencia del nombre en el cuerpo del artículo. */
+const NOMBRE_EN_CUERPO_RE =
+  /mery pozos|merilyn g[oó]mez pozos|diputada mery|diputada merilyn/i;
+
 /**
- * Clasifica una mención individual a partir del título del artículo y el
- * keyword_id que disparó la detección.
+ * Clasifica una mención individual a partir del título del artículo, el
+ * keyword_id que disparó la detección y, opcionalmente, el cuerpo del artículo.
+ *
+ * Si el título es "La Tremenda Corte" pero el cuerpo menciona explícitamente
+ * a Mery Pozos, se reclasifica como CONTEXTO_POLITICO en lugar de POSIBLE_FP.
  */
 export function clasificarMery(
   titulo: string,
   keywordId: string,
+  textoBody?: string,
 ): CategoriaEditorialMery {
-  if (FP_TITULO_RE.test(titulo)) return 'POSIBLE_FP';
+  if (FP_TITULO_RE.test(titulo)) {
+    if (textoBody && NOMBRE_EN_CUERPO_RE.test(textoBody)) return 'CONTEXTO_POLITICO';
+    return 'POSIBLE_FP';
+  }
   if (TIER_ALTA_IDS.has(keywordId)) {
     return NOMBRE_EN_TITULO_RE.test(titulo) ? 'MENCION_DIRECTA' : 'CONTEXTO_POLITICO';
   }
   if (TIER_BAJA_IDS.has(keywordId)) return 'TEMA_RELACIONADO';
   return 'TEMA_RELACIONADO';
 }
+
+/** Exportado para tests — detecta nombre en cuerpo del artículo. */
+export { NOMBRE_EN_CUERPO_RE };
 
 /** Estado editorial derivado de la categoría. */
 export function estadoEditorialMery(cat: CategoriaEditorialMery): string {
@@ -82,6 +96,8 @@ export function razonClasificacionMery(
   if (cat === 'POSIBLE_FP')
     return `Título fijo/sección detectada: "${titulo.slice(0, 60)}" — verificar manualmente`;
   if (cat === 'MENCION_DIRECTA') return `Nombre en título (${keywordId})`;
+  if (cat === 'CONTEXTO_POLITICO' && FP_TITULO_RE.test(titulo))
+    return 'Mención validada en cuerpo aunque el título es columna genérica';
   if (cat === 'CONTEXTO_POLITICO') return `Keyword Tier 1/2 en cuerpo sin nombre en título (${keywordId})`;
   if (cat === 'TEMA_RELACIONADO') return `Keyword Tier 3 variante amplia (${keywordId})`;
   return 'Excluido';

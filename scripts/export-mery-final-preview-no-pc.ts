@@ -18,7 +18,8 @@
 import 'dotenv/config';
 import { pathToFileURL } from 'node:url';
 import { getSupabase } from '../src/supabase/client.js';
-import { ensureSheetTabAndHeaders, appendHistoryRows, type OutRow } from '../src/sheets/write.js';
+import { ensureSheetTabAndHeaders, appendHistoryRows, mergeOutputRowsByKey, type OutRow } from '../src/sheets/write.js';
+import { type MergeUpdate } from '../src/sheets/mergePlan.js';
 import { getOutputTab } from '../src/sheets/client.js';
 import { normalizeUrl } from '../src/comparators/mentionMatcher.js';
 import { logger } from '../src/utils/logger.js';
@@ -180,21 +181,25 @@ export const HEADERS = [
 
 export interface Args {
   windowDays: number;
+  windowHours?: number;
   output: 'console' | 'sheet';
   dryRun: boolean;
   maxRows: number;
+  backfillExisting: boolean;
 }
 
 export function parseArgs(argv: string[]): Args {
-  const out: Args = { windowDays: 30, output: 'console', dryRun: false, maxRows: 200 };
+  const out: Args = { windowDays: 30, output: 'console', dryRun: false, maxRows: 200, backfillExisting: false };
   for (const arg of argv) {
     if (arg === '--dry-run') { out.dryRun = true; continue; }
+    if (arg === '--backfill-existing') { out.backfillExisting = true; continue; }
     if (!arg.startsWith('--')) continue;
     const body = arg.slice(2);
     const eq = body.indexOf('=');
     const key = eq === -1 ? body : body.slice(0, eq);
     const val = eq === -1 ? '' : body.slice(eq + 1);
     if (key === 'window-days') out.windowDays = parseIntOrNull(val) ?? out.windowDays;
+    if (key === 'window-hours') out.windowHours = parseIntOrNull(val) ?? out.windowHours;
     if (key === 'output') out.output = (val as 'console' | 'sheet') || out.output;
     if (key === 'max-rows') out.maxRows = parseIntOrNull(val) ?? out.maxRows;
   }
@@ -209,10 +214,19 @@ async function main() {
 
   const runId = `MERY-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   const fechaExport = new Date().toISOString();
-  const isoDesde = new Date(Date.now() - args.windowDays * 24 * 60 * 60 * 1000).toISOString();
+  const ventanaMs = args.windowHours != null
+    ? args.windowHours * 60 * 60 * 1000
+    : args.windowDays * 24 * 60 * 60 * 1000;
+  const isoDesde = new Date(Date.now() - ventanaMs).toISOString();
 
   logger.info(
-    { cli: CLI_ID, windowDays: args.windowDays, output: args.output, dryRun: args.dryRun, maxRows: args.maxRows, isoDesde },
+    {
+      cli: CLI_ID,
+      windowDays: args.windowHours != null ? undefined : args.windowDays,
+      windowHours: args.windowHours,
+      output: args.output, dryRun: args.dryRun, maxRows: args.maxRows,
+      backfillExisting: args.backfillExisting, isoDesde,
+    },
     '=== Exportador Mery Pozos → tabs 16/17/18 (sin envíos, alertas_activas intacto) ===',
   );
 
@@ -268,7 +282,7 @@ async function main() {
     const textoRaw = selectBestText(n, textoMatch);
     const keywordId = txt(m.keyword_id);
     const keyword = txt(m.keyword);
-    const cat = clasificarMery(titulo, keywordId);
+    const cat = clasificarMery(titulo, keywordId, textoRaw || undefined);
 
     if (!grupos.has(m.noticia_id)) {
       grupos.set(m.noticia_id, {
@@ -390,6 +404,70 @@ async function main() {
 
   if (args.dryRun || args.output === 'console') {
     logger.info({ listo: articulos.length > 0, con_nota_completa: conNota }, '=== FIN dry-run — NADA ESCRITO EN SHEETS ===');
+    return;
+  }
+
+  // ── Modo backfill: actualiza celdas vacías en filas existentes ────────────
+  if (args.backfillExisting) {
+    logger.info({ backfill: true }, 'Iniciando backfill de filas existentes (mergeOutputRowsByKey)');
+    let filas_existentes_actualizadas = 0;
+    let claves_no_encontradas_total = 0;
+    const tabs_afectadas: string[] = [];
+    const mismatch_tabs: string[] = [];
+
+    const BACKFILL_COLUMNS = [
+      'extracto_limpio', 'nota_completa_limpia', 'nota_completa_chars', 'nota_completa_truncada',
+      'texto_limpio_chars', 'texto_limpio_ok', 'categoria_editorial', 'estado_editorial', 'razon_clasificacion',
+    ];
+
+    for (const [tabName, filas] of porTab.entries()) {
+      const updates: MergeUpdate[] = filas.map((f) => ({
+        dedupe_key: f.dedupe_key,
+        extracto_limpio: f.extracto_limpio,
+        nota_completa_limpia: f.nota_completa_limpia,
+        nota_completa_chars: f.nota_completa_chars,
+        nota_completa_truncada: f.nota_completa_truncada,
+        texto_limpio_chars: f.texto_limpio_chars,
+        texto_limpio_ok: f.texto_limpio_ok,
+        categoria_editorial: f.categoria_editorial,
+        estado_editorial: f.estado_editorial,
+        razon_clasificacion: f.razon_clasificacion,
+      }));
+
+      if (updates.length === 0) {
+        logger.info({ tab: tabName }, '[backfill] Sin artículos para esta tab');
+        continue;
+      }
+
+      try {
+        const resumen = await mergeOutputRowsByKey(tabName, 'dedupe_key', updates, BACKFILL_COLUMNS);
+        filas_existentes_actualizadas += resumen.filas_actualizadas;
+        claves_no_encontradas_total += resumen.claves_no_encontradas.length;
+        if (resumen.filas_actualizadas > 0) tabs_afectadas.push(tabName);
+        if (resumen.mismatch) mismatch_tabs.push(tabName);
+        logger.info({
+          tab: tabName,
+          filas_actualizadas: resumen.filas_actualizadas,
+          claves_no_encontradas: resumen.claves_no_encontradas.length,
+          columnas_agregadas: resumen.columnas_agregadas,
+          mismatch: resumen.mismatch,
+        }, '[backfill] Tab procesada');
+      } catch (e: any) {
+        if (e?.message?.includes('not found') || e?.message?.includes('no existe')) {
+          logger.warn({ tab: tabName, error: e.message }, '[backfill] Tab no existe aún — omitida');
+        } else {
+          throw e;
+        }
+      }
+    }
+
+    logger.info({
+      filas_existentes_actualizadas,
+      filas_nuevas_insertadas: 0,
+      claves_no_encontradas: claves_no_encontradas_total,
+      tabs_afectadas,
+      mismatch_tabs,
+    }, '=== BACKFILL completado — sin envíos, alertas_activas intacto ===');
     return;
   }
 

@@ -8,6 +8,7 @@ import {
   TIER_ALTA_IDS,
   TIER_BAJA_IDS,
   PRIORIDAD_CAT,
+  NOMBRE_EN_CUERPO_RE,
 } from '../src/editorial/meryCriteria.js';
 import {
   parseArgs,
@@ -493,5 +494,146 @@ describe('clasificarMery — casos reales del backtest 2026-07-22', () => {
     expect(PRIORIDAD_CAT['MENCION_DIRECTA']).toBeGreaterThan(PRIORIDAD_CAT['CONTEXTO_POLITICO']);
     expect(PRIORIDAD_CAT['CONTEXTO_POLITICO']).toBeGreaterThan(PRIORIDAD_CAT['TEMA_RELACIONADO']);
     expect(PRIORIDAD_CAT['TEMA_RELACIONADO']).toBeGreaterThan(PRIORIDAD_CAT['EXCLUIR']);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FASE 2 — La Tremenda Corte: validación por cuerpo del artículo
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('clasificarMery — La Tremenda Corte con textoBody', () => {
+  it('título "La Tremenda Corte" + nombre en cuerpo → CONTEXTO_POLITICO', () => {
+    const body = 'En su columna, el autor discute la posición de Mery Pozos sobre el agua en Jalisco.';
+    expect(clasificarMery('La Tremenda Corte', 'KEY-0041', body)).toBe('CONTEXTO_POLITICO');
+  });
+
+  it('título "La Tremenda Corte" + "Merilyn Gómez Pozos" en cuerpo → CONTEXTO_POLITICO', () => {
+    const body = 'La diputada Merilyn Gómez Pozos encabezó las protestas.';
+    expect(clasificarMery('La Tremenda Corte', 'KEY-0040', body)).toBe('CONTEXTO_POLITICO');
+  });
+
+  it('título "La Tremenda Corte" + "diputada Mery" en cuerpo → CONTEXTO_POLITICO', () => {
+    const body = 'Según la diputada Mery, la crisis del agua es urgente.';
+    expect(clasificarMery('La Tremenda Corte', 'KEY-0046', body)).toBe('CONTEXTO_POLITICO');
+  });
+
+  it('título "La Tremenda Corte" + "diputada Merilyn" en cuerpo → CONTEXTO_POLITICO', () => {
+    const body = 'La diputada Merilyn fue entrevistada sobre el tema.';
+    expect(clasificarMery('La Tremenda Corte', 'KEY-0045', body)).toBe('CONTEXTO_POLITICO');
+  });
+
+  it('título "La Tremenda Corte" + sin nombre en cuerpo → POSIBLE_FP', () => {
+    const body = 'El columnista analiza el tema del agua sin mencionar a nadie específico.';
+    expect(clasificarMery('La Tremenda Corte', 'KEY-0041', body)).toBe('POSIBLE_FP');
+  });
+
+  it('título "La Tremenda Corte" + cuerpo vacío → POSIBLE_FP', () => {
+    expect(clasificarMery('La Tremenda Corte', 'KEY-0041', '')).toBe('POSIBLE_FP');
+  });
+
+  it('título "La Tremenda Corte" + sin textoBody → POSIBLE_FP (retrocompatible)', () => {
+    expect(clasificarMery('La Tremenda Corte', 'KEY-0041')).toBe('POSIBLE_FP');
+  });
+
+  it('CONTEXTO_POLITICO por cuerpo → estado GO_CONTEXTO', () => {
+    const body = 'Mery Pozos denuncia el agua contaminada.';
+    const cat = clasificarMery('La Tremenda Corte', 'KEY-0041', body);
+    expect(cat).toBe('CONTEXTO_POLITICO');
+    expect(estadoEditorialMery(cat)).toBe('GO_CONTEXTO');
+  });
+
+  it('CONTEXTO_POLITICO por cuerpo → tab 16_Mery_Final_Preview', () => {
+    const body = 'Mery Pozos habló ante la Cámara.';
+    const cat = clasificarMery('La Tremenda Corte', 'KEY-0041', body);
+    expect(tabDestinoMery(cat)).toBe('16_Mery_Final_Preview');
+  });
+
+  it('razonClasificacion La Tremenda Corte validada contiene "cuerpo" y "columna genérica"', () => {
+    const body = 'Mery Pozos declaró ante el pleno.';
+    const cat = clasificarMery('La Tremenda Corte', 'KEY-0041', body);
+    const razon = razonClasificacionMery(cat, 'La Tremenda Corte', 'KEY-0041');
+    expect(razon).toMatch(/cuerpo|columna gen[eé]rica/i);
+    expect(razon).toMatch(/validada|menci[oó]n/i);
+  });
+
+  it('razonClasificacion POSIBLE_FP sin cuerpo con nombre → sigue con "verificar manualmente"', () => {
+    const razon = razonClasificacionMery('POSIBLE_FP', 'La Tremenda Corte', 'KEY-0041');
+    expect(razon).toMatch(/verificar/i);
+  });
+
+  it('NOMBRE_EN_CUERPO_RE detecta "Mery Pozos"', () => {
+    expect(NOMBRE_EN_CUERPO_RE.test('La Mery Pozos habló.')).toBe(true);
+  });
+
+  it('NOMBRE_EN_CUERPO_RE detecta "Merilyn Gómez Pozos"', () => {
+    expect(NOMBRE_EN_CUERPO_RE.test('La diputada Merilyn Gómez Pozos votó.')).toBe(true);
+  });
+
+  it('NOMBRE_EN_CUERPO_RE detecta variante sin tilde "Merilyn Gomez Pozos"', () => {
+    expect(NOMBRE_EN_CUERPO_RE.test('Merilyn Gomez Pozos declaró.')).toBe(true);
+  });
+
+  it('NOMBRE_EN_CUERPO_RE no detecta nombre genérico "Gómez" solo', () => {
+    expect(NOMBRE_EN_CUERPO_RE.test('El señor Gómez habló.')).toBe(false);
+  });
+
+  it('NOMBRE_EN_CUERPO_RE no detecta "Pozos" solo (pozo de agua)', () => {
+    expect(NOMBRE_EN_CUERPO_RE.test('Los pozos de agua en la región.')).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FASE 1 + FASE 4 — parseArgs: backfill-existing y window-hours
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('parseArgs — backfill-existing y window-hours (FASES 1+4)', () => {
+  it('default: backfillExisting=false', () => {
+    expect(parseArgs([]).backfillExisting).toBe(false);
+  });
+
+  it('--backfill-existing activa backfillExisting', () => {
+    expect(parseArgs(['--backfill-existing']).backfillExisting).toBe(true);
+  });
+
+  it('--backfill-existing es compatible con --dry-run', () => {
+    const a = parseArgs(['--backfill-existing', '--dry-run']);
+    expect(a.backfillExisting).toBe(true);
+    expect(a.dryRun).toBe(true);
+  });
+
+  it('--backfill-existing es compatible con --output=sheet', () => {
+    const a = parseArgs(['--backfill-existing', '--output=sheet']);
+    expect(a.backfillExisting).toBe(true);
+    expect(a.output).toBe('sheet');
+  });
+
+  it('default: windowHours=undefined (usa windowDays)', () => {
+    expect(parseArgs([]).windowHours).toBeUndefined();
+  });
+
+  it('--window-hours=24 configura windowHours=24', () => {
+    expect(parseArgs(['--window-hours=24']).windowHours).toBe(24);
+  });
+
+  it('--window-hours=6 configura windowHours=6', () => {
+    expect(parseArgs(['--window-hours=6']).windowHours).toBe(6);
+  });
+
+  it('--window-hours y --window-days coexisten (ambos se parsean)', () => {
+    const a = parseArgs(['--window-hours=24', '--window-days=7']);
+    expect(a.windowHours).toBe(24);
+    expect(a.windowDays).toBe(7);
+  });
+
+  it('--backfill-existing no activa email, WhatsApp, Twilio, SMTP', () => {
+    const a = parseArgs(['--backfill-existing', '--output=sheet']);
+    const salidaStr = JSON.stringify(a);
+    expect(salidaStr).not.toMatch(/email|smtp|twilio|whatsapp/i);
+  });
+
+  it('--window-hours no activa email, WhatsApp, Twilio, SMTP', () => {
+    const a = parseArgs(['--window-hours=24', '--output=sheet']);
+    const salidaStr = JSON.stringify(a);
+    expect(salidaStr).not.toMatch(/email|smtp|twilio|whatsapp/i);
   });
 });

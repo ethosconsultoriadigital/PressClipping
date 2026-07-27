@@ -57,6 +57,7 @@
     "crawl-direct-lasillarota": "tsx scripts/crawl-direct-lasillarota.ts",
     "audit-jumex-keyword-discovery": "tsx scripts/audit-jumex-keyword-discovery.ts",
     "mery:no-pc:capture": "tsx scripts/export-mery-final-preview-no-pc.ts",
+    "audit-mery-media-coverage": "tsx scripts/audit-mery-media-coverage.ts",
     "simulate-keywords-shadow": "tsx scripts/simulate-keywords-shadow.ts",
     "export-operational-news-no-pc": "tsx scripts/export-operational-news-no-pc.ts",
     "export-operational-news-consolidated-no-pc": "tsx scripts/export-operational-news-consolidated-no-pc.ts",
