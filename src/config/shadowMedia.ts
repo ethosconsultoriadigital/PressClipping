@@ -469,3 +469,14 @@ export function mediosDailyNetNew(): ShadowMedioDaily[] {
   const cubiertos = mediosYaCubiertosPorCron();
   return mediosDailyValidatedActivos().filter((m) => !cubiertos.has(m.medio_id));
 }
+
+/**
+ * medio_id cubiertos por CUALQUIER tier de cron shadow activo (base + nacional
+ * B + crisis + daily-validated). Fuente de verdad única para "¿este medio
+ * corre en algún cron?" — usada por auditorías read-only fuera del pipeline.
+ */
+export function mediosEnCualquierCron(): Set<string> {
+  const s = mediosYaCubiertosPorCron();
+  for (const m of mediosDailyValidatedActivos()) s.add(m.medio_id);
+  return s;
+}

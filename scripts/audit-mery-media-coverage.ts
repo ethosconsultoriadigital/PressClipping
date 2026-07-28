@@ -13,6 +13,7 @@ import 'dotenv/config';
 import { pathToFileURL } from 'node:url';
 import { getSupabase } from '../src/supabase/client.js';
 import { logger } from '../src/utils/logger.js';
+import { mediosEnCualquierCron } from '../src/config/shadowMedia.js';
 
 const CLI_ID = 'CLI-MERY-TEST';
 
@@ -39,6 +40,7 @@ interface MedioStats {
   accion_recomendada: string;
 }
 
+
 async function main() {
   const sb = getSupabase();
   const ahora = Date.now();
@@ -50,7 +52,10 @@ async function main() {
   // ── Menciones 30d ──────────────────────────────────────────────────────────
   const { data: raw30, error: err30 } = await sb
     .from('menciones')
-    .select(`noticia_id, noticias!inner(url_original, medios!inner(medio_id, nombre_medio))`)
+    .select(
+      `noticia_id, noticias!inner(url_original, texto_nota_limpia, texto_cuerpo_nota, texto_extraido,
+                                   medios!inner(medio_id, nombre_medio))`,
+    )
     .eq('cliente_id', CLI_ID)
     .gte('created_at', iso30d)
     .limit(2000);
@@ -60,48 +65,58 @@ async function main() {
   // ── Menciones 90d ──────────────────────────────────────────────────────────
   const { data: raw90, error: err90 } = await sb
     .from('menciones')
-    .select(`noticia_id, noticias!inner(url_original, medios!inner(medio_id, nombre_medio))`)
+    .select(
+      `noticia_id, noticias!inner(url_original, texto_nota_limpia, texto_cuerpo_nota, texto_extraido,
+                                   medios!inner(medio_id, nombre_medio))`,
+    )
     .eq('cliente_id', CLI_ID)
     .gte('created_at', iso90d)
     .limit(2000);
 
   if (err90) { logger.error({ error: err90.message }, 'Error leyendo menciones 90d'); process.exit(1); }
 
+  const tieneTextoLimpio = (n: any): boolean =>
+    Boolean((n?.texto_nota_limpia ?? n?.texto_cuerpo_nota ?? n?.texto_extraido ?? '').toString().trim().length > 100);
+
   // ── Agrupar por noticia_id para evitar doble conteo por keywords múltiples ─
-  const noticias30 = new Map<string, { medio_id: string; nombre_medio: string }>();
+  const noticias30 = new Map<string, { medio_id: string; nombre_medio: string; texto_ok: boolean }>();
   for (const m of (raw30 ?? []) as any[]) {
     if (!noticias30.has(m.noticia_id)) {
       noticias30.set(m.noticia_id, {
         medio_id: m.noticias?.medios?.medio_id ?? '',
         nombre_medio: m.noticias?.medios?.nombre_medio ?? '',
+        texto_ok: tieneTextoLimpio(m.noticias),
       });
     }
   }
 
-  const noticias90 = new Map<string, { medio_id: string; nombre_medio: string }>();
+  const noticias90 = new Map<string, { medio_id: string; nombre_medio: string; texto_ok: boolean }>();
   for (const m of (raw90 ?? []) as any[]) {
     if (!noticias90.has(m.noticia_id)) {
       noticias90.set(m.noticia_id, {
         medio_id: m.noticias?.medios?.medio_id ?? '',
         nombre_medio: m.noticias?.medios?.nombre_medio ?? '',
+        texto_ok: tieneTextoLimpio(m.noticias),
       });
     }
   }
 
   // ── Conteo de artículos distintos por medio ────────────────────────────────
-  const conteo30 = new Map<string, { medio_id: string; count: number }>();
+  const conteo30 = new Map<string, { medio_id: string; count: number; con_texto_ok: number }>();
   for (const v of noticias30.values()) {
     const key = v.nombre_medio || v.medio_id;
-    const e = conteo30.get(key) ?? { medio_id: v.medio_id, count: 0 };
+    const e = conteo30.get(key) ?? { medio_id: v.medio_id, count: 0, con_texto_ok: 0 };
     e.count++;
+    if (v.texto_ok) e.con_texto_ok++;
     conteo30.set(key, e);
   }
 
-  const conteo90 = new Map<string, { medio_id: string; count: number }>();
+  const conteo90 = new Map<string, { medio_id: string; count: number; con_texto_ok: number }>();
   for (const v of noticias90.values()) {
     const key = v.nombre_medio || v.medio_id;
-    const e = conteo90.get(key) ?? { medio_id: v.medio_id, count: 0 };
+    const e = conteo90.get(key) ?? { medio_id: v.medio_id, count: 0, con_texto_ok: 0 };
     e.count++;
+    if (v.texto_ok) e.con_texto_ok++;
     conteo90.set(key, e);
   }
 
@@ -116,10 +131,10 @@ async function main() {
     'Dedupe por noticia_id completada',
   );
 
-  // ── Catálogo de medios de Supabase ─────────────────────────────────────────
+  // ── Catálogo de medios de Supabase (columnas reales de la tabla `medios`) ──
   const { data: catalogo, error: errCat } = await sb
     .from('medios')
-    .select('medio_id, nombre_medio, activo, metodo_extraccion, estado_fuente, ultimo_crawl, en_cron_daily_validated, texto_limpio_ok')
+    .select('medio_id, nombre_medio, activo, metodo_extraccion, ultimo_estado, ultimo_scrapeo')
     .order('medio_id');
 
   if (errCat) { logger.error({ error: errCat.message }, 'Error leyendo catálogo medios'); process.exit(1); }
@@ -129,6 +144,8 @@ async function main() {
     catalogoMap.set(m.nombre_medio?.toLowerCase()?.trim() ?? '', m);
     catalogoMap.set(m.medio_id ?? '', m);
   }
+
+  const cronCompleto = mediosEnCualquierCron();
 
   // ── Construir reporte ──────────────────────────────────────────────────────
   const reporte: MedioStats[] = [];
@@ -145,11 +162,13 @@ async function main() {
 
     const esta_en_catalogo = catalogoEntry != null;
     const activo: boolean | null = esta_en_catalogo ? (catalogoEntry.activo ?? null) : null;
-    const en_cron = esta_en_catalogo ? (catalogoEntry.en_cron_daily_validated ?? null) : null;
+    const en_cron = esta_en_catalogo && medio_id ? cronCompleto.has(medio_id) : null;
     const metodo = esta_en_catalogo ? (catalogoEntry.metodo_extraccion ?? null) : null;
-    const estado = esta_en_catalogo ? (catalogoEntry.estado_fuente ?? null) : null;
-    const crawl = esta_en_catalogo ? (catalogoEntry.ultimo_crawl ?? null) : null;
-    const texto_ok = esta_en_catalogo ? (catalogoEntry.texto_limpio_ok ?? null) : null;
+    const estado = esta_en_catalogo ? (catalogoEntry.ultimo_estado ?? null) : null;
+    const crawl = esta_en_catalogo ? (catalogoEntry.ultimo_scrapeo ?? null) : null;
+    const totalArticulos = (c30?.count ?? 0) + (c90?.count ?? 0);
+    const totalConTexto = (c30?.con_texto_ok ?? 0) + (c90?.con_texto_ok ?? 0);
+    const texto_ok = totalArticulos > 0 ? totalConTexto === totalArticulos : null;
 
     let accion: string;
     if (!esta_en_catalogo) {
@@ -157,9 +176,9 @@ async function main() {
     } else if (!activo) {
       accion = 'INACTIVO — medio en catálogo pero marcado inactivo, revisar';
     } else if (!en_cron) {
-      accion = 'SIN_CRON — medio activo pero fuera de daily-validated, evaluar inclusión';
+      accion = 'SIN_CRON — medio activo pero fuera de todos los tiers de cron shadow, evaluar inclusión';
     } else if (texto_ok === false) {
-      accion = 'CALIDAD — en cron pero texto_limpio_ok=false, revisar extractor';
+      accion = 'CALIDAD — en cron pero texto limpio incompleto en algunas notas, revisar extractor';
     } else {
       accion = 'OK — medio activo en cron con texto limpio';
     }
