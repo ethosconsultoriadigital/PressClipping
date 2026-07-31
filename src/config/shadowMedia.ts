@@ -442,6 +442,16 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED: readonly ShadowMedioDaily[] = [
   { medio_id: 'MED-0197', nombre: 'El Imparcial Oaxaca', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0198', nombre: '8 Columnas', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0199', nombre: 'DesInformémonos', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  // ── Mery Jalisco Priority (2026-07-29) ─────────────────────────────────────
+  // 4 medios Jalisco/regional con señal histórica de Mery Pozos — nuevos en catálogo.
+  // Los 5 medios ACTIVAR_EN_CRON (UDG TV/Canal 44, Notisistema, Tráfico ZMG,
+  // Vallarta Independiente, Partidero) ya existen en Supabase; ejecutar:
+  //   npm run catalog-mery-jalisco-priority -- --upsert --patch-shadowmedia
+  // para descubrir sus IDs y agregar sus entradas a este bloque automáticamente.
+  { medio_id: 'MED-0201', nombre: 'Semanario Conciencia Pública', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0202', nombre: 'A Fondo Jalisco', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0203', nombre: 'Siker', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0204', nombre: 'Página 24 Jalisco', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
 ] as const;
 
 /**

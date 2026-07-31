@@ -6,7 +6,7 @@
  * ignoran (no rompen). Es la base de la exportación operativa de la Fase 5.
  */
 import type { GoogleSpreadsheetWorksheet } from 'google-spreadsheet';
-import { getTab, getOutputTab, getOutputSpreadsheet, withSheetsRetry } from './client.js';
+import { getTab, getOutputTab, getOutputSpreadsheet, getTabById, withSheetsRetry } from './client.js';
 import { normalizeHeader } from '../utils/parse.js';
 import { planMergeByKey, type MergeUpdate } from './mergePlan.js';
 import { planEnsureTabHeaders } from './tabPlan.js';
@@ -54,6 +54,21 @@ export async function clearOutputDataRange(
 ): Promise<void> {
   const sheet = await getOutputTab(title); // lanza si la pestaña no existe
   await withSheetsRetry(() => sheet.clear(a1DataRange), `clear ${title}!${a1DataRange}`);
+}
+
+/**
+ * Agrega filas al final de una pestaña de un SPREADSHEET EXTERNO arbitrario,
+ * alineando por nombre de cabecera. El spreadsheet debe estar compartido con
+ * el email de la cuenta de servicio como Editor. Devuelve cuántas filas se
+ * escribieron.
+ */
+export async function appendRowsById(
+  spreadsheetId: string,
+  tabTitle: string,
+  rows: OutRow[],
+): Promise<number> {
+  if (rows.length === 0) return 0;
+  return appendToSheet(await getTabById(spreadsheetId, tabTitle), rows);
 }
 
 /**

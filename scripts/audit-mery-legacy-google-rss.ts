@@ -24,7 +24,7 @@ import { pathToFileURL } from 'node:url';
 import XLSX from 'xlsx';
 import { getSupabase } from '../src/supabase/client.js';
 import { ensureSheetTabAndHeaders, appendHistoryRows, type OutRow } from '../src/sheets/write.js';
-import { getOutputTab } from '../src/sheets/client.js';
+import { getOutputTab, getTabById, withSheetsRetry } from '../src/sheets/client.js';
 import { logger } from '../src/utils/logger.js';
 import { parseIntOrNull } from '../src/utils/parse.js';
 import { mediosEnCualquierCron } from '../src/config/shadowMedia.js';
@@ -91,6 +91,12 @@ export interface Args {
   dryRun: boolean;
   output: 'console' | 'sheet';
   maxMediosPrioritarios: number;
+  /** ID del spreadsheet externo para leer legacy y/o ethos desde Sheets. */
+  spreadsheetId?: string;
+  /** Pestaña de legacy dentro del spreadsheet externo (en lugar del xlsx). */
+  legacyTab?: string;
+  /** Pestaña de Ethos dentro del spreadsheet externo (en lugar de Supabase). */
+  ethosTab?: string;
 }
 
 export function parseArgs(argv: string[]): Args {
@@ -112,6 +118,9 @@ export function parseArgs(argv: string[]): Args {
     if (key === 'window-days') out.windowDays = parseIntOrNull(val) ?? out.windowDays;
     if (key === 'window-hours') out.windowHours = parseIntOrNull(val) ?? out.windowHours;
     if (key === 'output') out.output = (val as 'console' | 'sheet') || out.output;
+    if (key === 'spreadsheet-id') out.spreadsheetId = val || out.spreadsheetId;
+    if (key === 'legacy-tab') out.legacyTab = val || out.legacyTab;
+    if (key === 'ethos-tab') out.ethosTab = val || out.ethosTab;
   }
   return out;
 }
@@ -389,6 +398,68 @@ export function calcularMetricasCobertura(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Lectura de legacy desde Google Sheets (alternativa al xlsx)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Lee filas legacy desde una pestaña de Google Sheets en lugar del xlsx.
+ * La pestaña debe tener las mismas columnas A-I (title, description, link,
+ * pubDate, source, guid, status, sentimiento, tema de la nota).
+ */
+async function leerLegacyDesdeSheet(spreadsheetId: string, tabTitle: string): Promise<LegacyRowRaw[]> {
+  const sheet = await getTabById(spreadsheetId, tabTitle);
+  await withSheetsRetry(() => sheet.loadHeaderRow(), `loadHeaderRow ${tabTitle}`);
+  const rows = await withSheetsRetry(() => sheet.getRows(), `getRows ${tabTitle}`);
+  return rows.map((r) => ({
+    title: String(r.get('title') ?? r.get('Title') ?? ''),
+    description: String(r.get('description') ?? r.get('Description') ?? ''),
+    link: String(r.get('link') ?? r.get('Link') ?? ''),
+    pubDate: String(r.get('pubDate') ?? r.get('pubdate') ?? r.get('fecha') ?? ''),
+    source: String(r.get('source') ?? r.get('Source') ?? ''),
+    guid: String(r.get('guid') ?? r.get('GUID') ?? ''),
+    status: String(r.get('status') ?? r.get('Status') ?? ''),
+    sentimiento: String(r.get('sentimiento') ?? r.get('Sentimiento') ?? ''),
+    tema: String(r.get('tema de la nota') ?? r.get('tema') ?? ''),
+  }));
+}
+
+/**
+ * Lee filas Ethos desde la pestaña test_pressclipping (en lugar de Supabase).
+ * Mapea las 9 columnas legacy A-I de vuelta a EthosRowNorm.
+ */
+async function cargarEthosRowsDesdeSheet(
+  spreadsheetId: string,
+  tabTitle: string,
+  desde: Date,
+): Promise<EthosRowNorm[]> {
+  const sheet = await getTabById(spreadsheetId, tabTitle);
+  await withSheetsRetry(() => sheet.loadHeaderRow(), `loadHeaderRow ${tabTitle}`);
+  const rows = await withSheetsRetry(() => sheet.getRows(), `getRows ${tabTitle}`);
+  const result: EthosRowNorm[] = [];
+  for (const r of rows) {
+    const pubDate = String(r.get('pubDate') ?? r.get('pubdate') ?? '').trim();
+    const fecha = parseFechaLegacy(pubDate);
+    if (fecha && fecha.getTime() < desde.getTime()) continue;
+    const url = String(r.get('link') ?? '').trim();
+    const status = String(r.get('status') ?? '').trim();
+    const cat = status === 'ETHOS_TEST' ? 'MENCION_DIRECTA' : 'CONTEXTO_POLITICO';
+    result.push({
+      noticia_id: String(r.get('guid') ?? url),
+      titulo: String(r.get('title') ?? '').trim(),
+      url,
+      url_norm: normalizeUrl(url),
+      medio: String(r.get('source') ?? '').trim(),
+      medio_id: '',
+      fecha,
+      categoria_editorial: cat,
+      estado_editorial: estadoEditorialMery(cat),
+      nota_completa_limpia: String(r.get('description') ?? '').trim(),
+    });
+  }
+  return result;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -399,13 +470,20 @@ async function main() {
   const ventanaLabel = args.windowHours != null ? `${args.windowHours}h` : `${args.windowDays}d`;
   const desde = new Date(Date.now() - ventanaMs);
 
+  const modoSheets = Boolean(args.spreadsheetId && args.legacyTab);
   logger.info(
-    { input: args.input, windowDays: args.windowDays, windowHours: args.windowHours, dryRun: args.dryRun, output: args.output },
+    {
+      input: modoSheets ? `${args.spreadsheetId}!${args.legacyTab}` : args.input,
+      ethosSource: args.ethosTab ? `${args.spreadsheetId}!${args.ethosTab}` : 'supabase',
+      windowDays: args.windowDays, windowHours: args.windowHours, dryRun: args.dryRun, output: args.output,
+    },
     '=== MERY LEGACY GOOGLE RSS COMPARISON + MEDIA GAP AUDIT (solo lectura, sin envíos) ===',
   );
 
   // ── FASE 1: leer concentrado legacy ──────────────────────────────────────
-  const rawRows = leerConcentradoLegacy(args.input);
+  const rawRows = modoSheets && args.spreadsheetId && args.legacyTab
+    ? await leerLegacyDesdeSheet(args.spreadsheetId, args.legacyTab)
+    : leerConcentradoLegacy(args.input);
   const legacyRowsTodas = rawRows.map(normalizeLegacyRow);
   const reporteLegacy = construirReporteLegacy(legacyRowsTodas);
   logger.info(reporteLegacy, '[FASE 1] Resumen del concentrado legacy (dataset completo)');
@@ -420,7 +498,10 @@ async function main() {
 
   // ── FASE 4 + 5 + 6: comparación en ventana ───────────────────────────────
   const legacyEnVentana = legacyRowsTodas.filter((r) => r.fecha && r.fecha.getTime() >= desde.getTime());
-  const ethosRows = await cargarEthosRows(sb, desde.toISOString());
+  const modoEthosSheets = Boolean(args.spreadsheetId && args.ethosTab);
+  const ethosRows = modoEthosSheets && args.spreadsheetId && args.ethosTab
+    ? await cargarEthosRowsDesdeSheet(args.spreadsheetId, args.ethosTab, desde)
+    : await cargarEthosRows(sb, desde.toISOString());
 
   const filasComparativo = compararLegacyVsEthos(legacyEnVentana, ethosRows, catalogoPorSourceCanonico, {
     fechaComparacion, ventana: ventanaLabel,

@@ -36,9 +36,11 @@ describe('config Tier Daily Validated — dedupe', () => {
     // 200 MEDIA MILESTONE (2026-07-22): 8 nuevos A_PUBLICO_FACIL RSS.
     // Eje Central (MED-0200) NO en daily-validated — alto volumen, evaluar primero.
     'MED-0192', 'MED-0193', 'MED-0194', 'MED-0195', 'MED-0196', 'MED-0197', 'MED-0198', 'MED-0199',
+    // Mery Jalisco Priority (2026-07-29): 4 medios regionales Jalisco.
+    'MED-0201', 'MED-0202', 'MED-0203', 'MED-0204',
   ].sort();
 
-  it('la lista contiene todos los medios activos del tier incluyendo los lotes NEWS LAKE 200 FINAL PUSH + 200 MEDIA MILESTONE (2026-07-22)', () => {
+  it('la lista contiene todos los medios activos del tier incluyendo los lotes NEWS LAKE 200 FINAL PUSH + 200 MEDIA MILESTONE + Mery Jalisco Priority', () => {
     const ids = SHADOW_MEDIOS_DAILY_VALIDATED.map((m) => m.medio_id).sort();
     expect(ids).toEqual(IDS_ESPERADOS);
   });

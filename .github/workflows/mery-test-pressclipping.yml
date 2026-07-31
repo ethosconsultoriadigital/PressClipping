@@ -1,0 +1,72 @@
+name: Mery → test_pressclipping (manual)
+
+# Solo workflow_dispatch — NO ejecutar en schedule todavía.
+# Cuando estemos listos para automático, cambiar a:
+#   schedule:
+#     - cron: '0 9,15 * * 1-5'  # 09:00 y 15:00 UTC lun–vie
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry-run (sin escribir en Sheets)'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+      output_sheet:
+        description: 'Escribir en test_pressclipping'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+      window_hours:
+        description: 'Ventana en horas (default 24)'
+        required: false
+        default: '24'
+        type: string
+
+jobs:
+  export-mery-test:
+    name: Export Mery → test_pressclipping
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      GOOGLE_OUTPUT_SHEET_ID: ${{ secrets.GOOGLE_OUTPUT_SHEET_ID }}
+      # Seguridad: estas variables NUNCA deben configurarse
+      NO_SEND: 'true'
+      NO_EMAIL: 'true'
+      NO_WHATSAPP: 'true'
+      NO_TWILIO: 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Export Mery → test_pressclipping (dry-run)
+        if: ${{ inputs.dry_run == 'true' || inputs.output_sheet == 'false' }}
+        run: |
+          npm run mery:export:test-pressclipping -- \
+            --window-hours=${{ inputs.window_hours || '24' }} \
+            --dry-run
+
+      - name: Export Mery → test_pressclipping (write)
+        if: ${{ inputs.dry_run == 'false' && inputs.output_sheet == 'true' }}
+        run: |
+          npm run mery:export:test-pressclipping -- \
+            --window-hours=${{ inputs.window_hours || '24' }} \
+            --output=sheet
