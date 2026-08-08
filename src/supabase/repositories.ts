@@ -5,6 +5,11 @@
  * hablen directamente con el cliente. Las firmas devuelven datos planos.
  */
 import { getSupabase } from './client.js';
+import {
+  retryPostgrest,
+  describeSupabaseError,
+  hintForSupabaseError,
+} from './errors.js';
 import type { Medio, Cliente, Keyword, ConfigRow } from '../types/schemas.js';
 import type { NoticiaInsert } from '../normalizers/noticia.js';
 import {
@@ -72,10 +77,14 @@ export const upsertConfiguracion = (rows: ConfigRow[]) =>
 
 /** Lee toda la configuración como un mapa clave→valor. */
 export async function getConfigMap(): Promise<Record<string, string>> {
-  const { data, error } = await getSupabase()
-    .from('configuracion')
-    .select('clave, valor');
-  if (error) throw new Error(`No se pudo leer configuracion: ${error.message}`);
+  const { data, error } = await retryPostgrest('getConfigMap', () =>
+    getSupabase().from('configuracion').select('clave, valor'),
+  );
+  if (error) {
+    throw new Error(
+      `No se pudo leer configuracion: ${describeSupabaseError(error)}. ${hintForSupabaseError(error)}`,
+    );
+  }
   const map: Record<string, string> = {};
   for (const row of data ?? []) {
     if (row.clave != null) map[row.clave as string] = (row.valor as string) ?? '';
@@ -105,13 +114,19 @@ export interface MedioRow {
 
 /** Lee los medios activos para la corrida de ingesta. */
 export async function getMediosActivos(): Promise<MedioRow[]> {
-  const { data, error } = await getSupabase()
-    .from('medios')
-    .select(
-      'medio_id, nombre_medio, url_base, metodo_extraccion, rss_url, sitemap_url, secciones_urls, requiere_javascript, requiere_proxy, frecuencia_minutos, pais, estado, municipio, region, prioridad, ultimo_estado, ultimo_scrapeo',
-    )
-    .eq('activo', true);
-  if (error) throw new Error(`No se pudieron leer medios activos: ${error.message}`);
+  const { data, error } = await retryPostgrest('getMediosActivos', () =>
+    getSupabase()
+      .from('medios')
+      .select(
+        'medio_id, nombre_medio, url_base, metodo_extraccion, rss_url, sitemap_url, secciones_urls, requiere_javascript, requiere_proxy, frecuencia_minutos, pais, estado, municipio, region, prioridad, ultimo_estado, ultimo_scrapeo',
+      )
+      .eq('activo', true),
+  );
+  if (error) {
+    throw new Error(
+      `No se pudieron leer medios activos: ${describeSupabaseError(error)}. ${hintForSupabaseError(error)}`,
+    );
+  }
   return (data ?? []) as unknown as MedioRow[];
 }
 

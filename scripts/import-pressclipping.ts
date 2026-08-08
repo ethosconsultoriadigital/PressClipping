@@ -31,6 +31,12 @@ import {
   type MencionNorm,
 } from '../src/comparators/mentionMatcher.js';
 import { logger } from '../src/utils/logger.js';
+import {
+  retryPostgrest,
+  isMissingTableError,
+  describeSupabaseError,
+  hintForSupabaseError,
+} from '../src/supabase/errors.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tipos y args
@@ -533,20 +539,25 @@ async function insertarEnSupabase(
   filtradas: MencionNorm[],
   fuente: Fuente,
 ): Promise<void> {
-  // Verificar que la tabla existe
-  const { error: probeErr } = await sb
-    .from('comparativo_pressclipping')
-    .select('id')
-    .limit(1);
+  // Verificar que la tabla existe (con reintentos ante base degradada).
+  const { error: probeErr } = await retryPostgrest('probe comparativo_pressclipping', () =>
+    sb.from('comparativo_pressclipping').select('id').limit(1),
+  );
 
   if (probeErr) {
-    if (probeErr.code === '42P01' || probeErr.message.includes('schema cache')) {
-      logger.error({},
+    // OJO: no basta con buscar "schema cache" en el mensaje. PGRST002
+    // ("Could not query the database for the schema cache") es un fallo
+    // TRANSITORIO de la base y también contiene esa frase; reportarlo como
+    // migración faltante manda al diagnóstico equivocado.
+    if (isMissingTableError(probeErr)) {
+      logger.error({ error: describeSupabaseError(probeErr) },
         'La tabla comparativo_pressclipping no existe en Supabase. ' +
         'Aplica la migración 0010_comparativo_pressclipping.sql primero.');
       process.exit(1);
     }
-    throw new Error(`Error al verificar tabla: ${probeErr.message}`);
+    throw new Error(
+      `Error al verificar tabla: ${describeSupabaseError(probeErr)}. ${hintForSupabaseError(probeErr)}`,
+    );
   }
 
   // ── Calcular hashes para cada registro ───────────────────────────────────

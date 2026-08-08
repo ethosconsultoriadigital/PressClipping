@@ -47,6 +47,12 @@ import { appendOutputRows, clearOutputDataRange } from '../src/sheets/write.js';
 import { OUTPUT_TABS, getOutputTab, withSheetsRetry } from '../src/sheets/client.js';
 import { normalizarVentanaTimestamp, aFechaMx } from '../src/utils/dateWindow.js';
 import { logger } from '../src/utils/logger.js';
+import {
+  retryPostgrest,
+  isMissingTableError,
+  describeSupabaseError,
+  hintForSupabaseError,
+} from '../src/supabase/errors.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Args
@@ -179,23 +185,29 @@ async function cargarPressClipping(
   sb: SupabaseClient,
   args: CompareArgs,
 ): Promise<MencionNorm[]> {
-  let query = sb.from('comparativo_pressclipping').select('*');
+  const construirQuery = () => {
+    let query = sb.from('comparativo_pressclipping').select('*');
+    // Columna `date`: comparar por fecha calendario MX (ya inclusiva del día).
+    if (args.cliente) query = query.ilike('cliente', `%${args.cliente}%`);
+    if (args.fechaDesde) query = query.gte('fecha', aFechaMx(args.fechaDesde));
+    if (args.fechaHasta) query = query.lte('fecha', aFechaMx(args.fechaHasta));
+    return query;
+  };
 
-  // Columna `date`: comparar por fecha calendario MX (ya inclusiva del día).
-  if (args.cliente) query = query.ilike('cliente', `%${args.cliente}%`);
-  if (args.fechaDesde) query = query.gte('fecha', aFechaMx(args.fechaDesde));
-  if (args.fechaHasta) query = query.lte('fecha', aFechaMx(args.fechaHasta));
-
-  const { data, error } = await query;
+  const { data, error } = await retryPostgrest('cargarPressClipping', construirQuery);
 
   if (error) {
-    if (error.code === '42P01' || error.message.includes('schema cache')) {
+    // PGRST002 también dice "schema cache" pero es transitorio: no confundirlo
+    // con una migración faltante (ver src/supabase/errors.ts).
+    if (isMissingTableError(error)) {
       throw new Error(
         'La tabla comparativo_pressclipping no existe en Supabase. ' +
         'Aplica la migración 0010_comparativo_pressclipping.sql primero.',
       );
     }
-    throw new Error(`Error al cargar PressClipping: ${error.message}`);
+    throw new Error(
+      `Error al cargar PressClipping: ${describeSupabaseError(error)}. ${hintForSupabaseError(error)}`,
+    );
   }
 
   return (data ?? []).map((r: Record<string, unknown>) => ({
