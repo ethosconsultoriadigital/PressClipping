@@ -12,6 +12,7 @@
  */
 import 'dotenv/config';
 import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { getSupabase } from '../src/supabase/client.js';
 import { logger } from '../src/utils/logger.js';
 import { parseIntOrNull } from '../src/utils/parse.js';
@@ -665,4 +666,17 @@ async function main(): Promise<void> {
   );
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+/**
+ * Sin este guard, importar el módulo (p.ej. desde un test que solo usa sus
+ * funciones puras) ejecutaba main(): leía Supabase, escribía data/ y llamaba
+ * process.exit(1) al fallar, tumbando la corrida de tests.
+ */
+function esEntrypointCli(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  return import.meta.url === pathToFileURL(entry).href;
+}
+
+if (esEntrypointCli()) {
+  main().catch((e) => { console.error(e); process.exit(1); });
+}
