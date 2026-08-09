@@ -59,6 +59,8 @@ jobs:
 
       - name: Export Mery → test_pressclipping (dry-run)
         if: ${{ inputs.dry_run == 'true' || inputs.output_sheet == 'false' }}
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
         run: |
           npm run mery:export:test-pressclipping -- \
             --window-hours=${{ inputs.window_hours || '24' }} \
@@ -66,6 +68,8 @@ jobs:
 
       - name: Export Mery → test_pressclipping (write)
         if: ${{ inputs.dry_run == 'false' && inputs.output_sheet == 'true' }}
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
         run: |
           npm run mery:export:test-pressclipping -- \
             --window-hours=${{ inputs.window_hours || '24' }} \
