@@ -22,6 +22,11 @@
 import 'dotenv/config';
 import { pathToFileURL } from 'node:url';
 import { getSupabase } from '../src/supabase/client.js';
+import {
+  retryPostgrest,
+  describeSupabaseError,
+  hintForSupabaseError,
+} from '../src/supabase/errors.js';
 import { getSpreadsheetById, getTabById, withSheetsRetry } from '../src/sheets/client.js';
 import { appendRowsById, type OutRow } from '../src/sheets/write.js';
 import { normalizeUrl } from '../src/comparators/mentionMatcher.js';
@@ -193,21 +198,28 @@ async function cargarDedupeKeys(spreadsheetId: string, tabName: string): Promise
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function cargarMenciones(isoDesde: string, maxRows: number): Promise<MencionGrupo[]> {
-  const sb = getSupabase();
-  const { data: raw, error } = await sb
-    .from('menciones')
-    .select(
-      `mencion_id, noticia_id, keyword_id, keyword, texto_match, sentimiento, tema,
-       noticias!inner(titulo, url_original, resumen, fecha_publicacion,
-                      texto_nota_limpia, texto_cuerpo_nota, texto_extraido,
-                      medios(nombre_medio))`,
-    )
-    .eq('cliente_id', CLI_ID)
-    .gte('created_at', isoDesde)
-    .order('created_at', { ascending: false })
-    .limit(maxRows * 10);
+  const { data: raw, error } = await retryPostgrest('mery:cargarMenciones', () =>
+    getSupabase()
+      .from('menciones')
+      .select(
+        `mencion_id, noticia_id, keyword_id, keyword, texto_match, sentimiento, tema,
+         noticias!inner(titulo, url_original, resumen, fecha_publicacion,
+                        texto_nota_limpia, texto_cuerpo_nota, texto_extraido,
+                        medios(nombre_medio))`,
+      )
+      .eq('cliente_id', CLI_ID)
+      .gte('created_at', isoDesde)
+      .order('created_at', { ascending: false })
+      .limit(maxRows * 10),
+  );
 
-  if (error) throw new Error(`Error leyendo menciones CLI-MERY-TEST: ${error.message}`);
+  // Reintenta solo lo transitorio (PGRST002/conexión); tabla/columna faltante o
+  // permisos fallan de inmediato — reintentarlos solo esconde el bug real.
+  if (error) {
+    throw new Error(
+      `Error leyendo menciones CLI-MERY-TEST: ${describeSupabaseError(error)}. ${hintForSupabaseError(error)}`,
+    );
+  }
 
   const grupos = new Map<string, MencionGrupo>();
   for (const m of (raw ?? []) as any[]) {
