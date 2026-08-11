@@ -60,6 +60,7 @@
     "mery:export:test-pressclipping": "tsx scripts/mery-export-test-pressclipping.ts",
     "mery:priority-media:capture": "tsx scripts/mery-priority-media-capture.ts",
     "diagnose:supabase": "tsx scripts/diagnose-supabase.ts",
+    "diagnose:mery-vs-patron": "tsx scripts/diagnose-mery-vs-patron-supabase.ts",
     "catalog-mery-jalisco-priority": "tsx scripts/catalog-mery-jalisco-priority.ts",
     "audit-mery-media-coverage": "tsx scripts/audit-mery-media-coverage.ts",
     "mery:compare:legacy": "tsx scripts/audit-mery-legacy-google-rss.ts",

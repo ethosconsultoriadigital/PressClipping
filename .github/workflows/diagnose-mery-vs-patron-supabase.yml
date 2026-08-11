@@ -1,0 +1,53 @@
+name: diagnose-mery-vs-patron-supabase
+
+# Diagnóstico READ-ONLY: compara queries mínimas de Supabase entre
+# CLI-MERY-TEST y CLI-0002 (Patrón) para explicar por qué `cargarMenciones`
+# en mery-export-test-pressclipping.ts falla con PGRST002 mientras el
+# pipeline de Patrón corre limpio en el mismo entorno.
+#
+# No escribe en Google Sheets (no usa ni pide esas credenciales). No activa
+# alertas. No envía email/WhatsApp/Twilio/SMTP. Solo SELECT contra Supabase.
+
+on:
+  workflow_dispatch:
+    inputs:
+      full_limit_test:
+        description: 'Reproducir además el límite REAL de producción de Mery (5000 filas) para confirmar la hipótesis de volumen. Sigue siendo solo lectura (SELECT).'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+jobs:
+  diagnose:
+    name: Diagnóstico Mery vs Patrón (Supabase, read-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      LOG_FORMAT: json
+      RUN_BY: github-actions-diagnose-mery-vs-patron
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Diagnóstico Mery vs Patrón (Supabase, read-only)
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+        run: |
+          if [ "${{ inputs.full_limit_test }}" = "true" ]; then
+            npm run diagnose:mery-vs-patron -- --full-limit-test
+          else
+            npm run diagnose:mery-vs-patron
+          fi
