@@ -20,11 +20,19 @@
  *   NO_VIABLE                  → en catálogo pero sin RSS ni sitemap ni método directo.
  *   D_PAGO_CONVENIO_API        → acceso de pago/convenio: NO se toca.
  *
+ * En modo real (sin --dry-run), después de crawl + enrich corre detect-mentions
+ * ACOTADO a CLI-MERY-TEST y a los medio_id capturados en esta corrida (nunca al
+ * backlog global). Al usar `--client`, detect-mentions NO marca las noticias
+ * como `menciones_procesado=true`, así que el detect global de otros clientes
+ * sigue viéndolas normalmente después.
+ *
  * NO activa envíos. NO modifica alertas_activas. NO escribe en Sheets.
+ * NO exporta resultados, NO genera XML, NO corre classify-ia.
  *
  * Uso:
  *   npm run mery:priority-media:capture -- --dry-run --max-notas=20
  *   npm run mery:priority-media:capture -- --max-notas=20
+ *   npm run mery:priority-media:capture -- --max-notas=20 --enrich-limit=50 --detect-limit=100 --max-inserts=50
  */
 import 'dotenv/config';
 import { spawn } from 'node:child_process';
@@ -39,6 +47,9 @@ import { mediosEnCualquierCron } from '../src/config/shadowMedia.js';
 import { foldText } from '../src/matchers/text.js';
 import { logger } from '../src/utils/logger.js';
 import { parseIntOrNull } from '../src/utils/parse.js';
+
+/** Único cliente para el que este pipeline detecta menciones. */
+const CLI_ID_MERY = 'CLI-MERY-TEST';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Los 10 medios prioritarios de Mery Pozos
@@ -322,10 +333,29 @@ interface CaptureArgs {
   dryRun: boolean;
   maxNotas: number;
   enrichLimit: number;
+  /** Tope de noticias a analizar en detect-mentions (--client=CLI-MERY-TEST). */
+  detectLimit: number;
+  /** Tope de menciones nuevas a insertar en detect-mentions (safety cap). */
+  maxInserts: number;
+  /**
+   * Analizar solo noticias con texto_cuerpo_nota ya extraído. Default true:
+   * justo terminamos de correr crawl+enrich sobre estos medios, así que
+   * exigir texto evita marcar como "sin mención" noticias que en realidad
+   * todavía no tienen cuerpo (falla de extracción) — mejor dejarlas
+   * pendientes para el siguiente detect global que sí reintente con texto.
+   */
+  onlyWithText: boolean;
 }
 
 export function parseArgs(argv: string[]): CaptureArgs {
-  const out: CaptureArgs = { dryRun: false, maxNotas: 20, enrichLimit: 50 };
+  const out: CaptureArgs = {
+    dryRun: false,
+    maxNotas: 20,
+    enrichLimit: 50,
+    detectLimit: 100,
+    maxInserts: 50,
+    onlyWithText: true,
+  };
   for (const arg of argv) {
     if (arg === '--dry-run') { out.dryRun = true; continue; }
     if (!arg.startsWith('--')) continue;
@@ -335,6 +365,10 @@ export function parseArgs(argv: string[]): CaptureArgs {
     const val = eq === -1 ? '' : body.slice(eq + 1);
     if (key === 'max-notas') out.maxNotas = parseIntOrNull(val) ?? out.maxNotas;
     if (key === 'enrich-limit') out.enrichLimit = parseIntOrNull(val) ?? out.enrichLimit;
+    if (key === 'detect-limit') out.detectLimit = parseIntOrNull(val) ?? out.detectLimit;
+    if (key === 'max-inserts') out.maxInserts = parseIntOrNull(val) ?? out.maxInserts;
+    // Boolean negable: bare flag o `=true` → true; solo `=false` la apaga.
+    if (key === 'only-with-text') out.onlyWithText = val === '' ? true : val !== 'false';
   }
   return out;
 }
@@ -376,7 +410,15 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
 
   logger.info(
-    { dry_run: args.dryRun, max_notas: args.maxNotas, enrich_limit: args.enrichLimit },
+    {
+      dry_run: args.dryRun,
+      max_notas: args.maxNotas,
+      enrich_limit: args.enrichLimit,
+      detect_limit: args.detectLimit,
+      max_inserts: args.maxInserts,
+      only_with_text: args.onlyWithText,
+      client: CLI_ID_MERY,
+    },
     '=== Mery Priority Media Capture ===',
   );
 
@@ -470,7 +512,36 @@ async function main() {
     logger.warn({ code: enrichResult.code }, 'Enrich finalizó con código distinto de 0');
   }
 
-  logger.info({ ids }, '=== Mery Priority Media Capture completado ===');
+  // ── Detect ────────────────────────────────────────────────────────────────
+  // Acotado a CLI-MERY-TEST y a los medio_id de esta corrida (nunca backlog
+  // global). `--client` hace que detect-mentions NO marque las noticias como
+  // procesadas, así que el detect global de otros clientes las sigue viendo.
+  // Sin export-results / generate-xml / classify-ia / Sheets / alertas: solo
+  // inserta menciones en Supabase.
+  logger.info(
+    {
+      ids,
+      client: CLI_ID_MERY,
+      detect_limit: args.detectLimit,
+      max_inserts: args.maxInserts,
+      only_with_text: args.onlyWithText,
+    },
+    '[3] Detectar menciones CLI-MERY-TEST…',
+  );
+  const detectArgs = [
+    'tsx', 'scripts/detect-mentions.ts',
+    `--client=${CLI_ID_MERY}`,
+    medioIdsArg,
+    `--limit=${args.detectLimit}`,
+    `--max-inserts=${args.maxInserts}`,
+  ];
+  if (args.onlyWithText) detectArgs.push('--only-with-text');
+  const detectResult = await spawnAsync('npx', detectArgs);
+  if (detectResult.code !== 0) {
+    logger.warn({ code: detectResult.code }, 'Detect-mentions finalizó con código distinto de 0');
+  }
+
+  logger.info({ ids }, '=== Mery Priority Media Capture completado (crawl + enrich + detect CLI-MERY-TEST) ===');
 }
 
 function esEntrypointCli(): boolean {

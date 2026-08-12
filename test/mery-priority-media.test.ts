@@ -3,15 +3,66 @@
  *
  * Cubren la regresión real: la lista estaba hardcodeada a MED-0201..MED-0204, así
  * que los 5 medios ACTIVAR_EN_CRON y AFmedios quedaban fuera de la captura.
- * También fijan que MURAL nunca se captura.
+ * También fijan que MURAL nunca se captura, y que el pipeline crawl+enrich+detect
+ * (agregado para que mery-test-pressclipping deje de ver 0 menciones) solo toca
+ * CLI-MERY-TEST, nunca Sheets/export-results/generate-xml/classify-ia/alertas.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+interface SpawnCall {
+  cmd: string;
+  args: string[];
+}
+
+const spawnCalls: SpawnCall[] = [];
+
+/** Catálogo mínimo con un solo medio CAPTURABLE (Siker) para que main() avance. */
+const CATALOGO_UN_CAPTURABLE = [
+  {
+    medio_id: 'MED-0203',
+    nombre_medio: 'Siker',
+    activo: true,
+    metodo_extraccion: 'RSS',
+    rss_url: 'https://example.com/feed/',
+    sitemap_url: null,
+    requiere_javascript: false,
+    requiere_proxy: false,
+    ultimo_estado: 'ok',
+  },
+];
+
+vi.mock('../src/supabase/client.js', () => ({
+  getSupabase: () => ({
+    from: () => ({
+      select: () => ({
+        order: () => Promise.resolve({ data: CATALOGO_UN_CAPTURABLE, error: null }),
+      }),
+    }),
+  }),
+}));
+
+vi.mock('../src/config/shadowMedia.js', () => ({
+  mediosEnCualquierCron: () => new Set<string>(),
+}));
+
+vi.mock('node:child_process', () => ({
+  spawn: (cmd: string, args: string[]) => {
+    spawnCalls.push({ cmd, args });
+    return {
+      on: (event: string, cb: (code: number) => void) => {
+        if (event === 'close') setImmediate(() => cb(0));
+      },
+    };
+  },
+}));
+
 import {
   MERY_PRIORITY_MEDIOS,
   MERY_EXCLUIDOS,
   resolverEnCatalogo,
   clasificarMedio,
   parseArgs,
+  main,
   type CatalogoMedioRow,
 } from '../scripts/mery-priority-media-capture.js';
 
@@ -183,7 +234,14 @@ describe('clasificarMedio', () => {
 
 describe('parseArgs', () => {
   it('valores por defecto', () => {
-    expect(parseArgs([])).toEqual({ dryRun: false, maxNotas: 20, enrichLimit: 50 });
+    expect(parseArgs([])).toEqual({
+      dryRun: false,
+      maxNotas: 20,
+      enrichLimit: 50,
+      detectLimit: 100,
+      maxInserts: 50,
+      onlyWithText: true,
+    });
   });
 
   it('lee --dry-run, --max-notas y --enrich-limit', () => {
@@ -191,10 +249,101 @@ describe('parseArgs', () => {
       dryRun: true,
       maxNotas: 5,
       enrichLimit: 10,
+      detectLimit: 100,
+      maxInserts: 50,
+      onlyWithText: true,
     });
   });
 
   it('ignora valores no numéricos y conserva el default', () => {
     expect(parseArgs(['--max-notas=abc']).maxNotas).toBe(20);
+  });
+
+  it('reconoce --detect-limit y --max-inserts', () => {
+    const args = parseArgs(['--detect-limit=200', '--max-inserts=15']);
+    expect(args.detectLimit).toBe(200);
+    expect(args.maxInserts).toBe(15);
+  });
+
+  it('--only-with-text default true; se puede apagar con =false', () => {
+    expect(parseArgs([]).onlyWithText).toBe(true);
+    expect(parseArgs(['--only-with-text']).onlyWithText).toBe(true);
+    expect(parseArgs(['--only-with-text=true']).onlyWithText).toBe(true);
+    expect(parseArgs(['--only-with-text=false']).onlyWithText).toBe(false);
+  });
+});
+
+describe('main() — pipeline crawl + enrich + detect (CLI-MERY-TEST)', () => {
+  const ORIGINAL_ARGV = process.argv;
+
+  beforeEach(() => {
+    spawnCalls.length = 0;
+  });
+
+  function conArgv(extra: string[], fn: () => Promise<void>): Promise<void> {
+    process.argv = [...ORIGINAL_ARGV.slice(0, 2), ...extra];
+    return fn().finally(() => {
+      process.argv = ORIGINAL_ARGV;
+    });
+  }
+
+  it('--dry-run no invoca crawl, enrich ni detect-mentions', async () => {
+    await conArgv(['--dry-run'], async () => {
+      await main();
+    });
+    expect(spawnCalls).toHaveLength(0);
+  });
+
+  it('modo real invoca crawl, enrich y detect-mentions en orden, acotado a CLI-MERY-TEST', async () => {
+    await conArgv(['--max-notas=5', '--enrich-limit=20', '--detect-limit=100', '--max-inserts=50'], async () => {
+      await main();
+    });
+
+    expect(spawnCalls).toHaveLength(3);
+
+    const [crawl, enrich, detect] = spawnCalls;
+    expect(crawl!.args).toContain('scripts/crawl.ts');
+    expect(crawl!.args).toContain('--medio-ids=MED-0203');
+    expect(crawl!.args).toContain('--max-notas=5');
+
+    expect(enrich!.args).toContain('scripts/enrich-news.ts');
+    expect(enrich!.args).toContain('--medio-ids=MED-0203');
+    expect(enrich!.args).toContain('--limit=20');
+
+    expect(detect!.args).toContain('scripts/detect-mentions.ts');
+    expect(detect!.args).toContain('--client=CLI-MERY-TEST');
+    expect(detect!.args).toContain('--medio-ids=MED-0203');
+    expect(detect!.args).toContain('--limit=100');
+    expect(detect!.args).toContain('--max-inserts=50');
+    expect(detect!.args).toContain('--only-with-text');
+  });
+
+  it('--only-with-text=false no agrega el flag a detect-mentions', async () => {
+    await conArgv(['--only-with-text=false'], async () => {
+      await main();
+    });
+    const detect = spawnCalls.find((c) => c.args.includes('scripts/detect-mentions.ts'))!;
+    expect(detect.args).not.toContain('--only-with-text');
+  });
+
+  it('nunca invoca Sheets, export-results, generate-xml, classify-ia ni alertas', async () => {
+    await conArgv(['--max-notas=5'], async () => {
+      await main();
+    });
+    const todosLosArgs = spawnCalls.flatMap((c) => c.args).join(' ');
+    for (const prohibido of [
+      'export-results',
+      'export-raw-news',
+      'generate-xml',
+      'classify-ia',
+      'alertas_activas',
+      'sheet',
+      'email',
+      'whatsapp',
+      'smtp',
+      'twilio',
+    ]) {
+      expect(todosLosArgs.toLowerCase()).not.toContain(prohibido);
+    }
   });
 });

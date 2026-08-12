@@ -1,0 +1,81 @@
+name: mery-priority-media-capture
+
+# Captura segura de los medios prioritarios de Mery Pozos (Jalisco): crawl +
+# enrich + detect-mentions ACOTADO a CLI-MERY-TEST. Solo workflow_dispatch,
+# SIN schedule todavía.
+#
+# NO toca Patrón. NO toca Jumex. NO toca NOTAS ENVIADAS MERYPOZOS. NO escribe
+# en Google Sheets (no pide esas credenciales). NO email/WhatsApp/Twilio/SMTP.
+# NO export-results, NO generate-xml, NO classify-ia. NO activa alertas_activas.
+#
+# `dry_run=true` (default) es el modo seguro: no descarga, no enriquece, no
+# detecta, no escribe nada — solo reporta qué medios se capturarían.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry-run (no descarga, no enriquece, no detecta, no escribe)'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+      max_notas:
+        description: 'Tope de notas a crawlear por medio'
+        required: false
+        default: '5'
+        type: string
+      enrich_limit:
+        description: 'Tope de notas a enriquecer'
+        required: false
+        default: '20'
+        type: string
+      detect_limit:
+        description: 'Tope de noticias a analizar en detect-mentions (--client=CLI-MERY-TEST)'
+        required: false
+        default: '100'
+        type: string
+      max_inserts:
+        description: 'Tope de menciones nuevas a insertar (safety cap)'
+        required: false
+        default: '50'
+        type: string
+
+jobs:
+  capture:
+    name: Mery Priority Media Capture (crawl + enrich + detect CLI-MERY-TEST)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      LOG_FORMAT: json
+      RUN_BY: github-actions-mery-priority-media-capture
+      # Seguridad: estas variables NUNCA deben configurarse.
+      NO_SEND: 'true'
+      NO_EMAIL: 'true'
+      NO_WHATSAPP: 'true'
+      NO_TWILIO: 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Mery Priority Media Capture
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+        run: |
+          ARGS="--max-notas=${{ inputs.max_notas || '5' }} --enrich-limit=${{ inputs.enrich_limit || '20' }} --detect-limit=${{ inputs.detect_limit || '100' }} --max-inserts=${{ inputs.max_inserts || '50' }}"
+          if [ "${{ inputs.dry_run || 'true' }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          npm run mery:priority-media:capture -- $ARGS
