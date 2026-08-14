@@ -89,11 +89,9 @@ jobs:
         env:
           NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
         run: |
-          ARGS="--max-medios=${{ inputs.max_medios || '20' }} --max-notas=${{ inputs.max_notas || '5' }} --enrich-limit=${{ inputs.enrich_limit || '20' }} --window-days=${{ inputs.window_days || '30' }} --chunk-size=${{ inputs.chunk_size || '5' }}"
+          ARGS="--dry-run=${{ inputs.dry_run || 'true' }}"
+          ARGS="$ARGS --max-medios=${{ inputs.max_medios || '20' }} --max-notas=${{ inputs.max_notas || '5' }} --enrich-limit=${{ inputs.enrich_limit || '20' }} --window-days=${{ inputs.window_days || '30' }} --chunk-size=${{ inputs.chunk_size || '5' }}"
           if [ -n "${{ inputs.medio_ids }}" ]; then
             ARGS="$ARGS --medio-ids=${{ inputs.medio_ids }}"
-          fi
-          if [ "${{ inputs.dry_run || 'true' }}" = "true" ]; then
-            ARGS="$ARGS --dry-run"
           fi
           npm run news-lake:capture -- $ARGS

@@ -88,12 +88,24 @@ describe('parseArgs', () => {
     });
   });
 
-  it('--no-dry-run apaga el modo seguro', () => {
-    expect(parseArgs(['--no-dry-run']).dryRun).toBe(false);
+  it('parseArgs([]) → dryRun: true (default seguro)', () => {
+    expect(parseArgs([]).dryRun).toBe(true);
   });
 
-  it('--dry-run=false también apaga el modo seguro', () => {
+  it('parseArgs(["--dry-run"]) → dryRun: true', () => {
+    expect(parseArgs(['--dry-run']).dryRun).toBe(true);
+  });
+
+  it('parseArgs(["--dry-run=true"]) → dryRun: true', () => {
+    expect(parseArgs(['--dry-run=true']).dryRun).toBe(true);
+  });
+
+  it('parseArgs(["--dry-run=false"]) → dryRun: false (modo real explícito)', () => {
     expect(parseArgs(['--dry-run=false']).dryRun).toBe(false);
+  });
+
+  it('parseArgs(["--no-dry-run"]) → dryRun: false (alias explícito)', () => {
+    expect(parseArgs(['--no-dry-run']).dryRun).toBe(false);
   });
 
   it('--medio-ids sobrescribe la selección automática', () => {
@@ -138,7 +150,7 @@ describe('main() — orquestación crawl → enrich por chunk', () => {
     });
   }
 
-  it('--dry-run (default) no invoca crawl ni enrich', async () => {
+  it('sin flags: dryRun=true (default) no invoca spawn', async () => {
     await conArgv([], async () => {
       await main();
     });
@@ -150,6 +162,23 @@ describe('main() — orquestación crawl → enrich por chunk', () => {
       await main();
     });
     expect(spawnCalls).toHaveLength(0);
+  });
+
+  it('--dry-run=true explícito (como lo envía el workflow) tampoco invoca nada', async () => {
+    await conArgv(['--dry-run=true', '--max-medios=7'], async () => {
+      await main();
+    });
+    expect(spawnCalls).toHaveLength(0);
+  });
+
+  it('--dry-run=false (como lo envía el workflow en modo real) sí invoca crawl → enrich', async () => {
+    await conArgv(['--dry-run=false', '--max-medios=4', '--chunk-size=4'], async () => {
+      await main();
+    });
+    // 4 medios / chunk-size=4 → 1 chunk → 2 llamadas (crawl + enrich)
+    expect(spawnCalls).toHaveLength(2);
+    expect(spawnCalls[0]!.args).toContain('scripts/crawl.ts');
+    expect(spawnCalls[1]!.args).toContain('scripts/enrich-news.ts');
   });
 
   it('modo real invoca crawl→enrich por cada chunk, con los flags correctos', async () => {
