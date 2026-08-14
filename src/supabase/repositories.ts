@@ -743,6 +743,109 @@ export async function updateNoticiaEnriquecida(
 }
 
 // =============================================================================
+// News Lake — búsqueda de solo lectura sobre el lake general de noticias
+// =============================================================================
+//
+// A diferencia de getNoticiasPendientes/getNoticiasParaEnriquecer (que sirven
+// pipelines de detección/enriquecimiento y filtran por menciones_procesado o
+// campos faltantes), esto es una lectura EXPLORATORIA: cualquier ventana de
+// días, con o sin filtro de texto, sin tocar ningún flag de procesamiento.
+// Nunca escribe nada.
+
+/** Fila devuelta por el buscador ad-hoc del news lake (notas completas, no menciones). */
+export interface NoticiaLakeRow {
+  noticia_id: string;
+  medio_id: string | null;
+  medio_nombre: string | null;
+  titulo: string | null;
+  resumen: string | null;
+  url_original: string | null;
+  fecha_publicacion: string | null;
+  texto_extraido: string | null;
+  texto_nota_limpia: string | null;
+  texto_cuerpo_nota: string | null;
+}
+
+const SELECT_NOTICIA_LAKE =
+  'noticia_id, medio_id, titulo, resumen, url_original, fecha_publicacion,' +
+  ' texto_extraido, texto_nota_limpia, texto_cuerpo_nota, medios(nombre_medio)';
+
+function mapNoticiaLake(row: any): NoticiaLakeRow {
+  return {
+    noticia_id: row.noticia_id,
+    medio_id: (row.medio_id as string | null) ?? null,
+    medio_nombre: (row.medios?.nombre_medio as string | null | undefined) ?? null,
+    titulo: (row.titulo as string | null) ?? null,
+    resumen: (row.resumen as string | null) ?? null,
+    url_original: (row.url_original as string | null) ?? null,
+    fecha_publicacion: (row.fecha_publicacion as string | null) ?? null,
+    texto_extraido: (row.texto_extraido as string | null) ?? null,
+    texto_nota_limpia: (row.texto_nota_limpia as string | null) ?? null,
+    texto_cuerpo_nota: (row.texto_cuerpo_nota as string | null) ?? null,
+  };
+}
+
+export interface NoticiasEnVentanaOpts {
+  /** Ventana móvil en días sobre fecha_publicacion. 0/undefined = sin filtro de fecha. */
+  windowDays?: number;
+  /** Aísla a estos medio_id. */
+  medioIds?: string[];
+  /** Tope de filas a traer. */
+  limit?: number;
+  /**
+   * Filtro de texto a nivel de query (antes de cualquier matcher en memoria).
+   * `fts`   → Postgres full-text (`.textSearch`) sobre la columna generada `fts`.
+   * `ilike` → fallback simple con OR de ILIKE sobre título/resumen/texto_*.
+   * Sin filtro → trae la ventana completa (útil para --exact/--contains, que
+   * matchean en memoria con matchKeyword, o para "ver lo más reciente").
+   */
+  textFilter?: { modo: 'fts'; query: string } | { modo: 'ilike'; term: string };
+}
+
+/**
+ * Búsqueda de solo lectura sobre el lake de noticias. Nunca escribe nada
+ * (ni en `noticias` ni en `menciones`) y no depende de `keywords`/`clientes`.
+ */
+export async function getNoticiasEnVentana(
+  opts: NoticiasEnVentanaOpts = {},
+): Promise<NoticiaLakeRow[]> {
+  let query = getSupabase().from('noticias').select(SELECT_NOTICIA_LAKE);
+
+  if (opts.windowDays && opts.windowDays > 0) {
+    const desde = new Date(Date.now() - opts.windowDays * 24 * 60 * 60 * 1000).toISOString();
+    query = query.gte('fecha_publicacion', desde);
+  }
+  if (opts.medioIds && opts.medioIds.length > 0) {
+    query = query.in('medio_id', opts.medioIds);
+  }
+  if (opts.textFilter?.modo === 'fts') {
+    query = query.textSearch('fts', opts.textFilter.query, { type: 'websearch', config: 'spanish' });
+  } else if (opts.textFilter?.modo === 'ilike') {
+    const like = `%${opts.textFilter.term}%`;
+    query = query.or(
+      [
+        `titulo.ilike.${like}`,
+        `resumen.ilike.${like}`,
+        `texto_nota_limpia.ilike.${like}`,
+        `texto_cuerpo_nota.ilike.${like}`,
+        `texto_extraido.ilike.${like}`,
+      ].join(','),
+    );
+  }
+
+  query = query.order('fecha_publicacion', { ascending: false });
+  if (opts.limit && opts.limit > 0) query = query.limit(opts.limit);
+
+  const { data, error } = await retryPostgrest('getNoticiasEnVentana', () => query);
+  if (error) {
+    throw new Error(
+      `No se pudo buscar en el news lake: ${describeSupabaseError(error)}. ${hintForSupabaseError(error)}`,
+    );
+  }
+  return (data ?? []).map(mapNoticiaLake);
+}
+
+// =============================================================================
 // Fase 7 — Clasificación con IA
 // =============================================================================
 
