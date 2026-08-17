@@ -1,0 +1,143 @@
+name: client-live-sheet-export
+
+# Exportador genérico de LIVE shadow a Google Sheets (append-only, sin alertas).
+#
+# Busca noticias del news lake (ventana rolling de N días) y las exporta a una
+# Google Sheet arbitraria clasificadas en buckets (notas candidatas, menciones
+# de alta confianza, revisión humana, logs de corrida).
+#
+# NO envía alertas/email/WhatsApp/Twilio/SMTP. NO inserta en `menciones`.
+# NO toca Patrón final, Jumex final, NOTAS ENVIADAS MERYPOZOS.
+# NO borra ni limpia contenido existente (append-only + dedupe por dedupe_key).
+#
+# dry_run=true (default) imprime el plan y preview de filas sin escribir nada.
+# Para escritura real: dry_run=false y sheet_id requerido.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry-run (solo plan + preview; no escribe en Sheets)'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+      sheet_id:
+        description: 'Google Sheet ID destino (requerido para dry_run=false)'
+        required: false
+        default: ''
+        type: string
+      tab_prefix:
+        description: 'Prefijo de las pestañas (p.ej. ETHOS_LIVE, CLI0002_SHADOW)'
+        required: false
+        default: 'ETHOS_LIVE'
+        type: string
+      client_id:
+        description: 'Cliente ID con keywords activas (p.ej. CLI-0002). Modo A.'
+        required: false
+        default: ''
+        type: string
+      client_name:
+        description: 'Nombre del cliente para logs (p.ej. Patrón Tequilero)'
+        required: false
+        default: ''
+        type: string
+      query:
+        description: 'Búsqueda libre full-text (Modo B). Ej: Mery Pozos'
+        required: false
+        default: ''
+        type: string
+      exact:
+        description: 'Frase exacta a buscar (Modo B). Ej: Bacardí México'
+        required: false
+        default: ''
+        type: string
+      contains:
+        description: 'Substring a buscar (Modo B). Ej: Jumex'
+        required: false
+        default: ''
+        type: string
+      window_days:
+        description: 'Ventana de noticias en días (rolling)'
+        required: false
+        default: '30'
+        type: string
+      limit:
+        description: 'Tope de noticias a consultar desde el lake'
+        required: false
+        default: '100'
+        type: string
+      max_rows:
+        description: 'Tope de filas totales a escribir (safety cap)'
+        required: false
+        default: '100'
+        type: string
+
+concurrency:
+  group: client-live-sheet-export-${{ github.event.inputs.sheet_id }}-${{ github.event.inputs.tab_prefix || 'ETHOS_LIVE' }}
+  cancel-in-progress: false
+
+jobs:
+  export:
+    name: Client Live Sheet Export (LIVE shadow → Sheets, append-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+      # sheet_id como GOOGLE_SHEET_ID para que getSpreadsheetById use las credenciales
+      # correctas. En dry_run=true puede estar vacío (no se abre ninguna Sheet).
+      GOOGLE_SHEET_ID: ${{ github.event.inputs.sheet_id || 'DRY_RUN_NO_SHEET' }}
+      LOG_FORMAT: json
+      RUN_BY: github-actions-client-live-sheet-export
+      # Guardrails de seguridad: NUNCA configurar estas variables aquí.
+      NO_SEND: 'true'
+      NO_EMAIL: 'true'
+      NO_WHATSAPP: 'true'
+      NO_TWILIO: 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Client Live Sheet Export
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+        run: |
+          ARGS="--dry-run=${{ inputs.dry_run || 'true' }}"
+          ARGS="$ARGS --window-days=${{ inputs.window_days || '30' }}"
+          ARGS="$ARGS --limit=${{ inputs.limit || '100' }}"
+          ARGS="$ARGS --max-rows=${{ inputs.max_rows || '100' }}"
+          if [ -n "${{ inputs.sheet_id }}" ]; then
+            ARGS="$ARGS --sheet-id=${{ inputs.sheet_id }}"
+          fi
+          if [ -n "${{ inputs.tab_prefix }}" ]; then
+            ARGS="$ARGS --tab-prefix=${{ inputs.tab_prefix }}"
+          fi
+          if [ -n "${{ inputs.client_id }}" ]; then
+            ARGS="$ARGS --client-id=${{ inputs.client_id }}"
+          fi
+          if [ -n "${{ inputs.client_name }}" ]; then
+            ARGS="$ARGS --client-name=${{ inputs.client_name }}"
+          fi
+          if [ -n "${{ inputs.query }}" ]; then
+            ARGS="$ARGS --query=${{ inputs.query }}"
+          fi
+          if [ -n "${{ inputs.exact }}" ]; then
+            ARGS="$ARGS --exact=${{ inputs.exact }}"
+          fi
+          if [ -n "${{ inputs.contains }}" ]; then
+            ARGS="$ARGS --contains=${{ inputs.contains }}"
+          fi
+          npm run client-live:sheet -- $ARGS

@@ -63,6 +63,7 @@
     "diagnose:mery-vs-patron": "tsx scripts/diagnose-mery-vs-patron-supabase.ts",
     "news-lake:capture": "tsx scripts/news-lake-capture.ts",
     "news-lake:search": "tsx scripts/search-news-lake.ts",
+    "client-live:sheet": "tsx scripts/client-live-sheet-export.ts",
     "catalog-mery-jalisco-priority": "tsx scripts/catalog-mery-jalisco-priority.ts",
     "audit-mery-media-coverage": "tsx scripts/audit-mery-media-coverage.ts",
     "mery:compare:legacy": "tsx scripts/audit-mery-legacy-google-rss.ts",
