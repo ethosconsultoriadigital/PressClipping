@@ -96,6 +96,13 @@ export interface LiveSheetExportArgs {
   limit: number;
   maxRows: number;
   includeFullText: boolean;
+  /**
+   * Argumentos posicionales no reconocidos (no empiezan con '--').
+   * Si contiene elementos, main() hace process.exit(1) con mensaje claro.
+   * Detecta errores de quoting en workflow donde "--query=Mery Pozos"
+   * llega partido como ["--query=Mery", "Pozos"].
+   */
+  unknownPositional: string[];
 }
 
 function parseQuoted(v: string): string {
@@ -120,11 +127,18 @@ export function parseArgs(argv: string[]): LiveSheetExportArgs {
     limit: 100,
     maxRows: 100,
     includeFullText: true,
+    unknownPositional: [],
   };
   for (const arg of argv) {
     if (arg === '--dry-run') { out.dryRun = true; continue; }
     if (arg === '--no-dry-run') { out.dryRun = false; continue; }
-    if (!arg.startsWith('--')) continue;
+    if (!arg.startsWith('--')) {
+      // Argumento posicional no reconocido. Muy probablemente indica un error de
+      // quoting en el workflow: "--query=Mery Pozos" llegó partido como
+      // "--query=Mery" + "Pozos". Se recolecta para que main() lo reporte y falle.
+      out.unknownPositional.push(arg);
+      continue;
+    }
     const body = arg.slice(2);
     const eq = body.indexOf('=');
     const key = eq === -1 ? body : body.slice(0, eq);
@@ -532,6 +546,17 @@ export async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const started = Date.now();
   const fechaExport = new Date().toISOString();
+
+  // Detecta errores de quoting del workflow antes de cualquier otra validación.
+  if (args.unknownPositional.length > 0) {
+    logger.error(
+      { desconocidos: args.unknownPositional },
+      `Argumentos posicionales/desconocidos no permitidos: ${args.unknownPositional.join(', ')}. ` +
+      'Posible error de quoting en el workflow: un valor con espacios llegó partido. ' +
+      'Usa --flag="valor con espacios" o la sintaxis de array de Bash: ARGS+=( "--flag=valor con espacios" ).',
+    );
+    process.exit(1);
+  }
 
   logger.info(
     {

@@ -114,30 +114,32 @@ jobs:
       - name: Client Live Sheet Export
         env:
           NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+          # Inputs con espacios posibles pasan por variables de entorno para evitar
+          # word-splitting del shell. NUNCA interpolar ${{ inputs.* }} directamente
+          # en la cadena de ARGS — eso causa "--query=Mery Pozos" → "--query=Mery" + "Pozos".
+          INPUT_DRY_RUN: ${{ inputs.dry_run || 'true' }}
+          INPUT_WINDOW_DAYS: ${{ inputs.window_days || '30' }}
+          INPUT_LIMIT: ${{ inputs.limit || '100' }}
+          INPUT_MAX_ROWS: ${{ inputs.max_rows || '100' }}
+          INPUT_SHEET_ID: ${{ inputs.sheet_id }}
+          INPUT_TAB_PREFIX: ${{ inputs.tab_prefix }}
+          INPUT_CLIENT_ID: ${{ inputs.client_id }}
+          INPUT_CLIENT_NAME: ${{ inputs.client_name }}
+          INPUT_QUERY: ${{ inputs.query }}
+          INPUT_EXACT: ${{ inputs.exact }}
+          INPUT_CONTAINS: ${{ inputs.contains }}
         run: |
-          ARGS="--dry-run=${{ inputs.dry_run || 'true' }}"
-          ARGS="$ARGS --window-days=${{ inputs.window_days || '30' }}"
-          ARGS="$ARGS --limit=${{ inputs.limit || '100' }}"
-          ARGS="$ARGS --max-rows=${{ inputs.max_rows || '100' }}"
-          if [ -n "${{ inputs.sheet_id }}" ]; then
-            ARGS="$ARGS --sheet-id=${{ inputs.sheet_id }}"
-          fi
-          if [ -n "${{ inputs.tab_prefix }}" ]; then
-            ARGS="$ARGS --tab-prefix=${{ inputs.tab_prefix }}"
-          fi
-          if [ -n "${{ inputs.client_id }}" ]; then
-            ARGS="$ARGS --client-id=${{ inputs.client_id }}"
-          fi
-          if [ -n "${{ inputs.client_name }}" ]; then
-            ARGS="$ARGS --client-name=${{ inputs.client_name }}"
-          fi
-          if [ -n "${{ inputs.query }}" ]; then
-            ARGS="$ARGS --query=${{ inputs.query }}"
-          fi
-          if [ -n "${{ inputs.exact }}" ]; then
-            ARGS="$ARGS --exact=${{ inputs.exact }}"
-          fi
-          if [ -n "${{ inputs.contains }}" ]; then
-            ARGS="$ARGS --contains=${{ inputs.contains }}"
-          fi
-          npm run client-live:sheet -- $ARGS
+          # Array de Bash: cada elemento queda individualmente entre comillas cuando
+          # se expande con "${ARGS[@]}", preservando espacios dentro de los valores.
+          ARGS=( "--dry-run=${INPUT_DRY_RUN}" )
+          ARGS+=( "--window-days=${INPUT_WINDOW_DAYS}" )
+          ARGS+=( "--limit=${INPUT_LIMIT}" )
+          ARGS+=( "--max-rows=${INPUT_MAX_ROWS}" )
+          [ -n "${INPUT_SHEET_ID}" ]    && ARGS+=( "--sheet-id=${INPUT_SHEET_ID}" )
+          [ -n "${INPUT_TAB_PREFIX}" ]  && ARGS+=( "--tab-prefix=${INPUT_TAB_PREFIX}" )
+          [ -n "${INPUT_CLIENT_ID}" ]   && ARGS+=( "--client-id=${INPUT_CLIENT_ID}" )
+          [ -n "${INPUT_CLIENT_NAME}" ] && ARGS+=( "--client-name=${INPUT_CLIENT_NAME}" )
+          [ -n "${INPUT_QUERY}" ]       && ARGS+=( "--query=${INPUT_QUERY}" )
+          [ -n "${INPUT_EXACT}" ]       && ARGS+=( "--exact=${INPUT_EXACT}" )
+          [ -n "${INPUT_CONTAINS}" ]    && ARGS+=( "--contains=${INPUT_CONTAINS}" )
+          npm run client-live:sheet -- "${ARGS[@]}"

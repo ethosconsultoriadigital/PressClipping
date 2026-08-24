@@ -184,6 +184,53 @@ describe('parseArgs', () => {
     expect(args.clientId).toBe('CLI-0002');
     expect(args.query).toBe('Patrón');
   });
+
+  // ── Quoting: valores con espacios ──────────────────────────────────────────
+
+  it('--query="Mery Pozos" (valor con espacios) se preserva íntegro', () => {
+    const args = parseArgs(['--query=Mery Pozos']);
+    expect(args.query).toBe('Mery Pozos');
+    expect(args.unknownPositional).toHaveLength(0);
+  });
+
+  it('--client-name="Mery Pozos" (valor con espacios) se preserva íntegro', () => {
+    const args = parseArgs(['--client-name=Mery Pozos']);
+    expect(args.clientName).toBe('Mery Pozos');
+    expect(args.unknownPositional).toHaveLength(0);
+  });
+
+  it('--exact="Bacardí México" (valor con espacios) se preserva íntegro', () => {
+    const args = parseArgs(['--exact=Bacardí México']);
+    expect(args.exact).toBe('Bacardí México');
+    expect(args.unknownPositional).toHaveLength(0);
+  });
+
+  it('--contains="Patrón Tequilero" (valor con espacios) se preserva íntegro', () => {
+    const args = parseArgs(['--contains=Patrón Tequilero']);
+    expect(args.contains).toBe('Patrón Tequilero');
+    expect(args.unknownPositional).toHaveLength(0);
+  });
+
+  // ── Detección de quoting roto ──────────────────────────────────────────────
+
+  it('["--query=Mery", "Pozos"] detecta "Pozos" como argumento posicional desconocido', () => {
+    const args = parseArgs(['--query=Mery', 'Pozos']);
+    expect(args.query).toBe('Mery');
+    expect(args.unknownPositional).toContain('Pozos');
+    expect(args.unknownPositional).toHaveLength(1);
+  });
+
+  it('múltiples fragmentos son todos detectados como posicionales', () => {
+    const args = parseArgs(['--query=Mery', 'Pozos', 'Extra', '--window-days=7']);
+    expect(args.query).toBe('Mery');
+    expect(args.unknownPositional).toEqual(['Pozos', 'Extra']);
+    expect(args.windowDays).toBe(7);
+  });
+
+  it('unknownPositional está vacío cuando todos los args tienen --', () => {
+    expect(parseArgs(['--dry-run=true', '--query=Mery Pozos']).unknownPositional).toHaveLength(0);
+    expect(parseArgs([]).unknownPositional).toHaveLength(0);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -475,6 +522,23 @@ describe('main() — dry-run no escribe en Sheets', () => {
       conArgv([], async () => { await main(); }),
     ).rejects.toThrow('exit');
     exitSpy.mockRestore();
+  });
+
+  it('argumentos posicionales desconocidos (quoting roto) llaman a process.exit(1)', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((_code?: string | number | null) => { throw new Error('exit'); });
+    // Simula "--query=Mery Pozos" llegando partido por quoting roto en el workflow
+    await expect(
+      conArgv(['--query=Mery', 'Pozos'], async () => { await main(); }),
+    ).rejects.toThrow('exit');
+    expect(addRowsCalls).toHaveLength(0); // no debe escribir nada
+    exitSpy.mockRestore();
+  });
+
+  it('valores con espacios pasados correctamente (--query="Mery Pozos") no fallan', async () => {
+    // "--query=Mery Pozos" como UN SOLO elemento del array → sin posicionales desconocidos
+    await conArgv(['--client-id=CLI-0002', '--query=Mery Pozos'], async () => { await main(); });
+    // dry-run=true (default): no escribe nada
+    expect(addRowsCalls).toHaveLength(0);
   });
 });
 
