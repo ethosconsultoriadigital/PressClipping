@@ -6,7 +6,12 @@
  * revisión humana antes de activar alertas internas / WhatsApp.
  *
  * Soporta dos modos de búsqueda:
- *   Caso A: --client-id  → carga keywords activas del cliente y aplica matchKeyword.
+ *   Caso A: --client-id  → carga keywords activas del cliente, genera términos
+ *           de búsqueda a partir de ellas (frases completas y variantes, no
+ *           palabras sueltas) y busca candidatos en el News Lake por término
+ *           (fts con fallback ilike), en vez de escanear las últimas N
+ *           noticias genéricas. Luego aplica matchKeyword sobre los candidatos
+ *           deduplicados para clasificar en buckets.
  *   Caso B: --query/--exact/--contains → búsqueda ad-hoc sin cliente.
  * Si se combinan, gana --client-id sobre los modos ad-hoc.
  *
@@ -78,6 +83,17 @@ export const COMPARATIVO_HEADERS = [
 ] as const;
 
 const TIPOS_VALIDOS: TipoKeyword[] = ['exacta', 'frase_exacta', 'contiene', 'booleana', 'exacta_contextual'];
+
+/**
+ * Tuning de recuperación de candidatos por keyword para el modo --client-id.
+ * Bounds deliberadamente conservadores: priorizan recall dirigido por término
+ * (frases del cliente) sobre un escaneo genérico masivo de la ventana.
+ */
+export const MAX_TERMINOS_BUSQUEDA_CLIENTE = 15;
+export const CANDIDATOS_POR_TERMINO_CLIENTE = 50;
+export const MAX_CANDIDATOS_CLIENTE_TOTAL = 300;
+/** Términos más cortos que esto se descartan (demasiado ruidosos para fts/ilike). */
+const MIN_LEN_TERMINO_BUSQUEDA = 3;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Args
@@ -296,11 +312,101 @@ function baseRow(
   };
 }
 
+/**
+ * Extrae términos de búsqueda candidatos a partir de las keywords activas de
+ * un cliente (keyword + alias_o_variantes, ya separados por splitTerminos).
+ * Descarta términos demasiado cortos (ruidosos para fts/ilike) y prioriza
+ * frases largas/específicas (mayor precisión, p.ej. "diputada Mery Pozos")
+ * sobre términos cortos, para maximizar recall dirigido sin abrir la puerta
+ * a ruido masivo.
+ */
+export function extraerTerminosBusqueda(
+  keywords: KeywordActivaRow[],
+  minLen: number = MIN_LEN_TERMINO_BUSQUEDA,
+): string[] {
+  const set = new Set<string>();
+  for (const kw of keywords) {
+    for (const t of splitTerminos(kw.keyword, kw.alias_o_variantes)) {
+      const trimmed = t.trim();
+      if (trimmed.length >= minLen) set.add(trimmed);
+    }
+  }
+  // Frases más largas primero (más específicas / mayor precisión).
+  return [...set].sort((a, b) => b.length - a.length);
+}
+
+export interface CandidatosClienteResultado {
+  noticias: NoticiaLakeRow[];
+  terminosUsados: string[];
+}
+
+/**
+ * Busca candidatos del News Lake para un cliente usando sus keywords activas
+ * como términos de búsqueda dirigida (fts, con fallback a ilike por término),
+ * en vez de escanear las últimas N noticias genéricas de la ventana completa.
+ *
+ * Deduplica por noticia_id y por url_original (por si una misma nota aparece
+ * bajo IDs distintos). Acota el total de candidatos a MAX_CANDIDATOS_CLIENTE_TOTAL
+ * para evitar volúmenes de ruido masivo incluso si hay muchas keywords.
+ *
+ * Si el cliente no tiene keywords activas (o ninguna produce términos útiles),
+ * devuelve candidatos vacíos: sin keywords no hay base para filtrar, y por
+ * diseño NO se recurre a un escaneo genérico como fallback (evita ruido).
+ */
+export async function buscarCandidatosCliente(
+  keywords: KeywordActivaRow[],
+  windowDays: number,
+): Promise<CandidatosClienteResultado> {
+  const terminos = extraerTerminosBusqueda(keywords).slice(0, MAX_TERMINOS_BUSQUEDA_CLIENTE);
+  if (terminos.length === 0) return { noticias: [], terminosUsados: [] };
+
+  const porNoticiaId = new Map<string, NoticiaLakeRow>();
+  const seenUrls = new Set<string>();
+
+  for (const termino of terminos) {
+    if (porNoticiaId.size >= MAX_CANDIDATOS_CLIENTE_TOTAL) break;
+
+    let encontradas: NoticiaLakeRow[] = [];
+    try {
+      encontradas = await getNoticiasEnVentana({
+        windowDays,
+        limit: CANDIDATOS_POR_TERMINO_CLIENTE,
+        textFilter: { modo: 'fts', query: termino },
+      });
+    } catch {
+      try {
+        encontradas = await getNoticiasEnVentana({
+          windowDays,
+          limit: CANDIDATOS_POR_TERMINO_CLIENTE,
+          textFilter: { modo: 'ilike', term: termino },
+        });
+      } catch {
+        encontradas = [];
+      }
+    }
+
+    for (const n of encontradas) {
+      if (porNoticiaId.has(n.noticia_id)) continue;
+      const url = (n.url_original ?? '').trim().toLowerCase();
+      if (url && seenUrls.has(url)) continue;
+      porNoticiaId.set(n.noticia_id, n);
+      if (url) seenUrls.add(url);
+    }
+  }
+
+  return {
+    noticias: [...porNoticiaId.values()].slice(0, MAX_CANDIDATOS_CLIENTE_TOTAL),
+    terminosUsados: terminos,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Procesamiento de noticias → buckets (sin tocar DB ni Sheets)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Caso A: client_id con keywords activas. */
+/** Caso A: client_id con keywords activas. `noticias` ya deben venir como los
+ * candidatos filtrados por keyword (ver buscarCandidatosCliente), no un
+ * escaneo genérico de la ventana completa. */
 export function procesarCasoCliente(
   noticias: NoticiaLakeRow[],
   keywords: KeywordActivaRow[],
@@ -317,7 +423,7 @@ export function procesarCasoCliente(
       dedupeSuffix: 'raw',
       bucket: 'LIVE_Notas_Capturadas',
       confidence: '-',
-      motivo: `nota en ventana ${args.windowDays}d`,
+      motivo: `candidato por keyword search (ventana ${args.windowDays}d)`,
       fechaExport,
     }),
   );
@@ -594,11 +700,30 @@ export async function main(): Promise<void> {
     args.exact ? 'exact' : args.contains ? 'contains' : 'query';
 
   let noticias: NoticiaLakeRow[];
+  let keywords: KeywordActivaRow[] = [];
+  let terminosBusqueda: string[] = [];
+
   if (args.clientId) {
-    // Caso A: todas las noticias de la ventana (sin filtro de texto); el matching
-    // se hace en memoria con las keywords del cliente.
-    const scanLimit = Math.min(2000, Math.max(args.limit * 5, 500));
-    noticias = await getNoticiasEnVentana({ windowDays: args.windowDays, limit: scanLimit });
+    // Caso A: cargar keywords ANTES de buscar candidatos, y usarlas como
+    // términos de búsqueda dirigida (fts/ilike por término) en vez de
+    // escanear las últimas N noticias genéricas de la ventana completa.
+    // Esto es lo que corrige el problema de recall: antes se traían hasta
+    // 500 noticias por fecha_publicacion (sin relación al cliente) y luego
+    // se aplicaba matchKeyword encima, perdiendo candidatos fuera de ese top-N.
+    const todasKw = await getKeywordsActivas();
+    keywords = todasKw.filter((k) => k.cliente_id === args.clientId);
+    logger.info({ clientId: args.clientId, keywords: keywords.length }, 'Keywords del cliente cargadas');
+    if (keywords.length === 0) {
+      logger.warn({ clientId: args.clientId }, 'Sin keywords activas para este cliente. Revisa la configuración.');
+    }
+
+    const candidatos = await buscarCandidatosCliente(keywords, args.windowDays);
+    noticias = candidatos.noticias;
+    terminosBusqueda = candidatos.terminosUsados;
+    logger.info(
+      { terminos_busqueda: terminosBusqueda.length, terminos_muestra: terminosBusqueda.slice(0, 5) },
+      'Términos de búsqueda derivados de keywords activas',
+    );
   } else {
     // Caso B: búsqueda ad-hoc con filtro de texto en la query.
     const textFilter =
@@ -648,20 +773,9 @@ export async function main(): Promise<void> {
     }
   }
 
-  logger.info({ noticias_encontradas: noticias.length }, 'Noticias del lake cargadas');
+  logger.info({ noticias_encontradas: noticias.length }, 'Noticias/candidatos del lake cargados');
 
-  // ── Paso 2: Cargar keywords si Caso A ────────────────────────────────────
-  let keywords: KeywordActivaRow[] = [];
-  if (args.clientId) {
-    const todas = await getKeywordsActivas();
-    keywords = todas.filter((k) => k.cliente_id === args.clientId);
-    logger.info({ clientId: args.clientId, keywords: keywords.length }, 'Keywords del cliente cargadas');
-    if (keywords.length === 0) {
-      logger.warn({ clientId: args.clientId }, 'Sin keywords activas para este cliente. Revisa la configuración.');
-    }
-  }
-
-  // ── Paso 3: Clasificar en buckets ────────────────────────────────────────
+  // ── Paso 2: Clasificar en buckets ────────────────────────────────────────
   const buckets: BucketRows = args.clientId
     ? procesarCasoCliente(noticias, keywords, args, fechaExport)
     : procesarCasoAdHoc(noticias, args, searchMode, fechaExport);
@@ -675,7 +789,7 @@ export async function main(): Promise<void> {
     'Clasificación completada',
   );
 
-  // ── Paso 4: Dry-run (plan + preview) ─────────────────────────────────────
+  // ── Paso 3: Dry-run (plan + preview) ─────────────────────────────────────
   if (args.dryRun) {
     logger.info(
       {
@@ -688,6 +802,7 @@ export async function main(): Promise<void> {
           `${args.tabPrefix}_06_Logs`,
         ],
         sheet_id: args.sheetId ? `${args.sheetId.slice(0, 8)}...` : '(no pasado)',
+        terminos_busqueda_usados: args.clientId ? terminosBusqueda.length : null,
         preview_notas_capturadas: buckets.notasCapturadas.slice(0, 3).map((r) => ({
           dedupe_key: r['dedupe_key'], titulo: r['titulo'], bucket: r['bucket'],
         })),
@@ -703,7 +818,7 @@ export async function main(): Promise<void> {
     return;
   }
 
-  // ── Paso 5: Escritura real ────────────────────────────────────────────────
+  // ── Paso 4: Escritura real ────────────────────────────────────────────────
   const doc = await getSpreadsheetById(args.sheetId!);
 
   const tabs = {

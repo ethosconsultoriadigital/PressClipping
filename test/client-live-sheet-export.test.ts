@@ -18,7 +18,9 @@ function noticia(over: Partial<NoticiaLakeRow> & { noticia_id: string }): Notici
     medio_nombre: 'Medio de prueba',
     titulo: null,
     resumen: null,
-    url_original: 'https://example.com/nota',
+    // Única por defecto (incluye noticia_id) para no colisionar en dedupe por
+    // url_original entre fixtures de distintas noticias en los tests.
+    url_original: `https://example.com/nota-${over.noticia_id}`,
     fecha_publicacion: '2026-08-14T00:00:00.000Z',
     texto_extraido: null,
     texto_nota_limpia: null,
@@ -46,6 +48,17 @@ function keyword(over: Partial<KeywordActivaRow> & { keyword_id: string; keyword
 
 let mockNoticias: NoticiaLakeRow[] = [];
 let mockKeywords: KeywordActivaRow[] = [];
+/**
+ * Resultados por término de búsqueda (clave = query/term en minúsculas), para
+ * simular la recuperación dirigida por keyword de buscarCandidatosCliente.
+ * Si un término no tiene entrada aquí, se hace fallback a `mockNoticias`
+ * (preserva el comportamiento de los tests preexistentes que no diferencian
+ * por término).
+ */
+let mockNoticiasPorTermino: Record<string, NoticiaLakeRow[]> = {};
+/** Términos para los que la búsqueda fts debe fallar (fuerza fallback ilike). */
+let mockThrowFtsFor: Set<string> = new Set();
+const getNoticiasEnVentanaCalls: any[] = [];
 const addRowsCalls: { tab: string; rows: any[] }[] = [];
 const addSheetCalls: string[] = [];
 
@@ -85,7 +98,21 @@ function fakeDoc(existingTabs: Record<string, ReturnType<typeof fakeSheet>> = {}
 let mockDoc = fakeDoc();
 
 vi.mock('../src/supabase/repositories.js', () => ({
-  getNoticiasEnVentana: () => Promise.resolve(mockNoticias),
+  getNoticiasEnVentana: vi.fn((opts: any) => {
+    getNoticiasEnVentanaCalls.push(opts);
+    const tf = opts?.textFilter;
+    if (tf) {
+      const key = String(tf.query ?? tf.term ?? '').toLowerCase();
+      if (tf.modo === 'fts' && mockThrowFtsFor.has(key)) {
+        return Promise.reject(new Error('fts falló (simulado)'));
+      }
+      if (key in mockNoticiasPorTermino) {
+        return Promise.resolve(mockNoticiasPorTermino[key]);
+      }
+      return Promise.resolve(mockNoticias);
+    }
+    return Promise.resolve(mockNoticias);
+  }),
   getKeywordsActivas: () => Promise.resolve(mockKeywords),
 }));
 
@@ -101,14 +128,23 @@ import {
   textoEfectivo,
   camposDeLake,
   toKeywordRule,
+  extraerTerminosBusqueda,
+  buscarCandidatosCliente,
   procesarCasoCliente,
   procesarCasoAdHoc,
   ensureTabInDoc,
   leerDedupKeys,
   appendDeduped,
   LIVE_HEADERS,
+  MAX_CANDIDATOS_CLIENTE_TOTAL,
   main,
 } from '../scripts/client-live-sheet-export.js';
+
+beforeEach(() => {
+  mockNoticiasPorTermino = {};
+  mockThrowFtsFor = new Set();
+  getNoticiasEnVentanaCalls.length = 0;
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // parseArgs
@@ -303,6 +339,136 @@ describe('toKeywordRule', () => {
   it('tipo desconocido cae a "contiene"', () => {
     const kw = keyword({ keyword_id: 'KW-2', keyword: 'X', tipo_keyword: 'DESCONOCIDO' });
     expect(toKeywordRule(kw).tipo).toBe('contiene');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recall dirigido por keyword (modo --client-id)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('extraerTerminosBusqueda', () => {
+  it('extrae keyword + alias_o_variantes como términos separados', () => {
+    const kws = [
+      keyword({ keyword_id: 'KW-1', keyword: 'Mery Pozos', alias_o_variantes: 'Merilyn Gómez Pozos|Merilyn Gomez Pozos' }),
+    ];
+    const terminos = extraerTerminosBusqueda(kws);
+    expect(terminos).toContain('Mery Pozos');
+    expect(terminos).toContain('Merilyn Gómez Pozos');
+    expect(terminos).toContain('Merilyn Gomez Pozos');
+  });
+
+  it('prioriza frases largas/específicas primero (mayor precisión)', () => {
+    const kws = [
+      keyword({ keyword_id: 'KW-1', keyword: 'Mery Pozos', alias_o_variantes: 'diputada Mery Pozos|Pozos' }),
+    ];
+    const terminos = extraerTerminosBusqueda(kws, 1);
+    // "diputada Mery Pozos" (20) > "Mery Pozos" (10) > "Pozos" (5)
+    expect(terminos[0]).toBe('diputada Mery Pozos');
+    expect(terminos[terminos.length - 1]).toBe('Pozos');
+  });
+
+  it('descarta términos demasiado cortos (ruidosos)', () => {
+    const kws = [keyword({ keyword_id: 'KW-1', keyword: 'Mery Pozos', alias_o_variantes: 'a|b|de' })];
+    const terminos = extraerTerminosBusqueda(kws, 3);
+    expect(terminos).not.toContain('a');
+    expect(terminos).not.toContain('b');
+    expect(terminos).not.toContain('de');
+    expect(terminos).toContain('Mery Pozos');
+  });
+
+  it('deduplica términos repetidos entre distintas keywords', () => {
+    const kws = [
+      keyword({ keyword_id: 'KW-1', keyword: 'Mery Pozos' }),
+      keyword({ keyword_id: 'KW-2', keyword: 'Mery Pozos', alias_o_variantes: 'Mery Pozos' }),
+    ];
+    const terminos = extraerTerminosBusqueda(kws);
+    expect(terminos.filter((t) => t === 'Mery Pozos')).toHaveLength(1);
+  });
+
+  it('sin keywords devuelve lista vacía', () => {
+    expect(extraerTerminosBusqueda([])).toEqual([]);
+  });
+});
+
+describe('buscarCandidatosCliente', () => {
+  it('usa las keywords del cliente para recuperar candidatos por término (no escaneo genérico)', async () => {
+    mockNoticiasPorTermino = {
+      'mery pozos': [noticia({ noticia_id: 'N1', titulo: 'Mery Pozos inaugura obra' })],
+      'merilyn gómez pozos': [noticia({ noticia_id: 'N2', titulo: 'Merilyn Gómez Pozos en evento' })],
+    };
+    const kws = [
+      keyword({ keyword_id: 'KW-1', keyword: 'Mery Pozos', alias_o_variantes: 'Merilyn Gómez Pozos' }),
+    ];
+    const result = await buscarCandidatosCliente(kws, 30);
+    expect(result.noticias.map((n) => n.noticia_id).sort()).toEqual(['N1', 'N2']);
+    expect(result.terminosUsados.length).toBeGreaterThanOrEqual(2);
+    // Cada búsqueda debe haber usado textFilter (dirigida), no un scan genérico.
+    expect(getNoticiasEnVentanaCalls.every((c) => c.textFilter)).toBe(true);
+  });
+
+  it('no exporta 500 notas genéricas cuando solo hay pocos candidatos reales', async () => {
+    mockNoticiasPorTermino = {
+      'mery pozos': [noticia({ noticia_id: 'N1' }), noticia({ noticia_id: 'N2' })],
+    };
+    const kws = [keyword({ keyword_id: 'KW-1', keyword: 'Mery Pozos' })];
+    const result = await buscarCandidatosCliente(kws, 30);
+    expect(result.noticias.length).toBeLessThan(10);
+    expect(result.noticias.length).toBeLessThan(500);
+  });
+
+  it('deduplica candidatos por noticia_id entre distintos términos', async () => {
+    const mismaNota = noticia({ noticia_id: 'N1', titulo: 'Mery Pozos y Merilyn Gómez Pozos' });
+    mockNoticiasPorTermino = {
+      'mery pozos': [mismaNota],
+      'merilyn gómez pozos': [mismaNota],
+    };
+    const kws = [
+      keyword({ keyword_id: 'KW-1', keyword: 'Mery Pozos', alias_o_variantes: 'Merilyn Gómez Pozos' }),
+    ];
+    const result = await buscarCandidatosCliente(kws, 30);
+    expect(result.noticias).toHaveLength(1);
+  });
+
+  it('deduplica candidatos por url_original cuando noticia_id difiere', async () => {
+    const url = 'https://example.com/misma-nota';
+    mockNoticiasPorTermino = {
+      'mery pozos': [noticia({ noticia_id: 'N1', url_original: url })],
+      'merilyn gómez pozos': [noticia({ noticia_id: 'N2', url_original: url })],
+    };
+    const kws = [
+      keyword({ keyword_id: 'KW-1', keyword: 'Mery Pozos', alias_o_variantes: 'Merilyn Gómez Pozos' }),
+    ];
+    const result = await buscarCandidatosCliente(kws, 30);
+    expect(result.noticias).toHaveLength(1);
+  });
+
+  it('hace fallback a ilike si fts falla para un término, sin perder candidatos', async () => {
+    mockThrowFtsFor = new Set(['mery pozos']);
+    mockNoticiasPorTermino = {
+      'mery pozos': [noticia({ noticia_id: 'N1' })], // usado por el fallback ilike (mismo key)
+    };
+    const kws = [keyword({ keyword_id: 'KW-1', keyword: 'Mery Pozos' })];
+    const result = await buscarCandidatosCliente(kws, 30);
+    expect(result.noticias).toHaveLength(1);
+    const modos = getNoticiasEnVentanaCalls.map((c) => c.textFilter?.modo);
+    expect(modos).toContain('ilike');
+  });
+
+  it('sin keywords activas no busca nada y devuelve candidatos vacíos (sin fallback genérico)', async () => {
+    const result = await buscarCandidatosCliente([], 30);
+    expect(result.noticias).toEqual([]);
+    expect(result.terminosUsados).toEqual([]);
+    expect(getNoticiasEnVentanaCalls).toHaveLength(0);
+  });
+
+  it('acota el total de candidatos a MAX_CANDIDATOS_CLIENTE_TOTAL', async () => {
+    const muchas = Array.from({ length: MAX_CANDIDATOS_CLIENTE_TOTAL + 100 }, (_, i) =>
+      noticia({ noticia_id: `N${i}` }),
+    );
+    mockNoticiasPorTermino = { 'mery pozos': muchas };
+    const kws = [keyword({ keyword_id: 'KW-1', keyword: 'Mery Pozos' })];
+    const result = await buscarCandidatosCliente(kws, 30);
+    expect(result.noticias.length).toBeLessThanOrEqual(MAX_CANDIDATOS_CLIENTE_TOTAL);
   });
 });
 
@@ -539,6 +705,75 @@ describe('main() — dry-run no escribe en Sheets', () => {
     await conArgv(['--client-id=CLI-0002', '--query=Mery Pozos'], async () => { await main(); });
     // dry-run=true (default): no escribe nada
     expect(addRowsCalls).toHaveLength(0);
+  });
+});
+
+describe('main() — recall dirigido por keyword (client-id) reemplaza escaneo genérico', () => {
+  const ORIGINAL_ARGV = process.argv;
+
+  beforeEach(() => {
+    addRowsCalls.length = 0;
+    addSheetCalls.length = 0;
+    mockDoc = fakeDoc({});
+  });
+
+  function conArgv(extra: string[], fn: () => Promise<void>): Promise<void> {
+    process.argv = [...ORIGINAL_ARGV.slice(0, 2), ...extra];
+    return fn().finally(() => { process.argv = ORIGINAL_ARGV; });
+  }
+
+  it('nunca llama a getNoticiasEnVentana sin textFilter en modo client-id (sin escaneo genérico)', async () => {
+    // Simula 500 noticias "genéricas" bajo ausencia de textFilter, que es lo
+    // que el bug anterior habría usado. Los candidatos reales solo existen
+    // bajo búsquedas por término (fts/ilike dirigidas por keyword).
+    mockNoticias = Array.from({ length: 500 }, (_, i) =>
+      noticia({ noticia_id: `GEN-${i}`, titulo: 'Noticia genérica sin relación' }),
+    );
+    mockNoticiasPorTermino = {
+      'mery pozos': [
+        noticia({ noticia_id: 'N1', titulo: 'Mery Pozos inaugura obra pública' }),
+        noticia({ noticia_id: 'N2', titulo: 'Diputada Mery Pozos participa en sesión' }),
+      ],
+    };
+    mockKeywords = [
+      keyword({ keyword_id: 'KW-1', keyword: 'Mery Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-MERY-TEST' }),
+    ];
+
+    await conArgv(['--dry-run', '--client-id=CLI-MERY-TEST', '--window-days=30'], async () => { await main(); });
+
+    const llamadasSinFiltro = getNoticiasEnVentanaCalls.filter((c) => !c.textFilter);
+    expect(llamadasSinFiltro).toHaveLength(0);
+  });
+
+  it('en modo real, 01_LIVE_Notas_Capturadas contiene solo candidatos filtrados, no 500 genéricas', async () => {
+    mockNoticias = Array.from({ length: 500 }, (_, i) => noticia({ noticia_id: `GEN-${i}` }));
+    mockNoticiasPorTermino = {
+      'mery pozos': [
+        noticia({ noticia_id: 'N1', titulo: 'Mery Pozos inaugura obra pública' }),
+        noticia({ noticia_id: 'N2', titulo: 'Diputada Mery Pozos participa en sesión' }),
+      ],
+    };
+    mockKeywords = [
+      keyword({ keyword_id: 'KW-1', keyword: 'Mery Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-MERY-TEST' }),
+    ];
+
+    await conArgv(['--dry-run=false', '--sheet-id=SHEET-X', '--client-id=CLI-MERY-TEST'], async () => {
+      await main();
+    });
+
+    const notasCall = addRowsCalls.find((c) => c.tab.includes('01_LIVE_Notas_Capturadas'));
+    expect(notasCall?.rows.length ?? 0).toBeLessThan(10);
+    expect(notasCall?.rows.length ?? 0).toBeLessThan(500);
+
+    const mencionesCall = addRowsCalls.find((c) => c.tab.includes('02_Menciones_Detectadas'));
+    expect(mencionesCall?.rows.length ?? 0).toBeGreaterThanOrEqual(1);
+  });
+
+  it('modo ad-hoc (--query con espacios) sigue intacto tras el fix de recall', async () => {
+    mockNoticias = [noticia({ noticia_id: 'N1', titulo: 'Mery Pozos inaugura nuevo espacio cultural' })];
+    await conArgv(['--dry-run', '--query=Mery Pozos', '--window-days=30'], async () => { await main(); });
+    // No debe requerir keywords ni tocar la ruta de candidatos por cliente.
+    expect(addRowsCalls).toHaveLength(0); // dry-run
   });
 });
 
