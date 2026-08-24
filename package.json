@@ -66,6 +66,7 @@
     "client-live:sheet": "tsx scripts/client-live-sheet-export.ts",
     "catalog-mery-jalisco-priority": "tsx scripts/catalog-mery-jalisco-priority.ts",
     "audit-mery-media-coverage": "tsx scripts/audit-mery-media-coverage.ts",
+    "audit-mery-gap-sources": "tsx scripts/audit-mery-gap-sources.ts",
     "mery:compare:legacy": "tsx scripts/audit-mery-legacy-google-rss.ts",
     "simulate-keywords-shadow": "tsx scripts/simulate-keywords-shadow.ts",
     "export-operational-news-no-pc": "tsx scripts/export-operational-news-no-pc.ts",
