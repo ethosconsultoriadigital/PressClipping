@@ -32,10 +32,31 @@ News Lake (crawl + enrich) → client-live-sheet-export → Google Sheets → Re
 
 | Modo | Flag | Descripción |
 |------|------|-------------|
-| **A — Cliente** | `--client-id` | Carga keywords activas del cliente desde Supabase y aplica `matchKeyword` |
+| **A — Cliente** | `--client-id` | Carga keywords activas del cliente, deriva términos de búsqueda (frases completas, prioriza las más largas/precisas), busca candidatos en el News Lake por término (fts con fallback ilike) y aplica `matchKeyword` sobre esos candidatos |
 | **B — Ad-hoc** | `--query`, `--exact`, `--contains` | Búsqueda libre sin cliente registrado |
 
 Con `--client-id`, los flags `--query/--exact/--contains` se ignoran (gana el cliente).
+
+### Modo A — recuperación de candidatos dirigida por keyword
+
+En vez de escanear las últimas N noticias genéricas de la ventana y filtrarlas en memoria, el Modo A:
+1. Carga las keywords activas del cliente (`getKeywordsActivas` filtrado por `client_id`).
+2. Extrae términos de búsqueda de cada keyword (`splitTerminos`), priorizando las frases más largas (mayor precisión), hasta `MAX_TERMINOS_BUSQUEDA_CLIENTE` (15) términos.
+3. Por cada término, busca en el News Lake (fts, con fallback a ilike si fts falla), hasta `CANDIDATOS_POR_TERMINO_CLIENTE` (50) resultados por término.
+4. Deduplica candidatos por `noticia_id` y `url_original`, hasta `MAX_CANDIDATOS_CLIENTE_TOTAL` (300) en total.
+
+Esto evita que `01_LIVE_Notas_Capturadas` se llene con noticias genéricas no relacionadas al cliente, y mejora sensiblemente el recall frente al escaneo genérico anterior.
+
+### Modo A — consolidación por noticia
+
+Una misma noticia puede matchear varias keywords del cliente (p. ej. `"Mery Pozos"`, `"Diputada Mery Pozos"`, `"Merilyn Gomez Pozos"`). El exportador **consolida todos esos matches en una única fila** por noticia antes de escribir a Sheets — nunca una fila por keyword:
+
+- Se evalúan todas las keywords activas contra la noticia.
+- El **mejor score** de todos los matches decide el bucket (`Menciones_Detectadas` si score≥0.6, si no `Revision_Humana`) y la `confidence`/`motivo` principal.
+- Las columnas `keywords_matched`, `keyword_ids_matched` y `motivos_match` agregan (separadas por ` | `) todas las keywords que matchearon, no solo la mejor.
+- `best_score` = score del mejor match; `match_count` = cuántas keywords matchearon.
+- Una noticia **nunca** aparece simultáneamente en `Menciones_Detectadas` y `Revision_Humana` (prioridad: Menciones > Revision > Excluidas).
+- El `dedupe_key` de la fila consolidada usa un sufijo estable `mention` (no el `keyword_id`), para que la fila no cambie de identidad entre corridas aunque varíe qué keyword específica matcheó primero.
 
 ### Buckets de clasificación
 
@@ -82,6 +103,11 @@ Con `--client-id`, los flags `--query/--exact/--contains` se ignoran (gana el cl
 | `url_original` | URL canónica de la nota |
 | `texto` | Cuerpo efectivo (cuerpo_nota > nota_limpia > extraido > resumen) |
 | `motivo` | Explicación del score/bucket (por qué se clasificó así) |
+| `keywords_matched` | (solo Modo A, filas consolidadas) Keywords que matchearon, separadas por ` \| ` |
+| `keyword_ids_matched` | (solo Modo A) `keyword_id`s que matchearon, separados por ` \| ` |
+| `motivos_match` | (solo Modo A) Motivo de match por keyword, separados por ` \| ` |
+| `best_score` | (solo Modo A) Mejor score entre todas las keywords que matchearon |
+| `match_count` | (solo Modo A) Cantidad de keywords que matchearon esta noticia |
 | `source_script` | `client-live-sheet-export` |
 | `run_by` | `local` o `github-actions-client-live-sheet-export` |
 
@@ -209,9 +235,9 @@ npm run client-live:sheet -- \
 
 Formato: `identifier//noticia_id//sufijo`  
 Ejemplos:
-- Tab 01 (notas raw): `cli-0002//n-abc123//raw`  
-- Tab 02 (menciones): `cli-0002//n-abc123//kw-0042`  
-- Tab 02 (ad-hoc exact): `exact-bacardi-m-xico//n-abc123//adhoc`  
+- Tab 01 (notas raw, Modo A): `cli-0002//n-abc123//raw`
+- Tab 02/03 (mención consolidada, Modo A): `cli-0002//n-abc123//mention` — sufijo fijo, **no** depende de qué `keyword_id` matcheó (una noticia con 1 o con 5 keywords matcheadas sigue teniendo la misma `dedupe_key`).
+- Tab 02 (ad-hoc exact): `exact-bacardi-m-xico//n-abc123//adhoc`
 
 La misma `dedupe_key` en la misma tab → fila omitida (dedupe).  
 La misma nota puede aparecer en Tab 01 y Tab 02 (son dedupe_key distintas, tabs distintas).

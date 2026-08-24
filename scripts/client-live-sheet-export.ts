@@ -11,7 +11,11 @@
  *           palabras sueltas) y busca candidatos en el News Lake por término
  *           (fts con fallback ilike), en vez de escanear las últimas N
  *           noticias genéricas. Luego aplica matchKeyword sobre los candidatos
- *           deduplicados para clasificar en buckets.
+ *           deduplicados para clasificar en buckets. Los resultados se
+ *           CONSOLIDAN por noticia: si varias keywords matchean la misma
+ *           noticia, se escribe UNA sola fila (no una por keyword), con las
+ *           keywords/motivos agregados en columnas y el mejor score como
+ *           score principal.
  *   Caso B: --query/--exact/--contains → búsqueda ad-hoc sin cliente.
  * Si se combinan, gana --client-id sobre los modos ad-hoc.
  *
@@ -68,7 +72,12 @@ const TEXTO_MAX_CHARS = 5_000;
 export const LIVE_HEADERS = [
   'dedupe_key', 'fecha_export', 'client_id', 'client_name', 'query', 'match_mode',
   'bucket', 'confidence', 'medio_id', 'medio_nombre', 'fecha_publicacion', 'titulo',
-  'resumen', 'url_original', 'texto', 'motivo', 'source_script', 'run_by',
+  'resumen', 'url_original', 'texto', 'motivo',
+  // Columnas de consolidación (modo --client-id): cuando varias keywords
+  // matchean la misma noticia, se agregan aquí en vez de generar una fila
+  // por keyword. En modo ad-hoc quedan vacías.
+  'keywords_matched', 'keyword_ids_matched', 'motivos_match', 'best_score', 'match_count',
+  'source_script', 'run_by',
 ] as const;
 
 export const LOG_HEADERS = [
@@ -285,6 +294,12 @@ function baseRow(
     motivo: string;
     textoMatch?: string;
     fechaExport: string;
+    /** Campos de consolidación (solo modo --client-id, cuando >1 keyword matcheó). */
+    keywordsMatched?: string;
+    keywordIdsMatched?: string;
+    motivosMatch?: string;
+    bestScore?: number;
+    matchCount?: number;
   },
 ): OutRow {
   const textoCompleto = args.includeFullText
@@ -307,6 +322,11 @@ function baseRow(
     url_original: row.url_original,
     texto: textoCompleto,
     motivo: extra.motivo,
+    keywords_matched: extra.keywordsMatched ?? null,
+    keyword_ids_matched: extra.keywordIdsMatched ?? null,
+    motivos_match: extra.motivosMatch ?? null,
+    best_score: extra.bestScore ?? null,
+    match_count: extra.matchCount ?? null,
     source_script: SOURCE_SCRIPT,
     run_by: RUN_BY,
   };
@@ -433,25 +453,55 @@ export function procesarCasoCliente(
 
   for (const noticia of noticias) {
     const campos = camposDeLake(noticia);
+
+    // Recolecta TODOS los matches de keyword para esta noticia; se consolidan
+    // en UNA sola fila (no una fila por keyword) antes de exportar.
+    const matches: { keywordId: string; keyword: string; result: MatchResultado }[] = [];
     for (const regla of reglas) {
       const result = matchKeyword(regla, campos);
       if (!result) continue;
-      const { bucket, confidence, motivo } = clasificarBucket(result);
-      const row = baseRow(args, noticia, {
-        identifier,
-        matchMode: 'cliente_keyword',
-        dedupeSuffix: regla.keyword_id,
-        bucket,
-        confidence,
-        motivo,
-        textoMatch: result.texto_match,
-        fechaExport,
-      });
-      if (bucket === 'Menciones_Detectadas') {
-        mencionesDetectadas.push(row);
-      } else {
-        revisionHumana.push(row);
-      }
+      matches.push({ keywordId: regla.keyword_id, keyword: regla.keyword, result });
+    }
+    if (matches.length === 0) continue; // sin match de ninguna keyword: no va a Menciones ni Revisión.
+
+    // El mejor score decide el bucket/confidence/motivo principal (prioridad
+    // Menciones_Detectadas > Revision_Humana; nunca ambos para la misma nota).
+    matches.sort((a, b) => b.result.score - a.result.score);
+    const mejor = matches[0]!;
+    const { bucket, confidence, motivo } = clasificarBucket(mejor.result);
+    const matchCount = matches.length;
+
+    const keywordsMatched = matches.map((m) => m.keyword).join(' | ');
+    const keywordIdsMatched = matches.map((m) => m.keywordId).join(' | ');
+    const motivosMatch = matches
+      .map((m) => `${m.keyword}: match ${m.result.campo} score=${m.result.score}`)
+      .join(' | ');
+    const motivoConsolidado =
+      matchCount > 1 ? `${motivo} (+${matchCount - 1} keyword(s) adicional(es))` : motivo;
+
+    const row = baseRow(args, noticia, {
+      identifier,
+      matchMode: 'cliente_keyword',
+      // Suffix estable NO dependiente del keyword_id: una nota consolidada
+      // siempre mapea a la misma dedupe_key sin importar cuántas/cuáles
+      // keywords matcheen en corridas sucesivas.
+      dedupeSuffix: 'mention',
+      bucket,
+      confidence,
+      motivo: motivoConsolidado,
+      textoMatch: mejor.result.texto_match,
+      fechaExport,
+      keywordsMatched,
+      keywordIdsMatched,
+      motivosMatch,
+      bestScore: mejor.result.score,
+      matchCount,
+    });
+
+    if (bucket === 'Menciones_Detectadas') {
+      mencionesDetectadas.push(row);
+    } else {
+      revisionHumana.push(row);
     }
   }
 
@@ -808,9 +858,11 @@ export async function main(): Promise<void> {
         })),
         preview_menciones: buckets.mencionesDetectadas.slice(0, 3).map((r) => ({
           dedupe_key: r['dedupe_key'], titulo: r['titulo'], motivo: r['motivo'],
+          keywords_matched: r['keywords_matched'], match_count: r['match_count'],
         })),
         preview_revision: buckets.revisionHumana.slice(0, 3).map((r) => ({
           dedupe_key: r['dedupe_key'], titulo: r['titulo'], motivo: r['motivo'],
+          keywords_matched: r['keywords_matched'], match_count: r['match_count'],
         })),
       },
       '[dry-run] Plan completo — NO se crea tab ni se escribe nada',

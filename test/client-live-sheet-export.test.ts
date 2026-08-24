@@ -516,6 +516,115 @@ describe('procesarCasoCliente', () => {
     expect(key).toContain('cli-0002');
     expect(key).toContain('n1');
   });
+
+  // ── Consolidación por noticia (una sola fila aunque matcheen varias keywords) ──
+
+  it('noticia con 3 keywords con score >= 0.6 produce UNA sola fila en Menciones_Detectadas', () => {
+    const noticias = [
+      noticia({
+        noticia_id: 'N1',
+        titulo: 'Mery Pozos inaugura obra y Diputada Mery Pozos convive con Merilyn Gomez Pozos',
+      }),
+    ];
+    const kws = [
+      keyword({ keyword_id: 'KW-1', keyword: 'Mery Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-0002' }),
+      keyword({ keyword_id: 'KW-2', keyword: 'Diputada Mery Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-0002' }),
+      keyword({ keyword_id: 'KW-3', keyword: 'Merilyn Gomez Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-0002' }),
+    ];
+    const result = procesarCasoCliente(noticias, kws, args, fecha);
+    expect(result.mencionesDetectadas).toHaveLength(1);
+    expect(result.revisionHumana).toHaveLength(0);
+    expect(result.mencionesDetectadas[0]!['match_count']).toBe(3);
+  });
+
+  it('noticia con 3 keywords de score bajo (solo en texto) produce UNA sola fila en Revision_Humana', () => {
+    const noticias = [
+      noticia({
+        noticia_id: 'N2',
+        titulo: 'Nota sin relación aparente en el título',
+        texto_cuerpo_nota: 'En el cuerpo se menciona a Mery Pozos, a Diputada Mery Pozos y a Merilyn Gomez Pozos',
+      }),
+    ];
+    const kws = [
+      keyword({ keyword_id: 'KW-1', keyword: 'Mery Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-0002' }),
+      keyword({ keyword_id: 'KW-2', keyword: 'Diputada Mery Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-0002' }),
+      keyword({ keyword_id: 'KW-3', keyword: 'Merilyn Gomez Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-0002' }),
+    ];
+    const result = procesarCasoCliente(noticias, kws, args, fecha);
+    expect(result.revisionHumana).toHaveLength(1);
+    expect(result.mencionesDetectadas).toHaveLength(0);
+    expect(result.revisionHumana[0]!['match_count']).toBe(3);
+    expect(result.revisionHumana[0]!['bucket']).toBe('Revision_Humana');
+  });
+
+  it('noticia con un match alto y otros bajos va SOLO a Menciones_Detectadas, no a Revision', () => {
+    const noticias = [
+      noticia({
+        noticia_id: 'N3',
+        titulo: 'Mery Pozos inaugura obra pública',
+        texto_cuerpo_nota: 'También se habla de Diputada Mery Pozos y de Merilyn Gomez Pozos en el cuerpo',
+      }),
+    ];
+    const kws = [
+      keyword({ keyword_id: 'KW-1', keyword: 'Mery Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-0002' }), // match en título → score alto
+      keyword({ keyword_id: 'KW-2', keyword: 'Diputada Mery Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-0002' }), // solo en texto → score bajo
+      keyword({ keyword_id: 'KW-3', keyword: 'Merilyn Gomez Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-0002' }), // solo en texto → score bajo
+    ];
+    const result = procesarCasoCliente(noticias, kws, args, fecha);
+    expect(result.mencionesDetectadas).toHaveLength(1);
+    expect(result.revisionHumana).toHaveLength(0);
+    expect(result.mencionesDetectadas[0]!['match_count']).toBe(3);
+    expect(Number(result.mencionesDetectadas[0]!['best_score'])).toBeGreaterThanOrEqual(0.6);
+  });
+
+  it('agrega keywords_matched, keyword_ids_matched y motivos_match en la fila consolidada', () => {
+    const noticias = [
+      noticia({ noticia_id: 'N4', titulo: 'Mery Pozos y Diputada Mery Pozos en el mismo evento' }),
+    ];
+    const kws = [
+      keyword({ keyword_id: 'KW-1', keyword: 'Mery Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-0002' }),
+      keyword({ keyword_id: 'KW-2', keyword: 'Diputada Mery Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-0002' }),
+    ];
+    const result = procesarCasoCliente(noticias, kws, args, fecha);
+    expect(result.mencionesDetectadas).toHaveLength(1);
+    const row = result.mencionesDetectadas[0]!;
+    const keywordsMatched = String(row['keywords_matched'] ?? '').split(' | ');
+    const keywordIdsMatched = String(row['keyword_ids_matched'] ?? '').split(' | ');
+    const motivosMatch = String(row['motivos_match'] ?? '').split(' | ');
+    expect(keywordsMatched).toHaveLength(2);
+    expect(keywordsMatched).toContain('Mery Pozos');
+    expect(keywordsMatched).toContain('Diputada Mery Pozos');
+    expect(keywordIdsMatched).toHaveLength(2);
+    expect(keywordIdsMatched).toContain('KW-1');
+    expect(keywordIdsMatched).toContain('KW-2');
+    expect(motivosMatch).toHaveLength(2);
+  });
+
+  it('dedupe_key de fila consolidada usa suffix estable "mention", no depende del keyword_id', () => {
+    const noticias = [noticia({ noticia_id: 'N5', titulo: 'Mery Pozos y Diputada Mery Pozos juntas' })];
+    const kws = [
+      keyword({ keyword_id: 'KW-1', keyword: 'Mery Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-0002' }),
+      keyword({ keyword_id: 'KW-2', keyword: 'Diputada Mery Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-0002' }),
+    ];
+    const result = procesarCasoCliente(noticias, kws, args, fecha);
+    const key = String(result.mencionesDetectadas[0]!['dedupe_key'] ?? '');
+    expect(key).toBe(buildDedupeKey('CLI-0002', 'N5', 'mention'));
+    expect(key).not.toContain('kw-1');
+    expect(key).not.toContain('kw-2');
+  });
+
+  it('nunca hay más de una fila total (Menciones + Revision) por noticia', () => {
+    const noticias = [
+      noticia({ noticia_id: 'N6', titulo: 'Mery Pozos, Diputada Mery Pozos y Merilyn Gomez Pozos' }),
+    ];
+    const kws = [
+      keyword({ keyword_id: 'KW-1', keyword: 'Mery Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-0002' }),
+      keyword({ keyword_id: 'KW-2', keyword: 'Diputada Mery Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-0002' }),
+      keyword({ keyword_id: 'KW-3', keyword: 'Merilyn Gomez Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-0002' }),
+    ];
+    const result = procesarCasoCliente(noticias, kws, args, fecha);
+    expect(result.mencionesDetectadas.length + result.revisionHumana.length).toBe(1);
+  });
 });
 
 describe('procesarCasoAdHoc', () => {
@@ -774,6 +883,36 @@ describe('main() — recall dirigido por keyword (client-id) reemplaza escaneo g
     await conArgv(['--dry-run', '--query=Mery Pozos', '--window-days=30'], async () => { await main(); });
     // No debe requerir keywords ni tocar la ruta de candidatos por cliente.
     expect(addRowsCalls).toHaveLength(0); // dry-run
+  });
+
+  it('una noticia que matchea 3 keywords produce UNA sola fila escrita (no key-0040/0043/0046 repetidas)', async () => {
+    const notaCompartida = noticia({
+      noticia_id: 'ACBC45DE',
+      titulo: 'Mery Pozos, Diputada Mery Pozos y Merilyn Gomez Pozos en el mismo evento',
+    });
+    mockNoticiasPorTermino = {
+      'mery pozos': [notaCompartida],
+      'diputada mery pozos': [notaCompartida],
+      'merilyn gomez pozos': [notaCompartida],
+    };
+    mockKeywords = [
+      keyword({ keyword_id: 'KEY-0040', keyword: 'Mery Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-MERY-TEST' }),
+      keyword({ keyword_id: 'KEY-0043', keyword: 'Diputada Mery Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-MERY-TEST' }),
+      keyword({ keyword_id: 'KEY-0046', keyword: 'Merilyn Gomez Pozos', tipo_keyword: 'frase_exacta', cliente_id: 'CLI-MERY-TEST' }),
+    ];
+
+    await conArgv(['--dry-run=false', '--sheet-id=SHEET-X', '--client-id=CLI-MERY-TEST'], async () => {
+      await main();
+    });
+
+    const mencionesCall = addRowsCalls.find((c) => c.tab.includes('02_Menciones_Detectadas'));
+    const filasDeEstaNota = (mencionesCall?.rows ?? []).filter((r: any) =>
+      String(r['dedupe_key'] ?? '').includes('acbc45de'),
+    );
+    expect(filasDeEstaNota).toHaveLength(1);
+    expect(String(filasDeEstaNota[0]?.['keyword_ids_matched'] ?? '')).toContain('KEY-0040');
+    expect(String(filasDeEstaNota[0]?.['keyword_ids_matched'] ?? '')).toContain('KEY-0043');
+    expect(String(filasDeEstaNota[0]?.['keyword_ids_matched'] ?? '')).toContain('KEY-0046');
   });
 });
 
