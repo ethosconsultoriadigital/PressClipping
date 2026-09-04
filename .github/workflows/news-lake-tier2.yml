@@ -1,0 +1,107 @@
+name: news-lake-tier2
+
+# News Lake — Tier 2 (Regionales importantes + crisis).
+#
+# Reutiliza 100% `scripts/news-lake-capture.ts`. Este workflow NO agrega
+# lógica nueva: solo fija como DEFAULT la lista de medio_id de Tier 2
+# (documentada en `docs/PRODUCTION_NEWS_LAKE_RUNBOOK.md`), que es exactamente
+# la unión de `SHADOW_MEDIOS_CRISIS` + `SHADOW_MEDIOS_DAILY_VALIDATED` de
+# `src/config/shadowMedia.ts` (41 medios regionales/crisis, ya en cron sombra
+# hoy).
+#
+# Solo workflow_dispatch, SIN schedule — requiere autorización explícita antes
+# de activar cualquier `schedule:` real.
+#
+# NO toca Patrón. NO toca Jumex. NO toca NOTAS ENVIADAS MERYPOZOS. NO escribe
+# en Google Sheets. NO email/WhatsApp/Twilio/SMTP. NO alertas. NO
+# export-results/generate-xml/classify-ia. NO detecta menciones.
+#
+# `dry_run=true` (default) es el modo seguro.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry-run (no descarga, no enriquece, no escribe)'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+      medio_ids:
+        description: 'medio_id de Tier 2 (override opcional; default = lista Tier 2 completa)'
+        required: false
+        default: 'MED-0170,MED-0169,MED-0171,MED-0164,MED-0005,MED-0012,MED-0028,MED-0006,MED-0049,MED-0055,MED-0083,MED-0189,MED-0084,MED-0192,MED-0193,MED-0194,MED-0066,MED-0195,MED-0199,MED-0197,MED-0172,MED-0196,MED-0175,MED-0198,MED-0173,MED-0179,MED-0174,MED-0176,MED-0177,MED-0184,MED-0180,MED-0181,MED-0183,MED-0182,MED-0178,MED-0186,MED-0202,MED-0187,MED-0203,MED-0201,MED-0185'
+        type: string
+      max_notas:
+        description: 'Tope de notas a crawlear por medio, por chunk'
+        required: false
+        default: '10'
+        type: string
+      enrich_limit:
+        description: 'Tope de notas a enriquecer por chunk'
+        required: false
+        default: '20'
+        type: string
+      window_days:
+        description: 'Ventana en días para enrich (recent-first)'
+        required: false
+        default: '30'
+        type: string
+      chunk_size:
+        description: 'Medios por chunk (crawl→enrich se ejecuta chunk por chunk)'
+        required: false
+        default: '10'
+        type: string
+
+concurrency:
+  group: news-lake-tier2
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    name: News Lake Tier 2 (regionales importantes + crisis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      LOG_FORMAT: json
+      RUN_BY: github-actions-news-lake-tier2
+      NO_SEND: 'true'
+      NO_EMAIL: 'true'
+      NO_WHATSAPP: 'true'
+      NO_TWILIO: 'true'
+      INPUT_DRY_RUN: ${{ inputs.dry_run }}
+      INPUT_MEDIO_IDS: ${{ inputs.medio_ids }}
+      INPUT_MAX_NOTAS: ${{ inputs.max_notas }}
+      INPUT_ENRICH_LIMIT: ${{ inputs.enrich_limit }}
+      INPUT_WINDOW_DAYS: ${{ inputs.window_days }}
+      INPUT_CHUNK_SIZE: ${{ inputs.chunk_size }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: News Lake Capture — Tier 2
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+        run: |
+          ARGS=()
+          ARGS+=( "--dry-run=${INPUT_DRY_RUN:-true}" )
+          ARGS+=( "--max-notas=${INPUT_MAX_NOTAS:-10}" )
+          ARGS+=( "--enrich-limit=${INPUT_ENRICH_LIMIT:-20}" )
+          ARGS+=( "--window-days=${INPUT_WINDOW_DAYS:-30}" )
+          ARGS+=( "--chunk-size=${INPUT_CHUNK_SIZE:-10}" )
+          if [ -n "$INPUT_MEDIO_IDS" ]; then
+            ARGS+=( "--medio-ids=$INPUT_MEDIO_IDS" )
+          fi
+          npm run news-lake:capture -- "${ARGS[@]}"

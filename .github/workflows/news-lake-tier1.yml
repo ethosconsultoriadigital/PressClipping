@@ -1,0 +1,110 @@
+name: news-lake-tier1
+
+# News Lake — Tier 1 (Nacionales / alta prioridad).
+#
+# Reutiliza 100% `scripts/news-lake-capture.ts` (mismo orquestador crawl→enrich
+# por chunks que `news-lake-capture.yml`). Este workflow NO agrega lógica
+# nueva: solo fija como DEFAULT la lista de medio_id de Tier 1 (documentada en
+# `docs/PRODUCTION_NEWS_LAKE_RUNBOOK.md`), que es exactamente la unión de los
+# tiers ya validados `SHADOW_MEDIOS` (base) + `SHADOW_MEDIOS_NACIONALES_B` de
+# `src/config/shadowMedia.ts` (29 medios nacionales, ya en cron sombra hoy).
+#
+# Solo workflow_dispatch, SIN schedule — requiere autorización explícita antes
+# de activar cualquier `schedule:` real.
+#
+# NO toca Patrón. NO toca Jumex. NO toca NOTAS ENVIADAS MERYPOZOS. NO escribe
+# en Google Sheets. NO email/WhatsApp/Twilio/SMTP. NO alertas. NO
+# export-results/generate-xml/classify-ia. NO detecta menciones (eso sigue
+# siendo trabajo de detect-mentions.ts / client-live-sheet-export.ts, aparte).
+#
+# `dry_run=true` (default) es el modo seguro: no descarga, no enriquece, no
+# escribe nada — solo reporta el plan (medios + chunks) que se ejecutaría.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry-run (no descarga, no enriquece, no escribe)'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+      medio_ids:
+        description: 'medio_id de Tier 1 (override opcional; default = lista Tier 1 completa)'
+        required: false
+        default: 'MED-0151,MED-0153,MED-0001,MED-0020,MED-0160,MED-0031,MED-0167,MED-0154,MED-0165,MED-0157,MED-0060,MED-0161,MED-0152,MED-0159,MED-0163,MED-0156,MED-0155,MED-0034,MED-0166,MED-0162,MED-0158,MED-0145,MED-0148,MED-0017,MED-0053,MED-0030,MED-0011,MED-0025,MED-0008'
+        type: string
+      max_notas:
+        description: 'Tope de notas a crawlear por medio, por chunk'
+        required: false
+        default: '15'
+        type: string
+      enrich_limit:
+        description: 'Tope de notas a enriquecer por chunk'
+        required: false
+        default: '30'
+        type: string
+      window_days:
+        description: 'Ventana en días para enrich (recent-first)'
+        required: false
+        default: '30'
+        type: string
+      chunk_size:
+        description: 'Medios por chunk (crawl→enrich se ejecuta chunk por chunk)'
+        required: false
+        default: '10'
+        type: string
+
+concurrency:
+  group: news-lake-tier1
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    name: News Lake Tier 1 (nacionales / alta prioridad)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      LOG_FORMAT: json
+      RUN_BY: github-actions-news-lake-tier1
+      # Seguridad: estas variables NUNCA deben configurarse en este workflow.
+      NO_SEND: 'true'
+      NO_EMAIL: 'true'
+      NO_WHATSAPP: 'true'
+      NO_TWILIO: 'true'
+      INPUT_DRY_RUN: ${{ inputs.dry_run }}
+      INPUT_MEDIO_IDS: ${{ inputs.medio_ids }}
+      INPUT_MAX_NOTAS: ${{ inputs.max_notas }}
+      INPUT_ENRICH_LIMIT: ${{ inputs.enrich_limit }}
+      INPUT_WINDOW_DAYS: ${{ inputs.window_days }}
+      INPUT_CHUNK_SIZE: ${{ inputs.chunk_size }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: News Lake Capture — Tier 1
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+        run: |
+          ARGS=()
+          ARGS+=( "--dry-run=${INPUT_DRY_RUN:-true}" )
+          ARGS+=( "--max-notas=${INPUT_MAX_NOTAS:-15}" )
+          ARGS+=( "--enrich-limit=${INPUT_ENRICH_LIMIT:-30}" )
+          ARGS+=( "--window-days=${INPUT_WINDOW_DAYS:-30}" )
+          ARGS+=( "--chunk-size=${INPUT_CHUNK_SIZE:-10}" )
+          if [ -n "$INPUT_MEDIO_IDS" ]; then
+            ARGS+=( "--medio-ids=$INPUT_MEDIO_IDS" )
+          fi
+          npm run news-lake:capture -- "${ARGS[@]}"

@@ -1,0 +1,111 @@
+name: news-lake-tier3
+
+# News Lake — Tier 3 (Locales / baja frecuencia / candidatos en vetting).
+#
+# Reutiliza 100% `scripts/news-lake-capture.ts`. A diferencia de Tier 1/2,
+# este workflow NO trae un default de `medio_ids` amplio: los medios de Tier 3
+# son locales/baja frecuencia y candidatos `CATALOGO_NO_CRON` todavía en
+# proceso de vetting (ver `docs/PRODUCTION_NEWS_LAKE_RUNBOOK.md` §"Oleadas
+# Tier 3"). El operador debe pegar explícitamente el lote (`medio_ids`) que
+# quiere vetear/capturar en esta corrida, después de correr `--dry-run` y
+# revisar el plan.
+#
+# Solo workflow_dispatch, SIN schedule — requiere autorización explícita antes
+# de activar cualquier `schedule:` real, y más aún antes de promover cualquier
+# medio de Tier 3 a Tier 1/2 (eso requiere agregarlo a `shadowMedia.ts` con
+# evidencia de calidad, como ya se hace para los demás tiers).
+#
+# NO toca Patrón. NO toca Jumex. NO toca NOTAS ENVIADAS MERYPOZOS. NO escribe
+# en Google Sheets. NO email/WhatsApp/Twilio/SMTP. NO alertas. NO
+# export-results/generate-xml/classify-ia. NO detecta menciones.
+#
+# `dry_run=true` (default) es el modo seguro.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry-run (no descarga, no enriquece, no escribe)'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+      medio_ids:
+        description: 'medio_id del lote Tier 3 a vetear/capturar (REQUERIDO — ver runbook §Oleadas Tier 3 para candidatos sugeridos)'
+        required: true
+        type: string
+      max_notas:
+        description: 'Tope de notas a crawlear por medio, por chunk'
+        required: false
+        default: '5'
+        type: string
+      enrich_limit:
+        description: 'Tope de notas a enriquecer por chunk'
+        required: false
+        default: '10'
+        type: string
+      window_days:
+        description: 'Ventana en días para enrich (recent-first)'
+        required: false
+        default: '30'
+        type: string
+      chunk_size:
+        description: 'Medios por chunk (crawl→enrich se ejecuta chunk por chunk)'
+        required: false
+        default: '5'
+        type: string
+
+concurrency:
+  group: news-lake-tier3
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    name: News Lake Tier 3 (locales / baja frecuencia / vetting)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      LOG_FORMAT: json
+      RUN_BY: github-actions-news-lake-tier3
+      NO_SEND: 'true'
+      NO_EMAIL: 'true'
+      NO_WHATSAPP: 'true'
+      NO_TWILIO: 'true'
+      INPUT_DRY_RUN: ${{ inputs.dry_run }}
+      INPUT_MEDIO_IDS: ${{ inputs.medio_ids }}
+      INPUT_MAX_NOTAS: ${{ inputs.max_notas }}
+      INPUT_ENRICH_LIMIT: ${{ inputs.enrich_limit }}
+      INPUT_WINDOW_DAYS: ${{ inputs.window_days }}
+      INPUT_CHUNK_SIZE: ${{ inputs.chunk_size }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: News Lake Capture — Tier 3
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+        run: |
+          if [ -z "$INPUT_MEDIO_IDS" ]; then
+            echo "ERROR: medio_ids es requerido en Tier 3 (no hay default amplio; ver runbook)." >&2
+            exit 1
+          fi
+          ARGS=()
+          ARGS+=( "--dry-run=${INPUT_DRY_RUN:-true}" )
+          ARGS+=( "--max-notas=${INPUT_MAX_NOTAS:-5}" )
+          ARGS+=( "--enrich-limit=${INPUT_ENRICH_LIMIT:-10}" )
+          ARGS+=( "--window-days=${INPUT_WINDOW_DAYS:-30}" )
+          ARGS+=( "--chunk-size=${INPUT_CHUNK_SIZE:-5}" )
+          ARGS+=( "--medio-ids=$INPUT_MEDIO_IDS" )
+          npm run news-lake:capture -- "${ARGS[@]}"
