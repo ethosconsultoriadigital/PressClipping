@@ -3,7 +3,7 @@
  *
  * - PorEsto (MED-0189)   — A_PUBLICO_FACIL: RSS activo `/rss/portada.xml`
  * - LatinUS (MED-0190)   — B_PUBLICO_DIRECT: artículos en HTML estático, sin sitemap
- * - La Silla Rota (MED-0191) — B_PUBLICO_DIRECT: artículos en HTML estático, sin sitemap
+ * - La Silla Rota (MED-0191) — SITEMAP público (repair 2026-09-02: sitemaps/news.xml)
  *
  * Uso:
  *   npm run catalog-direct-lote3 -- --dry
@@ -80,21 +80,18 @@ export const NUEVOS_MEDIOS_LOTE3: Medio[] = [
     categoria: 'Noticias / Político-Digital',
     prioridad: 'Alta',
     activo: true,
-    metodo_extraccion: 'DIRECT',
+    metodo_extraccion: 'SITEMAP',
     rss_url: null,
-    sitemap_url: null,
+    sitemap_url: 'https://lasillarota.com/sitemaps/news.xml',
     secciones_urls: 'https://lasillarota.com/',
     buscador_url: null,
     requiere_javascript: false,
     requiere_proxy: false,
     frecuencia_minutos: 360,
     notas_tecnicas:
-      'Alta 2026-07-22 (NEWS LAKE 200 FINAL PUSH). B_PUBLICO_DIRECT (P2 según ' +
-      'REPLACEMENT_READINESS_REPORT: 9-11 menciones históricas, alto valor). ' +
-      'Homepage devuelve artículos en HTML estático, patrón ' +
-      '/SECCION/YYYY/M/DD/slug-ID.html (ID numérico). Extracción via ' +
-      'crawl-direct-lasillarota.ts. Sin proxy, sin Playwright. ' +
-      'Nota: IPs de datacenter pueden ser bloqueadas — verificar en prod.',
+      'Alta 2026-07-22 (NEWS LAKE 200 FINAL PUSH). Repair 2026-09-02: SITEMAP ' +
+      'público sitemaps/news.xml (News Lake). crawl-direct-lasillarota.ts sigue ' +
+      'como respaldo. Sin proxy, sin Playwright.',
   },
 ];
 

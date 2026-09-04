@@ -47,9 +47,12 @@ describe('catalog-direct-lote3 — definición de medios', () => {
     const m = NUEVOS_MEDIOS_LOTE3.find((x) => x.medio_id === 'MED-0191')!;
 
     it('nombre correcto', () => expect(m.nombre_medio).toBe('La Silla Rota'));
-    it('B_PUBLICO_DIRECT: metodo_extraccion DIRECT', () => expect(m.metodo_extraccion).toBe('DIRECT'));
+    it('repair 2026-09-02: metodo_extraccion SITEMAP', () => expect(m.metodo_extraccion).toBe('SITEMAP'));
     it('prioridad Alta (P2 en readiness report)', () => expect(m.prioridad).toBe('Alta'));
-    it('sin RSS ni sitemap', () => { expect(m.rss_url).toBeNull(); expect(m.sitemap_url).toBeNull(); });
+    it('news sitemap público, sin RSS', () => {
+      expect(m.rss_url).toBeNull();
+      expect(m.sitemap_url).toBe('https://lasillarota.com/sitemaps/news.xml');
+    });
     it('secciones_urls apunta a homepage', () => expect(m.secciones_urls).toBe('https://lasillarota.com/'));
     it('url_base correcto', () => expect(m.url_base).toBe('https://lasillarota.com'));
     it('pais MX, nacional', () => { expect(m.pais).toBe('MX'); expect(m.estado).toBe('Nacional'); });

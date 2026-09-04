@@ -46,6 +46,7 @@
     "catalog-patron-p1-gap-media": "tsx scripts/catalog-patron-p1-gap-media.ts",
     "audit-all-media-clean-capture-readiness": "tsx scripts/audit-all-media-clean-capture-readiness.ts",
     "repair-el-universal-source": "tsx scripts/repair-el-universal-source.ts",
+    "repair-failed-sources-batch": "tsx scripts/repair-failed-sources-batch.ts",
     "report-jumex-staging-categorized": "tsx scripts/report-jumex-staging-categorized.ts",
     "catalog-national-expansion-lote1": "tsx scripts/catalog-national-expansion-lote1.ts",
     "catalog-national-expansion-lote2": "tsx scripts/catalog-national-expansion-lote2.ts",
