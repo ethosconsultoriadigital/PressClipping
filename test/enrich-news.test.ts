@@ -2,8 +2,12 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   enrichNews,
   construirActualizacion,
+  buildEnrichMediaSummaryLogPayload,
+  buildEnrichUnattributedLogPayload,
+  ENRICH_MEDIA_SUMMARY_EVENT,
   type EnrichDeps,
   type NoticiaEnriquecibleRow,
+  type MedioEnrichSummary,
 } from '../src/enrichers/enrichNews.js';
 import type { FetchExtractResult } from '../src/extractors/html.js';
 import { MARCADOR_TITULO_DESDE_URL } from '../src/extractors/titleFromUrl.js';
@@ -12,6 +16,7 @@ import { parseArgs } from '../scripts/enrich-news.js';
 function noticia(over: Partial<NoticiaEnriquecibleRow> = {}): NoticiaEnriquecibleRow {
   return {
     noticia_id: 'n1',
+    medio_id: null,
     url_original: 'https://medio.mx/nota/messi-campeon',
     titulo: null,
     resumen: null,
@@ -496,5 +501,211 @@ describe('enrichNews', () => {
     expect(res.fallidas).toBe(1);
     const fallaN2 = res.detalle.find((d) => d.noticia_id === 'n2');
     expect(fallaN2?.error).toMatch(/statement timeout/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fase 1A — Media Validation & Certification: atribución per-medio en enrich.
+// Ver docs/MEDIA_VALIDATION_AND_CERTIFICATION.md §7.
+// ─────────────────────────────────────────────────────────────────────────────
+function porMedio(res: Awaited<ReturnType<typeof enrichNews>>, medioId: string): MedioEnrichSummary {
+  const s = res.porMedio.find((m) => m.medio_id === medioId);
+  if (!s) throw new Error(`No hay resumen per-medio para ${medioId}`);
+  return s;
+}
+
+describe('enrichNews — atribución per-medio (Fase 1A)', () => {
+  it('dos medios en el mismo batch producen dos agregados separados, sin contaminarse', async () => {
+    const fetchNoticias = vi.fn(async () => [
+      noticia({ noticia_id: 'a1', medio_id: 'MED-A', url_original: 'https://a.mx/1' }),
+      noticia({ noticia_id: 'a2', medio_id: 'MED-A', url_original: 'https://a.mx/2' }),
+      // titulo ya presente para que el fallback de título-desde-slug (que se
+      // dispara aun con ok:false) no cuente como "campo actualizado" y el
+      // caso quede limpio: falló, sin ningún campo de contenido nuevo.
+      noticia({ noticia_id: 'b1', medio_id: 'MED-B', url_original: 'https://b.mx/1', titulo: 'Ya existe' }),
+    ]);
+    const extract = vi.fn(async (url: string) => {
+      if (url.includes('b.mx')) {
+        return extracto({ ok: false, error: 'timeout', titulo: null, resumen: null, texto_extraido: null, autor: null, seccion: null, imagen: null, texto_nota_limpia: null });
+      }
+      return extracto();
+    });
+    const updateNoticia = vi.fn(async () => {});
+    const { d } = deps({
+      fetchNoticias: fetchNoticias as unknown as EnrichDeps['fetchNoticias'],
+      extract: extract as unknown as EnrichDeps['extract'],
+      updateNoticia: updateNoticia as unknown as EnrichDeps['updateNoticia'],
+    });
+
+    const res = await enrichNews(d, { dryRun: false, medioIds: ['MED-A', 'MED-B'] });
+
+    expect(res.porMedio).toHaveLength(2);
+    const a = porMedio(res, 'MED-A');
+    const b = porMedio(res, 'MED-B');
+
+    // MED-A: 2 noticias, ambas enriquecidas con éxito.
+    expect(a.processed).toBe(2);
+    expect(a.updated).toBe(2);
+    expect(a.failed).toBe(0);
+    expect(a.clean_text_count).toBe(2);
+
+    // MED-B: 1 noticia, falló la extracción — no contamina a MED-A.
+    expect(b.processed).toBe(1);
+    expect(b.updated).toBe(0);
+    expect(b.failed).toBe(1);
+    expect(b.clean_text_count).toBe(0);
+  });
+
+  it('una noticia fallida se atribuye al medio correcto (no al otro medio del batch)', async () => {
+    const fetchNoticias = vi.fn(async () => [
+      noticia({ noticia_id: 'ok1', medio_id: 'MED-OK', url_original: 'https://ok.mx/1' }),
+      noticia({ noticia_id: 'bad1', medio_id: 'MED-BAD', url_original: 'https://bad.mx/1' }),
+    ]);
+    const extract = vi.fn(async (url: string) =>
+      url.includes('bad.mx')
+        ? extracto({ ok: false, error: 'ECONNRESET', titulo: null, resumen: null, texto_extraido: null, autor: null, seccion: null, imagen: null })
+        : extracto(),
+    );
+    const { d } = deps({
+      fetchNoticias: fetchNoticias as unknown as EnrichDeps['fetchNoticias'],
+      extract: extract as unknown as EnrichDeps['extract'],
+    });
+
+    const res = await enrichNews(d, { dryRun: false });
+
+    expect(porMedio(res, 'MED-OK').failed).toBe(0);
+    expect(porMedio(res, 'MED-BAD').failed).toBe(1);
+  });
+
+  it('body_count se atribuye correctamente por medio cuando el campo está disponible', async () => {
+    const fetchNoticias = vi.fn(async () => [
+      noticia({ noticia_id: 'c1', medio_id: 'MED-C', url_original: 'https://c.mx/1' }),
+    ]);
+    const extract = vi.fn(async () =>
+      extracto({ texto_cuerpo_nota: 'Cuerpo real.', extracto_cuerpo_1300: 'Cuerpo real.', cuerpo_nota_chars: 12 }),
+    );
+    const { d } = deps({
+      fetchNoticias: fetchNoticias as unknown as EnrichDeps['fetchNoticias'],
+      extract: extract as unknown as EnrichDeps['extract'],
+    });
+
+    const res = await enrichNews(d, { dryRun: false });
+    expect(porMedio(res, 'MED-C').body_count).toBe(1);
+  });
+
+  it('el resumen global conserva exactamente su comportamiento previo (no cambia el procesamiento funcional)', async () => {
+    const { d, updateNoticia } = deps();
+    const res = await enrichNews(d, { dryRun: false });
+    expect(res.actualizadas).toBe(1);
+    expect(res.leidas).toBe(1);
+    expect(updateNoticia).toHaveBeenCalledTimes(1);
+    // medio_id NUNCA viaja al update de Supabase (no es un campo editorial).
+    const [, fieldsEscritos] = updateNoticia.mock.calls[0] as [string, Record<string, unknown>];
+    expect(fieldsEscritos).not.toHaveProperty('medio_id');
+  });
+
+  it('reconciliación: cuando todo es atribuible, SUM(per-media) === total global para cada métrica', async () => {
+    const fetchNoticias = vi.fn(async () => [
+      noticia({ noticia_id: 'a1', medio_id: 'MED-A', url_original: 'https://a.mx/1' }),
+      noticia({ noticia_id: 'a2', medio_id: 'MED-A', url_original: 'https://a.mx/2' }),
+      noticia({ noticia_id: 'b1', medio_id: 'MED-B', url_original: 'https://b.mx/1' }),
+      noticia({ noticia_id: 'b2', medio_id: 'MED-B', url_original: null }),
+    ]);
+    const extract = vi.fn(async (url: string) =>
+      url.includes('b.mx') ? extracto({ ok: false, error: 'timeout' }) : extracto(),
+    );
+    const { d } = deps({
+      fetchNoticias: fetchNoticias as unknown as EnrichDeps['fetchNoticias'],
+      extract: extract as unknown as EnrichDeps['extract'],
+    });
+
+    const res = await enrichNews(d, { dryRun: false, medioIds: ['MED-A', 'MED-B'] });
+
+    const sum = (key: keyof MedioEnrichSummary) =>
+      res.porMedio.reduce((acc, m) => acc + (m[key] as number), (res.sinMedioId as any)[key] ?? 0);
+
+    expect(sum('processed')).toBe(res.leidas);
+    expect(sum('updated')).toBe(res.actualizadas);
+    expect(sum('unchanged')).toBe(res.sinCambios);
+    expect(sum('failed')).toBe(res.fallidas);
+    expect(sum('clean_text_count')).toBe(res.conTextoLimpio);
+    expect(sum('body_count')).toBe(res.conCuerpoNota);
+  });
+
+  it('medio solicitado explícitamente con 0 noticias elegibles NO desaparece: queda con processed=0, requested=true', async () => {
+    // Solo llegó MED-A en la respuesta de fetchNoticias; MED-B fue pedido pero
+    // no tuvo ninguna noticia elegible para este batch (filtros de enrich).
+    const fetchNoticias = vi.fn(async () => [
+      noticia({ noticia_id: 'a1', medio_id: 'MED-A', url_original: 'https://a.mx/1' }),
+    ]);
+    const { d } = deps({ fetchNoticias: fetchNoticias as unknown as EnrichDeps['fetchNoticias'] });
+
+    const res = await enrichNews(d, { dryRun: true, medioIds: ['MED-A', 'MED-B'] });
+
+    expect(res.porMedio).toHaveLength(2);
+    const b = porMedio(res, 'MED-B');
+    expect(b.requested).toBe(true);
+    expect(b.processed).toBe(0);
+    expect(b.updated).toBe(0);
+    expect(b.failed).toBe(0);
+  });
+
+  it('atribución desconocida (medio_id null) se cuenta aparte y NO se asigna a ningún medio del batch', async () => {
+    const fetchNoticias = vi.fn(async () => [
+      noticia({ noticia_id: 'a1', medio_id: 'MED-A', url_original: 'https://a.mx/1' }),
+      noticia({ noticia_id: 'huerfana', medio_id: null, url_original: 'https://borrado.mx/1' }),
+    ]);
+    const { d } = deps({ fetchNoticias: fetchNoticias as unknown as EnrichDeps['fetchNoticias'] });
+
+    const res = await enrichNews(d, { dryRun: false });
+
+    expect(res.leidas).toBe(2);
+    expect(porMedio(res, 'MED-A').processed).toBe(1);
+    expect(res.sinMedioId.processed).toBe(1);
+    expect(res.sinMedioId.updated).toBe(1);
+    // La noticia huérfana no se cuela en el bucket de MED-A.
+    expect(res.porMedio.some((m) => m.medio_id === null as unknown as string)).toBe(false);
+  });
+
+  it('sin --medio-ids (corrida global), los medios encontrados aparecen con requested=false', async () => {
+    const fetchNoticias = vi.fn(async () => [
+      noticia({ noticia_id: 'a1', medio_id: 'MED-A', url_original: 'https://a.mx/1' }),
+    ]);
+    const { d } = deps({ fetchNoticias: fetchNoticias as unknown as EnrichDeps['fetchNoticias'] });
+
+    const res = await enrichNews(d, { dryRun: true });
+    expect(porMedio(res, 'MED-A').requested).toBe(false);
+  });
+});
+
+describe('enrichNews — logging estructurado per-medio (Fase 1A, sin parsing de texto humano)', () => {
+  it('buildEnrichMediaSummaryLogPayload produce un evento identificable por código, no por texto', () => {
+    const summary: MedioEnrichSummary = {
+      medio_id: 'MED-0029',
+      requested: true,
+      processed: 3,
+      updated: 3,
+      unchanged: 0,
+      failed: 0,
+      clean_text_count: 3,
+      body_count: 3,
+    };
+    const payload = buildEnrichMediaSummaryLogPayload(summary, { dryRun: false });
+    expect(payload.event).toBe(ENRICH_MEDIA_SUMMARY_EVENT);
+    expect(payload.event).toBe('enrich_media_summary');
+    expect(payload.schema_version).toBe(1);
+    expect(payload.medio_id).toBe('MED-0029');
+    expect(payload.processed).toBe(3);
+    expect(payload.dry_run).toBe(false);
+  });
+
+  it('buildEnrichUnattributedLogPayload marca medio_id null explícitamente (no lo omite)', () => {
+    const payload = buildEnrichUnattributedLogPayload(
+      { processed: 2, updated: 1, unchanged: 1, failed: 0, clean_text_count: 1, body_count: 0 },
+      { dryRun: true },
+    );
+    expect(payload.event).toBe(ENRICH_MEDIA_SUMMARY_EVENT);
+    expect(payload.medio_id).toBeNull();
+    expect(payload.processed).toBe(2);
   });
 });

@@ -19,6 +19,14 @@ import { resolverTitulo, MARCADOR_TITULO_DESDE_URL } from '../extractors/titleFr
 /** Fila mínima de `noticias` necesaria para decidir el enriquecimiento. */
 export interface NoticiaEnriquecibleRow {
   noticia_id: string;
+  /**
+   * Medio dueño de la noticia (FK `noticias.medio_id → medios.medio_id`,
+   * `on delete set null`: puede venir `null` si el medio fue borrado del
+   * catálogo). Se usa SOLO para atribución/observabilidad (Fase 1A — Media
+   * Validation & Certification); nunca decide qué se enriquece ni se escribe
+   * de vuelta en `NoticiaEnriquecidaUpdate`.
+   */
+  medio_id: string | null;
   url_original: string | null;
   titulo: string | null;
   resumen: string | null;
@@ -111,6 +119,39 @@ export interface EnrichItemResult {
   fields: NoticiaEnriquecidaUpdate;
 }
 
+/**
+ * Evidencia atribuible por medio_id (Fase 1A — Media Validation & Certification,
+ * `docs/MEDIA_VALIDATION_AND_CERTIFICATION.md` §7). Mismo criterio de conteo
+ * que las métricas globales de `EnrichResult`, solo particionado por medio —
+ * ver `enrichNews()` para la semántica exacta de cada campo.
+ */
+export interface MedioEnrichCounts {
+  /** Noticias leídas para este medio en el batch (porción de `leidas`). */
+  processed: number;
+  /** Se aplicó (o se habría aplicado, en dry-run) una escritura con campos de contenido nuevos. */
+  updated: number;
+  /** Sin campos de contenido para actualizar (incluye extracciones fallidas sin contenido nuevo — mismo criterio superpuesto que el `sinCambios` global, ver enrichNews()). */
+  unchanged: number;
+  /** Extracción falló (`extracto.ok === false`) o falló la escritura a Supabase. Puede solaparse con `unchanged`, igual que el `fallidas` global. */
+  failed: number;
+  /** De las `processed`, cuántas terminan con `texto_nota_limpia` no vacío. */
+  clean_text_count: number;
+  /** De las `processed`, cuántas terminan con `texto_cuerpo_nota` no vacío. */
+  body_count: number;
+}
+
+export interface MedioEnrichSummary extends MedioEnrichCounts {
+  medio_id: string;
+  /**
+   * `true` si este medio_id vino explícitamente en `opts.medioIds`. Permite
+   * distinguir "medio solicitado con 0 noticias elegibles" (requested=true,
+   * processed=0) de "no fue solicitado explícitamente" (corrida global sin
+   * `--medio-ids`). Cuando `opts.medioIds` no se pasó, siempre es `false`
+   * (no existe lista de solicitud contra la cual comparar).
+   */
+  requested: boolean;
+}
+
 export interface EnrichResult {
   leidas: number;
   actualizadas: number;
@@ -122,6 +163,71 @@ export interface EnrichResult {
   conCuerpoNota: number;
   dryRun: boolean;
   detalle: EnrichItemResult[];
+  /**
+   * Evidencia adicional por medio_id (Fase 1A). ADITIVO: no sustituye a los
+   * contadores globales de arriba, que siguen siendo la fuente de verdad
+   * para consumidores existentes. Incluye entradas con `processed: 0` para
+   * medios pedidos explícitamente en `opts.medioIds` que no tuvieron ninguna
+   * noticia elegible (no desaparecen silenciosamente — ver §7 del documento
+   * de arquitectura).
+   */
+  porMedio: MedioEnrichSummary[];
+  /**
+   * Noticias leídas cuyo `medio_id` vino `null` (medio borrado del catálogo,
+   * FK `on delete set null`). NO se atribuyen a ningún medio ni se descartan
+   * silenciosamente — se cuentan aparte para que "atribución desconocida"
+   * nunca se confunda con "0 fallos". En la práctica se espera que quede en
+   * cero salvo borrado de un medio con histórico.
+   */
+  sinMedioId: MedioEnrichCounts;
+}
+
+function contadoresVacios(): MedioEnrichCounts {
+  return { processed: 0, updated: 0, unchanged: 0, failed: 0, clean_text_count: 0, body_count: 0 };
+}
+
+/** Nombre de evento estable para logging estructurado (Fase 1A). Ver enrich-news.ts. */
+export const ENRICH_MEDIA_SUMMARY_EVENT = 'enrich_media_summary';
+export const ENRICH_MEDIA_SUMMARY_SCHEMA_VERSION = 1;
+
+/**
+ * Payload de log estructurado para un medio_id. Función pura (no loguea):
+ * separa el "shape" del evento de la llamada real a logger, para que sea
+ * testeable sin mocks de logging y para que un futuro Shadow Validator no
+ * dependa de parsear frases humanas — solo de estos campos.
+ */
+export function buildEnrichMediaSummaryLogPayload(
+  summary: MedioEnrichSummary,
+  meta: { dryRun: boolean },
+): Record<string, unknown> {
+  return {
+    event: ENRICH_MEDIA_SUMMARY_EVENT,
+    schema_version: ENRICH_MEDIA_SUMMARY_SCHEMA_VERSION,
+    medio_id: summary.medio_id,
+    requested: summary.requested,
+    processed: summary.processed,
+    updated: summary.updated,
+    unchanged: summary.unchanged,
+    failed: summary.failed,
+    clean_text_count: summary.clean_text_count,
+    body_count: summary.body_count,
+    dry_run: meta.dryRun,
+  };
+}
+
+/** Payload de log estructurado para la bolsa de noticias sin medio_id atribuible. */
+export function buildEnrichUnattributedLogPayload(
+  counts: MedioEnrichCounts,
+  meta: { dryRun: boolean },
+): Record<string, unknown> {
+  return {
+    event: ENRICH_MEDIA_SUMMARY_EVENT,
+    schema_version: ENRICH_MEDIA_SUMMARY_SCHEMA_VERSION,
+    medio_id: null,
+    requested: false,
+    ...counts,
+    dry_run: meta.dryRun,
+  };
 }
 
 function vacio(v: string | null | undefined): boolean {
@@ -255,10 +361,39 @@ export async function enrichNews(
   let sinCambios = 0;
   let fallidas = 0;
 
+  // ── Atribución per-medio (Fase 1A) ────────────────────────────────────────
+  // Sembrado ANTES del loop con los medio_id pedidos explícitamente: así un
+  // medio con 0 noticias elegibles queda representado (processed=0) en vez de
+  // desaparecer silenciosamente — ver docs/MEDIA_VALIDATION_AND_CERTIFICATION.md §7.
+  const porMedioMap = new Map<string, MedioEnrichSummary>();
+  const medioIdsSolicitados = new Set((opts.medioIds ?? []).map((id) => id.trim()));
+  for (const id of medioIdsSolicitados) {
+    porMedioMap.set(id, { medio_id: id, requested: true, ...contadoresVacios() });
+  }
+  const sinMedioId = contadoresVacios();
+
+  /** Bucket de conteo para este medio_id (o `sinMedioId` si viene null). Nunca inventa medio_id. */
+  function bucketPara(medioId: string | null): MedioEnrichCounts {
+    if (!medioId) return sinMedioId;
+    let entry = porMedioMap.get(medioId);
+    if (!entry) {
+      // Medio presente en la noticia pero no en --medio-ids (corrida global
+      // sin filtro, o filtro parcial): se registra igual, sin marcarlo como
+      // "solicitado" (no había una lista explícita contra la cual comparar).
+      entry = { medio_id: medioId, requested: medioIdsSolicitados.has(medioId), ...contadoresVacios() };
+      porMedioMap.set(medioId, entry);
+    }
+    return entry;
+  }
+
   for (const noticia of noticias) {
+    const medioBucket = bucketPara(noticia.medio_id);
+    medioBucket.processed += 1;
+
     const url = noticia.url_original;
     if (!url) {
       fallidas += 1;
+      medioBucket.failed += 1;
       detalle.push({
         noticia_id: noticia.noticia_id,
         url: null,
@@ -287,11 +422,15 @@ export async function enrichNews(
     };
     detalle.push(item);
 
-    if (!extracto.ok) fallidas += 1;
+    if (!extracto.ok) {
+      fallidas += 1;
+      medioBucket.failed += 1;
+    }
 
     const hayCambios = Object.keys(fields).length > 0;
     if (!hayCambios) {
       sinCambios += 1;
+      medioBucket.unchanged += 1;
       continue;
     }
 
@@ -304,31 +443,48 @@ export async function enrichNews(
         // en vivo 2026-07-20: "statement timeout" en una sola nota mataba el
         // proceso completo, perdiendo el resto del cupo de enrich del ciclo).
         if (!item.error) item.error = err instanceof Error ? err.message : String(err);
-        if (extracto.ok) fallidas += 1;
+        if (extracto.ok) {
+          fallidas += 1;
+          medioBucket.failed += 1;
+        }
         continue;
       }
     }
-    if (campos.length > 0) actualizadas += 1;
-    else sinCambios += 1;
+    if (campos.length > 0) {
+      actualizadas += 1;
+      medioBucket.updated += 1;
+    } else {
+      sinCambios += 1;
+      medioBucket.unchanged += 1;
+    }
   }
 
   // Conteos post-proceso: refleja el estado efectivo incluyendo lo que ya tenían +
   // lo que se acaba de escribir (en dry-run, lo que se habría escrito).
-  const conTextoLimpio = noticias.filter((n, i) => {
+  // Mismo predicado que las métricas globales, particionado por medio: cada
+  // noticia cae en exactamente un bucket (su medio, o sinMedioId), por lo que
+  // la suma per-media reconcilia exactamente con el global — ver
+  // docs/MEDIA_VALIDATION_AND_CERTIFICATION.md §8.
+  let conTextoLimpio = 0;
+  let conCuerpoNota = 0;
+  noticias.forEach((n, i) => {
     const d = detalle[i];
-    return (
-      !vacio(n.texto_nota_limpia) ||
-      (d !== undefined && 'texto_nota_limpia' in (d.fields ?? {}))
-    );
-  }).length;
+    const bucket = bucketPara(n.medio_id);
 
-  const conCuerpoNota = noticias.filter((n, i) => {
-    const d = detalle[i];
-    return (
-      !vacio(n.texto_cuerpo_nota) ||
-      (d !== undefined && 'texto_cuerpo_nota' in (d.fields ?? {}))
-    );
-  }).length;
+    const tieneTextoLimpio =
+      !vacio(n.texto_nota_limpia) || (d !== undefined && 'texto_nota_limpia' in (d.fields ?? {}));
+    if (tieneTextoLimpio) {
+      conTextoLimpio += 1;
+      bucket.clean_text_count += 1;
+    }
+
+    const tieneCuerpoNota =
+      !vacio(n.texto_cuerpo_nota) || (d !== undefined && 'texto_cuerpo_nota' in (d.fields ?? {}));
+    if (tieneCuerpoNota) {
+      conCuerpoNota += 1;
+      bucket.body_count += 1;
+    }
+  });
 
   return {
     leidas: noticias.length,
@@ -339,5 +495,7 @@ export async function enrichNews(
     conCuerpoNota,
     dryRun: opts.dryRun,
     detalle,
+    porMedio: Array.from(porMedioMap.values()),
+    sinMedioId,
   };
 }

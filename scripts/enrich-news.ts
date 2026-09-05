@@ -28,8 +28,11 @@ import {
 } from '../src/supabase/repositories.js';
 import {
   enrichNews,
+  buildEnrichMediaSummaryLogPayload,
+  buildEnrichUnattributedLogPayload,
   type EnrichOpts,
   type EnrichDeps,
+  type EnrichResult,
 } from '../src/enrichers/enrichNews.js';
 import { fetchAndExtract } from '../src/extractors/html.js';
 import { logger } from '../src/utils/logger.js';
@@ -102,6 +105,28 @@ function parseArgs(argv: string[]): EnrichArgs {
     }
   }
   return out;
+}
+
+/**
+ * Evidencia estructurada por medio_id (Fase 1A — Media Validation &
+ * Certification, ver docs/MEDIA_VALIDATION_AND_CERTIFICATION.md §7).
+ * ADITIVA al resumen global de arriba/abajo: no lo reemplaza. Un evento por
+ * medio (`event: 'enrich_media_summary'`), consumible por código sin
+ * depender de parsear frases humanas.
+ */
+function logPorMedio(result: EnrichResult, dryRun: boolean): void {
+  for (const summary of result.porMedio) {
+    logger.info(
+      buildEnrichMediaSummaryLogPayload(summary, { dryRun }),
+      `Enrich por medio completado: ${summary.medio_id}`,
+    );
+  }
+  if (result.sinMedioId.processed > 0) {
+    logger.warn(
+      buildEnrichUnattributedLogPayload(result.sinMedioId, { dryRun }),
+      'Enrich: noticias leídas sin medio_id atribuible (medio borrado del catálogo)',
+    );
+  }
 }
 
 /** Modo diagnóstico de una sola URL: descarga, extrae y muestra. No escribe. */
@@ -204,6 +229,7 @@ async function main() {
       },
       '[dry-run] Resumen del enriquecimiento (no se escribió en Supabase)',
     );
+    logPorMedio(result, true);
     return;
   }
 
@@ -218,6 +244,7 @@ async function main() {
     },
     'Enriquecimiento de noticias completado.',
   );
+  logPorMedio(result, false);
 }
 
 function esEntrypointCli(): boolean {

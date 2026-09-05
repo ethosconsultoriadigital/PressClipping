@@ -686,7 +686,7 @@ export async function getNoticiasParaEnriquecer(
   let query = getSupabase()
     .from('noticias')
     .select(
-      'noticia_id, url_original, titulo, resumen, texto_extraido, autor, seccion, imagen_principal,' +
+      'noticia_id, medio_id, url_original, titulo, resumen, texto_extraido, autor, seccion, imagen_principal,' +
       ' texto_nota_limpia, extracto_nota_1300, calidad_extraccion, texto_limpio_chars,' +
       ' texto_cuerpo_nota, extracto_cuerpo_1300, cuerpo_nota_chars, tipo_nota',
     );
