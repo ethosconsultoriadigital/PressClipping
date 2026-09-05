@@ -6,6 +6,13 @@ Repo local esperado: C:\Users\Juanjo\ProyectosCursor\PressClipping\pressclipping
 Fecha de operacion: 2026-09-01
 ```
 
+> **Nota (2026-09-05):** el proceso manual A/B/C/D/E descrito en este
+> documento es exactamente lo que la nueva capacidad **Media Validation &
+> Certification** (`docs/MEDIA_VALIDATION_AND_CERTIFICATION.md`) busca
+> asistir/reducir a futuro (Shadow Validator V1, Fase 1, todavía no
+> implementado) — no reemplazarlo de golpe. Mientras esa fase no exista,
+> este README sigue siendo el proceso vigente para reparar medios.
+
 ```
 ======================================================================
 ```

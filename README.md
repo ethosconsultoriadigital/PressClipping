@@ -248,10 +248,24 @@ GET /read-xml?token=...&cliente=Jumex&desde=2026-06-01&hasta=2026-06-05
 
 ---
 
+## News Lake y Media Validation & Certification
+
+Además del pipeline original (Sheets ↔ Supabase por cliente, arriba), el
+proyecto opera un **News Lake**: captura general de medios (independiente de
+keywords/clientes) que alimenta detección por cliente después. Sobre ese
+lake corre una capa transversal de **control** —
+`docs/MEDIA_VALIDATION_AND_CERTIFICATION.md`— que observa las corridas de
+captura/enriquecimiento y certifica, por medio, si una fuente es confiable,
+necesita revisión o requiere reparación. Es una capa de control/evidencia
+sobre el pipeline de ingesta, no una etapa lineal que bloquea físicamente la
+escritura al lake. Ver también `docs/NEWS_LAKE_V0.md`.
+
 ## Documentación
 
 - [`docs/architecture.md`](docs/architecture.md) — arquitectura y plan por fases
 - [`docs/data-contract.md`](docs/data-contract.md) — contrato Sheets ↔ Supabase ↔ XML
 - [`docs/operations.md`](docs/operations.md) — operación y scraping responsable
 - [`docs/fase-8-interfaz.md`](docs/fase-8-interfaz.md) — diseño de la interfaz futura (dashboard, buscador, alertas)
+- [`docs/NEWS_LAKE_V0.md`](docs/NEWS_LAKE_V0.md) — captura general de medios (News Lake), separada de clientes/keywords
+- [`docs/MEDIA_VALIDATION_AND_CERTIFICATION.md`](docs/MEDIA_VALIDATION_AND_CERTIFICATION.md) — control, evidencia y certificación de medios (roadmap Shadow Validator → Media Health Monitor)
 - [`worker/README.md`](worker/README.md) — endpoint HTTP `/read-xml` (Cloudflare Worker)

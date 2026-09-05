@@ -855,3 +855,44 @@ Creados: `src/editorial/meryCriteria.ts` (clasificación editorial en 5 categor�
 `.github/workflows/mery-no-pc-capture.yml` (solo workflow_dispatch, dry_run=true default),
 `npm run mery:no-pc:capture`. Tests: 1262/1262 verdes (+43 nuevos).
 Detalle: `docs/MERY_POZOS_STAGING_READINESS.md` §10.
+
+---
+
+## NUEVA CAPACIDAD ESTRUCTURAL — MEDIA VALIDATION & CERTIFICATION (2026-09-05)
+
+**Fase 0 (arquitectura + documentación, sin código operativo).** Se incorpora
+formalmente al plan maestro una capacidad transversal permanente: certificar,
+por `medio_id` y de forma reproducible, si una fuente del catálogo es
+confiable — sin escalar proporcionalmente el QA manual de Juan al crecer el
+catálogo (203 medios hoy, objetivo 120–150 útiles en producción vía
+`juan/production-tier-runbook`, no mergeada).
+
+**Motivo:** evidencia real confirmó `WORKFLOW SUCCESS ≠ MEDIA PASS` — el run
+`33924994423` de `news-lake-capture.yml` reportó `chunks_ok:2,
+chunks_con_error:0` (éxito global) mientras `MED-0114` (Radio Universidad de
+Guadalajara) falló individualmente con `INVALID_XML` ("Invalid character in
+entity name"). Esta capacidad es la respuesta estructural a ese hallazgo, no
+un parche puntual sobre `MED-0114`.
+
+**Diseño completo:** `docs/MEDIA_VALIDATION_AND_CERTIFICATION.md` — Data
+Plane vs Control Plane, `readiness_state` vs `validation_result` vs
+`recommendation`, gap de observabilidad confirmado (enrich no atribuye por
+medio en corridas multi-medio; el orquestador de chunks tampoco), error
+taxonomy, quality metrics sin thresholds inventados, Deterministic
+Regression Fixtures vs Live Canary Media, y roadmap Fase 0→7 (Shadow
+Validator V1 report-only → Fixtures → Canary/Regression → Assisted Repair →
+Media Health Monitor → Promoción semiautomática → Escalamiento 300/500+).
+
+**Relación con las fases 0–5 de este plan:** transversal, no las reemplaza
+ni reordena. Es un prerrequisito de calidad para escalar el catálogo de
+medios que alimenta la Fase 0 (shadow medible) y las fases de sustitución
+posteriores — más catálogo confiable sin más horas de QA humano por medio.
+
+**Siguiente paso habilitado (requiere autorización, no ejecutado):** Fase 1
+— Shadow Validator V1, *report-only*, sin promoción automática, sin nuevas
+tablas Supabase, sin tocar producción.
+
+**Prohibido sin autorización:** implementar `scripts/shadow-validator.ts` o
+cualquier script/workflow/tabla operativa de esta capacidad. Ejecutar
+`repair-failed-sources-batch --apply` automáticamente. Promoción automática
+de cualquier medio a Tier 1/2/3.
