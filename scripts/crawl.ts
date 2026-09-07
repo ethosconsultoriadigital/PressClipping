@@ -40,7 +40,11 @@ import {
   updateMedioEstado,
   type MedioRow,
 } from '../src/supabase/repositories.js';
-import { crawlMedio, type CrawlMedioOpts } from '../src/crawlers/index.js';
+import {
+  crawlMedio,
+  buildCrawlMediaSummaryLogPayload,
+  type CrawlMedioOpts,
+} from '../src/crawlers/index.js';
 import {
   seleccionarMedios,
   type CrawlFiltros,
@@ -342,6 +346,27 @@ async function main() {
     logger.info(
       { medio_id: medio.medio_id, estado: estadoFinal, insertadas, duplicados, promovidas_diagnostico: promovidas },
       `Medio procesado: ${medio.nombre_medio}`,
+    );
+
+    // Evento terminal atómico por medio (Media Validation & Certification —
+    // Fase 1B, Hardening Pass 2). Puramente aditivo: usa los mismos valores
+    // ya calculados arriba, en el mismo instante, para el mismo medio_id —
+    // nunca mezcla datos de intentos/medios distintos. Ver
+    // src/crawlers/index.ts (buildCrawlMediaSummaryLogPayload) y
+    // src/mediaValidation/runEvidenceAggregator.ts (consumidor).
+    logger.info(
+      buildCrawlMediaSummaryLogPayload({
+        medioId: medio.medio_id,
+        status: estadoFinal,
+        sourceMethod: result.fuente,
+        detected: result.urls_detectadas,
+        items: result.items.length,
+        inserted: insertadas,
+        duplicates: duplicados,
+        promotedDiagnostic: promovidas,
+        terminalErrorMessage: errorFinal,
+      }),
+      `Crawl media summary: ${medio.medio_id}`,
     );
   }
 

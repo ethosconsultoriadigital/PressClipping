@@ -24,6 +24,90 @@ export interface CrawlResult {
 
 const METODOS_MVP = new Set(['rss', 'sitemap']);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Evento terminal atómico por medio (Media Validation & Certification —
+// Fase 1B, Hardening Pass 2: hallazgos B3/B5). PURAMENTE ADITIVO: no cambia
+// `crawlMedio()` ni `CrawlResult`, no afecta selección/fallback/ingestión.
+//
+// Lo emite `scripts/crawl.ts` (no este módulo) UNA vez por medio_id, justo
+// después de conocer de forma atómica en su loop: el `CrawlResult` de
+// `crawlMedio()` (fuente que funcionó, detectadas, items) + el resultado de
+// `ingestNoticias()` (insertadas/duplicados/promovidas) + el `estadoFinal`/
+// `errorFinal` ya resueltos (que pueden diferir del `CrawlResult` si
+// `ingestNoticias` lanza). Por eso el *constructor* del payload vive aquí
+// (junto al resto del contrato de evidencia de crawl, simétrico a
+// `buildEnrichMediaSummaryLogPayload` en `src/enrichers/enrichNews.ts`), pero
+// la *emisión* (logger.info) ocurre en `scripts/crawl.ts`, que es quien tiene
+// todos los valores en scope al mismo tiempo.
+//
+// Todos los campos describen SIEMPRE el mismo resultado terminal (atomicidad,
+// §6 del prompt de Pass 2): nunca se construye mezclando `source_method` de
+// un intento con `inserted` de otro. `terminal_error` es la causa TERMINAL
+// (por qué el medio no llegó a `status='ok'`, o por qué fue omitido), nunca
+// un error de intento/fuente intermedio — esos siguen siendo exclusivamente
+// los eventos `log.warn({fuente, err}, 'Fallo en fuente, probando siguiente')`
+// de este mismo módulo, sin cambios.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const CRAWL_MEDIA_SUMMARY_EVENT = 'crawl_media_summary';
+export const CRAWL_MEDIA_SUMMARY_SCHEMA_VERSION = 1;
+
+export interface CrawlMediaSummaryTerminalError {
+  message: string;
+}
+
+export interface CrawlMediaSummaryLogPayload {
+  event: typeof CRAWL_MEDIA_SUMMARY_EVENT;
+  schema_version: typeof CRAWL_MEDIA_SUMMARY_SCHEMA_VERSION;
+  medio_id: string;
+  /** Mismo valor que el `estadoFinal` de scripts/crawl.ts (== CrawlResult.estado, salvo que ingestNoticias haya lanzado). */
+  status: string;
+  /** Fuente cuyo resultado produjo `items` (p.ej. 'rss'|'sitemap'), o null si ninguna produjo items. */
+  source_method: string | null;
+  detected: number;
+  items: number;
+  inserted: number;
+  duplicates: number;
+  promoted_diagnostic: number;
+  /**
+   * Causa TERMINAL, o `null` si no hay ninguna conocida (éxito, o motivo
+   * desconocido — nunca se inventa una causa cuando no existe).
+   */
+  terminal_error: CrawlMediaSummaryTerminalError | null;
+}
+
+/**
+ * Construye (sin loguear ni tener efectos secundarios) el payload del
+ * evento terminal atómico de crawl a partir de los valores que
+ * `scripts/crawl.ts` YA conoce en su loop, de forma síncrona y coherente,
+ * para UN medio_id. Función pura, testeable sin Supabase/red/IO.
+ */
+export function buildCrawlMediaSummaryLogPayload(params: {
+  medioId: string;
+  status: string;
+  sourceMethod: string | null;
+  detected: number;
+  items: number;
+  inserted: number;
+  duplicates: number;
+  promotedDiagnostic: number;
+  terminalErrorMessage: string | null;
+}): CrawlMediaSummaryLogPayload {
+  return {
+    event: CRAWL_MEDIA_SUMMARY_EVENT,
+    schema_version: CRAWL_MEDIA_SUMMARY_SCHEMA_VERSION,
+    medio_id: params.medioId,
+    status: params.status,
+    source_method: params.sourceMethod,
+    detected: params.detected,
+    items: params.items,
+    inserted: params.inserted,
+    duplicates: params.duplicates,
+    promoted_diagnostic: params.promotedDiagnostic,
+    terminal_error: params.terminalErrorMessage ? { message: params.terminalErrorMessage } : null,
+  };
+}
+
 /** Opciones de crawl dirigido (backfill). No afectan el crawl normal si se omiten. */
 export interface CrawlMedioOpts {
   /** Fuerza la fuente (rss|sitemap) e ignora la cascada. Útil para backfill por sitemap. */
