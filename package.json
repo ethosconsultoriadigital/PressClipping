@@ -66,6 +66,8 @@
     "news-lake:search": "tsx scripts/search-news-lake.ts",
     "media-validation:snapshot": "tsx scripts/media-validation-snapshot.ts",
     "media-validation:compose": "tsx scripts/media-validation-compose.ts",
+    "media-validation:calibrate": "tsx scripts/media-validation-calibrate.ts",
+    "media-validation:evaluate": "tsx scripts/media-validation-evaluate.ts",
     "client-live:sheet": "tsx scripts/client-live-sheet-export.ts",
     "catalog-mery-jalisco-priority": "tsx scripts/catalog-mery-jalisco-priority.ts",
     "audit-mery-media-coverage": "tsx scripts/audit-mery-media-coverage.ts",
