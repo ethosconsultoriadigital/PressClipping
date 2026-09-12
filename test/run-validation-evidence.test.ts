@@ -20,7 +20,7 @@ const T_AFTER_START = '2026-09-07T22:30:00.000Z';
 const T_AFTER_END = '2026-09-07T22:35:00.000Z';
 
 function row(id: string, medioId: string, textoLimpio: string | null, cuerpo: string | null): NoticiaSnapshotRow {
-  return { noticia_id: id, medio_id: medioId, texto_nota_limpia: textoLimpio, texto_cuerpo_nota: cuerpo };
+  return { noticia_id: id, medio_id: medioId, texto_nota_limpia: textoLimpio, texto_cuerpo_nota: cuerpo, url_original: null };
 }
 
 function completeSnap(medioId: string, total: number, clean: number, body: number, consistency: SnapshotConsistency = 'STABLE_OBSERVED'): MediaSnapshot {

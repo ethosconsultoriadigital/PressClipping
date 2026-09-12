@@ -48,6 +48,7 @@ import type { SupabaseErrorLike } from '../supabase/errors.js';
 import { getSupabase } from '../supabase/client.js';
 import { retryPostgrest, describeSupabaseError } from '../supabase/errors.js';
 import { computeWindowStart, isValidIsoTimestamp } from './temporalWindow.js';
+import { computeContentSanitySummary, type ContentSanitySummary } from './contentSanity.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Contrato de fila — mínimo necesario para las métricas soportadas.
@@ -60,6 +61,8 @@ export interface NoticiaSnapshotRow {
   texto_nota_limpia: string | null;
   /** Mismo campo que consume `enrichNews.ts` para "body disponible". */
   texto_cuerpo_nota: string | null;
+  /** Campo URL canónico de `noticias` — necesario para `pareceListing`. */
+  url_original: string | null;
 }
 
 /**
@@ -114,7 +117,7 @@ export function createSupabaseFetchNoticiasPage(): FetchNoticiasPage {
     const result = await retryPostgrest(`newsLakeSnapshot:${medioId}`, () => {
       let q = getSupabase()
         .from('noticias')
-        .select('noticia_id, medio_id, texto_nota_limpia, texto_cuerpo_nota')
+        .select('noticia_id, medio_id, texto_nota_limpia, texto_cuerpo_nota, url_original')
         .eq('medio_id', medioId)
         .order('noticia_id', { ascending: true })
         .range(offset, offset + pageSize - 1);
@@ -167,6 +170,11 @@ export interface MediaSnapshot {
   duplicate_rows_skipped: number;
   errors: string[];
   consistency: SnapshotConsistency;
+  /**
+   * Resumen de content-sanity de ESTA ventana (Fase 1F). Presente en snapshots
+   * nuevos; ausente (`undefined`) en artifacts históricos schema v1.
+   */
+  content_sanity?: ContentSanitySummary;
 }
 
 export interface SnapshotResult {
@@ -217,6 +225,7 @@ async function fetchOneMediaSnapshot(
   let duplicateRowsSkipped = 0;
   let pagesRead = 0;
   const errors: string[] = [];
+  const sanityRows: { noticia_id: string; url_original: string | null; texto_nota_limpia: string | null }[] = [];
   let offset = 0;
 
   for (;;) {
@@ -244,6 +253,11 @@ async function fetchOneMediaSnapshot(
       totalNews += 1;
       if (!vacio(row.texto_nota_limpia)) cleanText += 1;
       if (!vacio(row.texto_cuerpo_nota)) body += 1;
+      sanityRows.push({
+        noticia_id: row.noticia_id,
+        url_original: row.url_original ?? null,
+        texto_nota_limpia: row.texto_nota_limpia,
+      });
     }
 
     if (rows.length < pageSize) break; // condición REAL de fin.
@@ -265,6 +279,10 @@ async function fetchOneMediaSnapshot(
     duplicate_rows_skipped: duplicateRowsSkipped,
     errors,
     consistency,
+    content_sanity: computeContentSanitySummary({
+      snapshotComplete: succeeded,
+      rows: succeeded ? sanityRows : [],
+    }),
   };
 }
 

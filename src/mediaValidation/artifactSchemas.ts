@@ -27,6 +27,7 @@
 import { z } from 'zod';
 import { isValidIsoTimestamp } from './temporalWindow.js';
 import { NEWS_LAKE_SNAPSHOT_SCHEMA_VERSION, type SnapshotResult } from './newsLakeSnapshot.js';
+import { contentSanitySummarySchema } from './contentSanity.js';
 
 const isoTimestamp = z.string().refine(isValidIsoTimestamp, { message: 'timestamp ISO inválido' });
 
@@ -45,6 +46,7 @@ const mediaSnapshotSchema = z
     duplicate_rows_skipped: nonNegativeInt,
     errors: z.array(z.string()),
     consistency: z.enum(['STABLE_OBSERVED', 'POSSIBLE_DRIFT', 'UNKNOWN']),
+    content_sanity: contentSanitySummarySchema.optional(),
   })
   .superRefine((m, ctx) => {
     if (m.status === 'COMPLETE') {
@@ -69,6 +71,18 @@ const mediaSnapshotSchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: `medio_id=${m.medio_id}: body_count (${m.body_count}) > total_news (${m.total_news})`,
+        });
+      }
+      if (
+        m.content_sanity &&
+        m.content_sanity.availability === 'AVAILABLE' &&
+        m.content_sanity.sample_total !== m.total_news
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            `medio_id=${m.medio_id}: content_sanity.sample_total (${m.content_sanity.sample_total}) ` +
+            `!= total_news (${m.total_news})`,
         });
       }
     } else {

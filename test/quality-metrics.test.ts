@@ -236,4 +236,48 @@ describe('computeMediaQualityMetrics — Fase 1D', () => {
     const m = computeMediaQualityMetrics(fakeMediaValidationRecord('MED-1'), CTX);
     expect(m.schema_version).toBe(1);
   });
+
+  it('1F. AFTER sin content_sanity → EVIDENCE_ABSENT (legacy)', () => {
+    const m = computeMediaQualityMetrics(
+      fakeMediaValidationRecord('MED-1', {
+        persistence: fakePersistenceEvidence('MED-1', {
+          after: fakeMediaSnapshot('MED-1', { status: 'COMPLETE', total_news: 5, clean_text_count: 3, body_count: 2 }),
+        }),
+      }),
+      CTX,
+    );
+    expect(m.content_sanity.availability).toBe('UNAVAILABLE');
+    expect(m.content_sanity.issue).toBe('EVIDENCE_ABSENT');
+  });
+
+  it('1F. content_sanity.sample_total != after.total_news → SAMPLE_TOTAL_MISMATCH', () => {
+    const m = computeMediaQualityMetrics(
+      fakeMediaValidationRecord('MED-1', {
+        persistence: fakePersistenceEvidence('MED-1', {
+          after: fakeMediaSnapshot('MED-1', {
+            status: 'COMPLETE',
+            total_news: 5,
+            clean_text_count: 3,
+            body_count: 2,
+            content_sanity: {
+              schema_version: 1,
+              availability: 'AVAILABLE',
+              issue: null,
+              sample_total: 9,
+              encoding_suspect_count: 0,
+              listing_suspect_count: 0,
+              boilerplate_suspect_count: 0,
+              placeholder_count: 0,
+              blocking_defective_count: 0,
+              blocking_defective_rate: 0,
+              example_noticia_ids: [],
+            },
+          }),
+        }),
+      }),
+      CTX,
+    );
+    expect(m.content_sanity.issue).toBe('SAMPLE_TOTAL_MISMATCH');
+    expect(m.content_sanity.blocking_defective_count).toBeNull();
+  });
 });

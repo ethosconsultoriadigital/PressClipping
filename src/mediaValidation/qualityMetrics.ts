@@ -26,6 +26,7 @@ import type { CrawlProvenance, EnrichPresence, EvidenceStatus } from './runEvide
 import type { MediaValidationRecord, RunValidationEvidence, PersistenceStatus } from './runValidationEvidence.js';
 import type { ContextMatchStatus } from './runContext.js';
 import type { DeltaStatus } from './mediaDelta.js';
+import { resolveContentSanityFromSnapshot, type ContentSanitySummary } from './contentSanity.js';
 
 export const MEDIA_QUALITY_METRICS_SCHEMA_VERSION = 1;
 
@@ -167,6 +168,8 @@ export interface MediaQualityMetrics {
   run: MediaQualityRun;
   delta: MediaQualityDelta;
   ratios: MediaQualityRatios;
+  /** Fase 1F — derivado del AFTER snapshot. Ausencia de campo legado → UNAVAILABLE/EVIDENCE_ABSENT. */
+  content_sanity: ContentSanitySummary;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -347,6 +350,11 @@ export function computeMediaQualityMetrics(
     run,
     delta: deltaOut,
     ratios,
+    content_sanity: resolveContentSanityFromSnapshot({
+      raw: after.content_sanity,
+      snapshotComplete: afterComplete,
+      afterTotalNews: afterComplete ? after.total_news : null,
+    }),
   };
 }
 

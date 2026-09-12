@@ -1,13 +1,100 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateMedia, evaluateRun } from '../src/mediaValidation/shadowValidator.js';
+import {
+  evaluateMedia as evaluateMediaRaw,
+  evaluateRun as evaluateRunRaw,
+} from '../src/mediaValidation/shadowValidator.js';
 import { computeMediaQualityMetrics } from '../src/mediaValidation/qualityMetrics.js';
+import type { MediaQualityMetrics } from '../src/mediaValidation/qualityMetrics.js';
 import type { CalibrationProfile, ThresholdRule, MinimumSampleRule } from '../src/mediaValidation/calibration.js';
+import type { ContentSanityPolicy, ContentSanitySummary } from '../src/mediaValidation/contentSanity.js';
+import { OPERATIONAL_CONTENT_SANITY_POLICY } from '../src/mediaValidation/contentSanity.js';
 import { fakeCrawlEvidence, fakeEnrichEvidence, fakeMediaEvidence } from './fixtures/runEvidenceFixtures.js';
 import { fakeMediaSnapshot, fakeMediaValidationRecord, fakePersistenceEvidence } from './fixtures/validationEvidenceFixtures.js';
 
 const CTX = { context_id: 'CTX-VAL', context_identity: 'MATCH' as const };
 
+/**
+ * Policy SINTÉTICA de test — NO es ContentSanityPolicy V1, NO se exporta
+ * desde src/, NO es recomendación operacional. min_count=2 AND min_rate=0.5
+ * demuestra: 1 anomalía aislada no bloquea; defecto prevalente sí.
+ */
+const TEST_ONLY_CONTENT_SANITY_POLICY: ContentSanityPolicy = {
+  schema_version: 1,
+  policy_id: 'content-sanity-test-only-not-v1',
+  status: 'ACTIVE',
+  min_blocking_defective_count: 2,
+  min_blocking_defective_rate: 0.5,
+};
+
+function evaluateMedia(metrics: MediaQualityMetrics, profile: CalibrationProfile | null) {
+  return evaluateMediaRaw(metrics, profile, TEST_ONLY_CONTENT_SANITY_POLICY);
+}
+
+function evaluateRun(metrics: MediaQualityMetrics[], profile: CalibrationProfile | null) {
+  return evaluateRunRaw(metrics, profile, TEST_ONLY_CONTENT_SANITY_POLICY);
+}
+
+function healthySanity(sampleTotal: number): ContentSanitySummary {
+  if (sampleTotal === 0) {
+    return {
+      schema_version: 1,
+      availability: 'NOT_APPLICABLE',
+      issue: 'ZERO_SAMPLE',
+      sample_total: 0,
+      encoding_suspect_count: 0,
+      listing_suspect_count: 0,
+      boilerplate_suspect_count: 0,
+      placeholder_count: 0,
+      blocking_defective_count: 0,
+      blocking_defective_rate: null,
+      example_noticia_ids: [],
+    };
+  }
+  return {
+    schema_version: 1,
+    availability: 'AVAILABLE',
+    issue: null,
+    sample_total: sampleTotal,
+    encoding_suspect_count: 0,
+    listing_suspect_count: 0,
+    boilerplate_suspect_count: 0,
+    placeholder_count: 0,
+    blocking_defective_count: 0,
+    blocking_defective_rate: 0,
+    example_noticia_ids: [],
+  };
+}
+
+function defectiveSanity(opts: {
+  sample_total: number;
+  blocking_defective_count: number;
+  encoding_suspect_count?: number;
+  listing_suspect_count?: number;
+  boilerplate_suspect_count?: number;
+  placeholder_count?: number;
+}): ContentSanitySummary {
+  const encoding = opts.encoding_suspect_count ?? opts.blocking_defective_count;
+  const listing = opts.listing_suspect_count ?? 0;
+  const boilerplate = opts.boilerplate_suspect_count ?? 0;
+  const placeholder = opts.placeholder_count ?? 0;
+  return {
+    schema_version: 1,
+    availability: 'AVAILABLE',
+    issue: null,
+    sample_total: opts.sample_total,
+    encoding_suspect_count: encoding,
+    listing_suspect_count: listing,
+    boilerplate_suspect_count: boilerplate,
+    placeholder_count: placeholder,
+    blocking_defective_count: opts.blocking_defective_count,
+    blocking_defective_rate: opts.blocking_defective_count / opts.sample_total,
+    example_noticia_ids: ['n1', 'n2', 'n3'].slice(0, Math.min(3, opts.blocking_defective_count)),
+  };
+}
+
 function goodMetrics(overridesAfter: Partial<Parameters<typeof fakeMediaSnapshot>[1]> = {}, overridesEnrich: Partial<ReturnType<typeof fakeEnrichEvidence>> = {}) {
+  const total = (overridesAfter.total_news as number | undefined) ?? 10;
+  const content_sanity = overridesAfter.content_sanity ?? healthySanity(typeof total === 'number' ? total : 10);
   const record = fakeMediaValidationRecord('MED-1', {
     run_evidence: fakeMediaEvidence('MED-1', {
       evidence_status: 'COMPLETE',
@@ -29,7 +116,14 @@ function goodMetrics(overridesAfter: Partial<Parameters<typeof fakeMediaSnapshot
     }),
     persistence: fakePersistenceEvidence('MED-1', {
       status: 'VERIFIED',
-      after: fakeMediaSnapshot('MED-1', { status: 'COMPLETE', total_news: 10, clean_text_count: 9, body_count: 9, ...overridesAfter }),
+      after: fakeMediaSnapshot('MED-1', {
+        status: 'COMPLETE',
+        total_news: 10,
+        clean_text_count: 9,
+        body_count: 9,
+        ...overridesAfter,
+        content_sanity,
+      }),
     }),
   });
   return computeMediaQualityMetrics(record, CTX);
@@ -325,5 +419,180 @@ describe('evaluateMedia — determinismo, batch y calibration_id (§49/§60-61/�
     const profile = approvedThresholdProfile([], 'DRAFT');
     const r = evaluateMedia(goodMetrics(), profile);
     expect(r.evaluation_status).toBe('CALIBRATION_REQUIRED');
+  });
+});
+
+describe('evaluateMedia — content sanity 1F', () => {
+  it('policy operacional UNSET nunca produce PASS aunque thresholds pasen', () => {
+    const r = evaluateMediaRaw(goodMetrics(), approvedThresholdProfile([CLEAN_TEXT_RULE]));
+    expect(r.validation_result).toBe('REVIEW');
+    expect(r.content_sanity.outcome).toBe('NOT_EVALUABLE');
+    expect(r.content_sanity.review_reason).toBe('REVIEW_CONTENT_SANITY_POLICY_UNSET');
+    expect(r.review_reasons).toContain('REVIEW_CONTENT_SANITY_POLICY_UNSET');
+  });
+
+  it('MED-0087-like: texto presente + defecto prevalente + ratios 1.0 → REVIEW_CONTENT_SANITY (nunca FAIL)', () => {
+    const metrics = goodMetrics({
+      total_news: 10,
+      clean_text_count: 10,
+      body_count: 10,
+      content_sanity: defectiveSanity({
+        sample_total: 10,
+        blocking_defective_count: 8,
+        encoding_suspect_count: 7,
+        placeholder_count: 3,
+      }),
+    });
+    expect(metrics.ratios.persisted_clean_text_ratio.value).toBe(1);
+    expect(metrics.ratios.persisted_body_ratio.value).toBe(1);
+    const r = evaluateMedia(metrics, approvedThresholdProfile([CLEAN_TEXT_RULE]));
+    expect(r.validation_result).toBe('REVIEW');
+    expect(r.validation_result).not.toBe('FAIL');
+    expect(r.content_sanity.outcome).toBe('REVIEW');
+    expect(r.review_reasons).toContain('REVIEW_CONTENT_SANITY');
+  });
+
+  it('fixture GOOD + sanity PASS → final PASS (TEST_POLICY, profile APPROVED de test)', () => {
+    const r = evaluateMedia(goodMetrics(), approvedThresholdProfile([CLEAN_TEXT_RULE]));
+    expect(r.content_sanity.outcome).toBe('PASS');
+    expect(r.validation_result).toBe('PASS');
+  });
+
+  it('anomalía aislada no envenena bajo TEST_POLICY (1/10)', () => {
+    const metrics = goodMetrics({
+      content_sanity: defectiveSanity({
+        sample_total: 10,
+        blocking_defective_count: 1,
+        encoding_suspect_count: 1,
+      }),
+    });
+    const r = evaluateMedia(metrics, approvedThresholdProfile([CLEAN_TEXT_RULE]));
+    expect(r.content_sanity.outcome).toBe('PASS');
+    expect(r.validation_result).toBe('PASS');
+  });
+
+  it('artifact legado sin content_sanity → no PASS (EVIDENCE_ABSENT)', () => {
+    const metrics = goodMetrics();
+    const legacy = { ...metrics, content_sanity: { ...metrics.content_sanity, ...{
+      availability: 'UNAVAILABLE' as const,
+      issue: 'EVIDENCE_ABSENT' as const,
+      sample_total: null,
+      encoding_suspect_count: null,
+      listing_suspect_count: null,
+      boilerplate_suspect_count: null,
+      placeholder_count: null,
+      blocking_defective_count: null,
+      blocking_defective_rate: null,
+      example_noticia_ids: [],
+    } } };
+    const r = evaluateMedia(legacy, approvedThresholdProfile([CLEAN_TEXT_RULE]));
+    expect(r.validation_result).toBe('REVIEW');
+    expect(r.content_sanity.outcome).toBe('NOT_EVALUABLE');
+    expect(r.review_reasons).toContain('REVIEW_MISSING_SANITY_EVIDENCE');
+  });
+
+  it('DRAFT + thresholds PASS + sanity REVIEW → operacional REVIEW y would_be REVIEW (no PASS hipotético)', () => {
+    const metrics = goodMetrics({
+      content_sanity: defectiveSanity({
+        sample_total: 10,
+        blocking_defective_count: 8,
+        encoding_suspect_count: 8,
+      }),
+    });
+    const r = evaluateMedia(metrics, approvedThresholdProfile([CLEAN_TEXT_RULE], 'DRAFT'));
+    expect(r.validation_result).toBe('REVIEW');
+    expect(r.would_be_result_if_approved).toBe('REVIEW');
+    expect(r.would_be_result_if_approved).not.toBe('PASS');
+    expect(r.content_sanity.outcome).toBe('REVIEW');
+  });
+
+  it('n=0 → sanity NOT_APPLICABLE, ratios NOT_APPLICABLE, no PASS', () => {
+    const metrics = goodMetrics({ total_news: 0, clean_text_count: 0, body_count: 0 });
+    const r = evaluateMedia(metrics, approvedThresholdProfile([CLEAN_TEXT_RULE]));
+    expect(metrics.content_sanity.availability).toBe('NOT_APPLICABLE');
+    expect(metrics.ratios.persisted_clean_text_ratio.availability).toBe('NOT_APPLICABLE');
+    expect(r.validation_result).not.toBe('PASS');
+    expect(r.content_sanity.review_reason).toBe('REVIEW_CONTENT_SANITY_ZERO_SAMPLE');
+  });
+
+  it('n < minimum sample → REVIEW_INSUFFICIENT_SAMPLE aunque sanity PASS', () => {
+    const rule: MinimumSampleRule = {
+      rule_id: 'R-MIN',
+      kind: 'MINIMUM_SAMPLE',
+      metric: 'persisted.after_total_news',
+      minimum: 100,
+      source_method_scope: 'GLOBAL',
+    };
+    const r = evaluateMedia(goodMetrics(), approvedThresholdProfile([CLEAN_TEXT_RULE, rule]));
+    expect(r.content_sanity.outcome).toBe('PASS');
+    expect(r.validation_result).toBe('REVIEW');
+    expect(r.review_reasons).toContain('REVIEW_INSUFFICIENT_SAMPLE');
+    expect(r.review_reasons).not.toContain('REVIEW_CONTENT_SANITY');
+  });
+
+  it('FAIL por threshold conserva precedencia: sanity no lo convierte a REVIEW/PASS', () => {
+    const metrics = goodMetrics({
+      total_news: 10,
+      clean_text_count: 3,
+      body_count: 3,
+      content_sanity: defectiveSanity({
+        sample_total: 10,
+        blocking_defective_count: 8,
+        encoding_suspect_count: 8,
+      }),
+    });
+    const r = evaluateMedia(metrics, approvedThresholdProfile([CLEAN_TEXT_RULE]));
+    expect(r.validation_result).toBe('FAIL');
+    expect(r.content_sanity.outcome).toBe('REVIEW');
+  });
+
+  it('sample_total mismatch con after.total_news → no PASS', () => {
+    const metrics = goodMetrics({
+      total_news: 10,
+      clean_text_count: 9,
+      body_count: 9,
+      content_sanity: healthySanity(7),
+    });
+    expect(metrics.content_sanity.availability).toBe('UNAVAILABLE');
+    expect(metrics.content_sanity.issue).toBe('SAMPLE_TOTAL_MISMATCH');
+    const r = evaluateMedia(metrics, approvedThresholdProfile([CLEAN_TEXT_RULE]));
+    expect(r.validation_result).toBe('REVIEW');
+    expect(r.review_reasons).toContain('REVIEW_CONTENT_SANITY_MISMATCH');
+  });
+
+  it('boilerplate prevalente (0 encoding/placeholder) no dispara REVIEW_CONTENT_SANITY', () => {
+    const metrics = goodMetrics({
+      content_sanity: defectiveSanity({
+        sample_total: 10,
+        blocking_defective_count: 0,
+        encoding_suspect_count: 0,
+        placeholder_count: 0,
+        boilerplate_suspect_count: 10,
+      }),
+    });
+    const r = evaluateMedia(metrics, approvedThresholdProfile([CLEAN_TEXT_RULE]));
+    expect(r.content_sanity.outcome).toBe('PASS');
+    expect(r.validation_result).toBe('PASS');
+    expect(r.review_reasons).not.toContain('REVIEW_CONTENT_SANITY');
+    expect(r.content_sanity.blocking_defect_types).toEqual([]);
+    expect(r.content_sanity.diagnostic_defect_types).toEqual(['boilerplate']);
+  });
+
+  it('listing prevalente (0 encoding/placeholder) no dispara REVIEW_CONTENT_SANITY', () => {
+    const metrics = goodMetrics({
+      content_sanity: defectiveSanity({
+        sample_total: 10,
+        blocking_defective_count: 0,
+        encoding_suspect_count: 0,
+        placeholder_count: 0,
+        listing_suspect_count: 10,
+      }),
+    });
+    const r = evaluateMedia(metrics, approvedThresholdProfile([CLEAN_TEXT_RULE]));
+    expect(r.content_sanity.outcome).toBe('PASS');
+    expect(r.validation_result).toBe('PASS');
+    expect(r.review_reasons).not.toContain('REVIEW_CONTENT_SANITY');
+    expect(r.content_sanity.blocking_defect_types).toEqual([]);
+    expect(r.content_sanity.diagnostic_defect_types).toEqual(['listing']);
   });
 });

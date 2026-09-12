@@ -36,6 +36,11 @@ export function pareceListing(url: string): boolean {
   } catch { return false; }
 }
 
+/** Placeholder conocido demostrado (MED-0087): exactamente "Sin contenido" tras trim, case-insensitive. No fuzzy. */
+export function parecePlaceholder(s: string): boolean {
+  return /^sin contenido$/i.test(txt(s));
+}
+
 export function fechaValida(s: unknown): boolean {
   return /^\d{4}-\d{2}-\d{2}/.test(txt(s));
 }

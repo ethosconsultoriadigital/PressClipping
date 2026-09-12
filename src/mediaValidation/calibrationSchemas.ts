@@ -37,6 +37,7 @@
  * igual que exige `aggregateRunEvidence` en `runEvidenceAggregator.ts`).
  */
 import { z } from 'zod';
+import { contentSanitySummarySchema } from './contentSanity.js';
 import { CALIBRATION_EXCLUSION_REASONS } from './calibrationEligibility.js';
 import { METRIC_LOOKUP_KEYS } from './qualityMetrics.js';
 
@@ -337,6 +338,27 @@ export const shadowValidationReportSchema = z.object({
   gates_failed: z.array(z.string()),
   rules_evaluated: z.array(ruleEvaluationSchema),
   issues: z.array(z.string()),
+  content_sanity: z
+    .object({
+      outcome: z.enum(['PASS', 'REVIEW', 'NOT_EVALUABLE']),
+      review_reason: z
+        .enum([
+          'REVIEW_CONTENT_SANITY',
+          'REVIEW_MISSING_SANITY_EVIDENCE',
+          'REVIEW_CONTENT_SANITY_POLICY_UNSET',
+          'REVIEW_CONTENT_SANITY_INVALID',
+          'REVIEW_CONTENT_SANITY_ZERO_SAMPLE',
+          'REVIEW_CONTENT_SANITY_MISMATCH',
+        ])
+        .nullable(),
+      blocking_defect_types: z.array(z.enum(['encoding', 'placeholder'])),
+      diagnostic_defect_types: z.array(z.enum(['listing', 'boilerplate'])),
+      policy_id: z.string(),
+      policy_status: z.enum(['UNSET', 'ACTIVE']),
+      summary: contentSanitySummarySchema,
+    })
+    .optional(),
+  review_reasons: z.array(z.string()).optional(),
 });
 
 export function validateShadowValidationReport(json: unknown) {
@@ -371,6 +393,8 @@ const mediaSnapshotEnvelopeSchema = z
     body_count: z.number().int().nonnegative().nullable(),
     /** `SnapshotConsistency` real (Fase 1C) — necesario para el cross-check de `persistence.status='VERIFIED'` (B5C). */
     consistency: z.enum(['STABLE_OBSERVED', 'POSSIBLE_DRIFT', 'UNKNOWN']),
+    /** Fase 1F — additive optional. Artifacts históricos sin el campo siguen parseando. */
+    content_sanity: contentSanitySummarySchema.optional(),
   })
   .passthrough()
   .superRefine((m, ctx) => {
@@ -396,6 +420,18 @@ const mediaSnapshotEnvelopeSchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: `medio_id=${m.medio_id}: body_count (${m.body_count}) > total_news (${m.total_news}) — invariante de 1C violada.`,
+        });
+      }
+      if (
+        m.content_sanity &&
+        m.content_sanity.availability === 'AVAILABLE' &&
+        m.content_sanity.sample_total !== m.total_news
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            `medio_id=${m.medio_id}: content_sanity.sample_total (${m.content_sanity.sample_total}) ` +
+            `!= total_news (${m.total_news})`,
         });
       }
     } else if (m.total_news !== null || m.clean_text_count !== null || m.body_count !== null) {

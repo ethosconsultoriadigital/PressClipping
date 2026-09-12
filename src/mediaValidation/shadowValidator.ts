@@ -1,5 +1,5 @@
 /**
- * Shadow Validator V1 — Media Validation & Certification, FASE 1E.
+ * Shadow Validator V1 + Content Sanity Guard 1F — Media Validation & Certification.
  *
  * Consume `MediaQualityMetrics` (Fase 1D) + `CalibrationProfile` (este
  * módulo, `calibration.ts`) y produce, REPORT-ONLY, un `ShadowValidationReport`
@@ -15,6 +15,10 @@
  * incondicional — nunca se convierte en un FAIL "inventado", siempre en
  * REVIEW/NOT_EVALUABLE (§43).
  *
+ * CONTENT SANITY (Fase 1F): invariante fuera del profile. Un CalibrationProfile
+ * NO puede apagarlo. Policy operacional UNSET ⇒ NOT_EVALUABLE ⇒ nunca PASS
+ * optimista. Sanity NUNCA produce FAIL.
+ *
  * THRESHOLDS (§26): ninguno se hardcodea aquí. Todos los números
  * (`pass_threshold`, `fail_threshold`, `minimum`) vienen del
  * `CalibrationProfile` que recibe esta función como parámetro.
@@ -22,7 +26,8 @@
  * DRAFT vs APPROVED (§30/§58/AH): un profile `DRAFT` NUNCA puede producir
  * `recommendation='ELIGIBLE_FOR_PROMOTION'` — incluso si todas las reglas
  * "pasarían", el resultado se degrada a `REVIEW`/`REVIEW_REQUIRED` y se
- * expone el resultado hipotético en `would_be_result_if_approved`.
+ * expone el resultado hipotético en `would_be_result_if_approved` (con
+ * content sanity ya aplicado al preview).
  *
  * DETERMINISMO (§49): sin `Date.now()`, sin `Math.random()`, sin red, sin
  * LLM. Mismo input → mismo output siempre.
@@ -31,6 +36,12 @@ import type { MediaQualityMetrics } from './qualityMetrics.js';
 import { getMetricValue, getEvidenceGateFailures } from './qualityMetrics.js';
 import type { CalibrationProfile, CalibrationRule, RuleOperator, SourceMethodScope } from './calibration.js';
 import { scopeOf } from './calibration.js';
+import {
+  evaluateContentSanity,
+  OPERATIONAL_CONTENT_SANITY_POLICY,
+  type ContentSanityEvaluation,
+  type ContentSanityPolicy,
+} from './contentSanity.js';
 
 export const SHADOW_VALIDATION_REPORT_SCHEMA_VERSION = 1;
 
@@ -83,6 +94,14 @@ export interface ShadowValidationReport {
   gates_failed: string[];
   rules_evaluated: RuleEvaluation[];
   issues: string[];
+  /** Fase 1F — evaluación de content sanity (invariante, no forma parte del profile). */
+  content_sanity: ContentSanityEvaluation;
+  /**
+   * Taxonomía mínima de REVIEW para Batch Runner futuro.
+   * p.ej. REVIEW_THRESHOLD, REVIEW_INSUFFICIENT_SAMPLE, REVIEW_CONTENT_SANITY,
+   * REVIEW_MISSING_SANITY_EVIDENCE, REVIEW_CONTENT_SANITY_POLICY_UNSET.
+   */
+  review_reasons: string[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -259,6 +278,27 @@ function combineRuleOutcomes(rules: RuleEvaluation[]): ValidationResult {
   return 'PASS';
 }
 
+/** FAIL por threshold conserva precedencia. Sanity NUNCA produce FAIL ni convierte FAIL en otra cosa. */
+function applySanityGate(combined: ValidationResult, sanityOutcome: ContentSanityEvaluation['outcome']): ValidationResult {
+  if (combined === 'FAIL') return 'FAIL';
+  if (combined === null) return null;
+  if (sanityOutcome === 'PASS') return combined;
+  if (combined === 'PASS') return 'REVIEW';
+  return combined;
+}
+
+function reviewReasonsFromRules(rules: RuleEvaluation[]): string[] {
+  const reasons: string[] = [];
+  for (const r of rules) {
+    if (r.kind === 'MINIMUM_SAMPLE' && r.outcome === 'NOT_EVALUABLE' && r.reason.includes('INSUFFICIENT_SAMPLE')) {
+      reasons.push('REVIEW_INSUFFICIENT_SAMPLE');
+    } else if (r.kind === 'THRESHOLD' && r.outcome === 'REVIEW') {
+      reasons.push('REVIEW_THRESHOLD');
+    }
+  }
+  return [...new Set(reasons)];
+}
+
 function recommendationFor(result: ValidationResult): Recommendation {
   switch (result) {
     case 'PASS':
@@ -272,11 +312,42 @@ function recommendationFor(result: ValidationResult): Recommendation {
   }
 }
 
+function finishReport(
+  partial: Omit<ShadowValidationReport, 'content_sanity' | 'review_reasons'>,
+  metrics: MediaQualityMetrics,
+  policy: ContentSanityPolicy,
+  extraReasons: string[] = [],
+): ShadowValidationReport {
+  const content_sanity = evaluateContentSanity(metrics.content_sanity, policy);
+  const review_reasons = [...extraReasons];
+  if (content_sanity.review_reason) review_reasons.push(content_sanity.review_reason);
+  if (content_sanity.outcome !== 'PASS' && content_sanity.review_reason) {
+    partial.issues.push(
+      `content_sanity outcome=${content_sanity.outcome} reason=${content_sanity.review_reason} ` +
+        `blocking=${content_sanity.summary.blocking_defective_count}/${content_sanity.summary.sample_total} ` +
+        `rate=${content_sanity.summary.blocking_defective_rate} ` +
+        `blocking_types=${content_sanity.blocking_defect_types.join(',') || 'none'} ` +
+        `diagnostic_only=${content_sanity.diagnostic_defect_types.join(',') || 'none'} ` +
+        `policy=${content_sanity.policy_id} status=${content_sanity.policy_status}`,
+    );
+  }
+  return { ...partial, content_sanity, review_reasons };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // evaluateMedia — entrada principal
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function evaluateMedia(metrics: MediaQualityMetrics, profile: CalibrationProfile | null): ShadowValidationReport {
+/**
+ * `contentSanityPolicy` omitido ⇒ OPERATIONAL UNSET (nunca PASS por sanity).
+ * Tests pueden inyectar una policy ACTIVE sintética. No existe bypass para
+ * apagar el guard: UNSET también bloquea PASS.
+ */
+export function evaluateMedia(
+  metrics: MediaQualityMetrics,
+  profile: CalibrationProfile | null,
+  contentSanityPolicy: ContentSanityPolicy = OPERATIONAL_CONTENT_SANITY_POLICY,
+): ShadowValidationReport {
   const base = {
     schema_version: SHADOW_VALIDATION_REPORT_SCHEMA_VERSION as typeof SHADOW_VALIDATION_REPORT_SCHEMA_VERSION,
     context_id: metrics.context_id,
@@ -288,18 +359,22 @@ export function evaluateMedia(metrics: MediaQualityMetrics, profile: Calibration
   // §59: sin profile en absoluto → CALIBRATION_REQUIRED. El engine está
   // listo, pero no hay ninguna calibración con la que evaluar.
   if (profile === null) {
-    return {
-      ...base,
-      calibration_id: null,
-      evaluation_status: 'CALIBRATION_REQUIRED',
-      validation_result: null,
-      recommendation: null,
-      simulated: false,
-      would_be_result_if_approved: null,
-      gates_failed: [],
-      rules_evaluated: [],
-      issues: ['no se proveyó ningún CalibrationProfile — CALIBRATION_REQUIRED (§59: no se inventan thresholds).'],
-    };
+    return finishReport(
+      {
+        ...base,
+        calibration_id: null,
+        evaluation_status: 'CALIBRATION_REQUIRED',
+        validation_result: null,
+        recommendation: null,
+        simulated: false,
+        would_be_result_if_approved: null,
+        gates_failed: [],
+        rules_evaluated: [],
+        issues: ['no se proveyó ningún CalibrationProfile — CALIBRATION_REQUIRED (§59: no se inventan thresholds).'],
+      },
+      metrics,
+      contentSanityPolicy,
+    );
   }
 
   const issues: string[] = [];
@@ -308,66 +383,81 @@ export function evaluateMedia(metrics: MediaQualityMetrics, profile: Calibration
   const gatesFailed = getEvidenceGateFailures(metrics.gates);
   if (gatesFailed.length > 0) {
     for (const g of gatesFailed) issues.push(`hard gate fallido: ${g}`);
-    return {
-      ...base,
-      calibration_id: profile.calibration_id,
-      evaluation_status: 'NOT_EVALUABLE',
-      validation_result: 'REVIEW',
-      recommendation: 'REVIEW_REQUIRED',
-      simulated: false,
-      would_be_result_if_approved: null,
-      gates_failed: gatesFailed,
-      rules_evaluated: [],
-      issues,
-    };
+    return finishReport(
+      {
+        ...base,
+        calibration_id: profile.calibration_id,
+        evaluation_status: 'NOT_EVALUABLE',
+        validation_result: 'REVIEW',
+        recommendation: 'REVIEW_REQUIRED',
+        simulated: false,
+        would_be_result_if_approved: null,
+        gates_failed: gatesFailed,
+        rules_evaluated: [],
+        issues,
+      },
+      metrics,
+      contentSanityPolicy,
+    );
   }
 
   if (profile.rules.length === 0) {
-    return {
-      ...base,
-      calibration_id: profile.calibration_id,
-      evaluation_status: 'CALIBRATION_REQUIRED',
-      validation_result: null,
-      recommendation: null,
-      simulated: false,
-      would_be_result_if_approved: null,
-      gates_failed: [],
-      rules_evaluated: [],
-      issues: [
-        `CalibrationProfile '${profile.calibration_id}' (status=${profile.status}) no tiene reglas (rules=[]) — ` +
-          'nada que evaluar todavía (§27: DRAFT sin reglas no autoriza nada; un profile sin reglas nunca produce PASS/FAIL).',
-      ],
-    };
+    return finishReport(
+      {
+        ...base,
+        calibration_id: profile.calibration_id,
+        evaluation_status: 'CALIBRATION_REQUIRED',
+        validation_result: null,
+        recommendation: null,
+        simulated: false,
+        would_be_result_if_approved: null,
+        gates_failed: [],
+        rules_evaluated: [],
+        issues: [
+          `CalibrationProfile '${profile.calibration_id}' (status=${profile.status}) no tiene reglas (rules=[]) — ` +
+            'nada que evaluar todavía (§27: DRAFT sin reglas no autoriza nada; un profile sin reglas nunca produce PASS/FAIL).',
+        ],
+      },
+      metrics,
+      contentSanityPolicy,
+    );
   }
 
   const mediumScope = scopeOf(metrics.source_method);
   const applicableRules = selectApplicableRules(profile.rules, mediumScope);
 
   if (applicableRules.length === 0) {
-    return {
-      ...base,
-      calibration_id: profile.calibration_id,
-      evaluation_status: 'NOT_EVALUABLE',
-      validation_result: 'REVIEW',
-      recommendation: 'REVIEW_REQUIRED',
-      simulated: false,
-      would_be_result_if_approved: null,
-      gates_failed: [],
-      rules_evaluated: [],
-      issues: [`ninguna regla del profile aplica al scope de este medio (source_method resuelto=${mediumScope}, §54).`],
-    };
+    return finishReport(
+      {
+        ...base,
+        calibration_id: profile.calibration_id,
+        evaluation_status: 'NOT_EVALUABLE',
+        validation_result: 'REVIEW',
+        recommendation: 'REVIEW_REQUIRED',
+        simulated: false,
+        would_be_result_if_approved: null,
+        gates_failed: [],
+        rules_evaluated: [],
+        issues: [`ninguna regla del profile aplica al scope de este medio (source_method resuelto=${mediumScope}, §54).`],
+      },
+      metrics,
+      contentSanityPolicy,
+    );
   }
 
   const rulesEvaluated = applicableRules.map((r) => evaluateRule(r, metrics));
-  const combined = combineRuleOutcomes(rulesEvaluated);
+  const combinedRules = combineRuleOutcomes(rulesEvaluated);
+  const sanityPreview = evaluateContentSanity(metrics.content_sanity, contentSanityPolicy);
+  const combined = applySanityGate(combinedRules, sanityPreview.outcome);
+  const extraReasons = reviewReasonsFromRules(rulesEvaluated);
 
   let validationResult: ValidationResult = combined;
   let wouldBeResultIfApproved: ValidationResult = null;
 
   // §30/§58/AH: DRAFT nunca produce PASS operativo. Se degrada a REVIEW y se
-  // conserva el resultado hipotético para preview (FAIL/REVIEW no se
-  // degradan — solo PASS, que es lo único que podría confundirse con una
-  // certificación real).
+  // conserva el resultado hipotético para preview. Content sanity se aplica
+  // TAMBIÉN a would_be_result_if_approved (un DRAFT no puede mostrar PASS
+  // hipotético si sanity lo bloquearía).
   if (profile.status === 'DRAFT') {
     wouldBeResultIfApproved = combined;
     if (combined === 'PASS') {
@@ -392,21 +482,30 @@ export function evaluateMedia(metrics: MediaQualityMetrics, profile: Calibration
     }
   }
 
-  return {
-    ...base,
-    calibration_id: profile.calibration_id,
-    evaluation_status: 'EVALUATED',
-    validation_result: validationResult,
-    recommendation,
-    simulated,
-    would_be_result_if_approved: wouldBeResultIfApproved,
-    gates_failed: [],
-    rules_evaluated: rulesEvaluated,
-    issues,
-  };
+  return finishReport(
+    {
+      ...base,
+      calibration_id: profile.calibration_id,
+      evaluation_status: 'EVALUATED',
+      validation_result: validationResult,
+      recommendation,
+      simulated,
+      would_be_result_if_approved: wouldBeResultIfApproved,
+      gates_failed: [],
+      rules_evaluated: rulesEvaluated,
+      issues,
+    },
+    metrics,
+    contentSanityPolicy,
+    extraReasons,
+  );
 }
 
 /** Batch — acepta una colección de `MediaQualityMetrics` (§60/§61, O(N×R)). */
-export function evaluateRun(metrics: MediaQualityMetrics[], profile: CalibrationProfile | null): ShadowValidationReport[] {
-  return metrics.map((m) => evaluateMedia(m, profile));
+export function evaluateRun(
+  metrics: MediaQualityMetrics[],
+  profile: CalibrationProfile | null,
+  contentSanityPolicy: ContentSanityPolicy = OPERATIONAL_CONTENT_SANITY_POLICY,
+): ShadowValidationReport[] {
+  return metrics.map((m) => evaluateMedia(m, profile, contentSanityPolicy));
 }

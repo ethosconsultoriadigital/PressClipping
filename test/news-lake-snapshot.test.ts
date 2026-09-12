@@ -16,8 +16,8 @@ import {
 
 const ANCHOR = '2026-09-07T22:00:00.000Z';
 
-function row(id: string, medioId: string, textoLimpio: string | null, cuerpo: string | null): NoticiaSnapshotRow {
-  return { noticia_id: id, medio_id: medioId, texto_nota_limpia: textoLimpio, texto_cuerpo_nota: cuerpo };
+function row(id: string, medioId: string, textoLimpio: string | null, cuerpo: string | null, url: string | null = null): NoticiaSnapshotRow {
+  return { noticia_id: id, medio_id: medioId, texto_nota_limpia: textoLimpio, texto_cuerpo_nota: cuerpo, url_original: url };
 }
 
 /** Opciones base con identidad de contexto/rol/ventana ya rellenadas — los tests que no son el foco de esos campos los reutilizan tal cual. */
@@ -57,6 +57,11 @@ describe('buildNewsLakeSnapshot — Fase 1C', () => {
     expect(m.clean_text_count).toBe(0);
     expect(m.body_count).toBe(0);
     expect(m.consistency).toBe('STABLE_OBSERVED');
+    expect(m.content_sanity?.availability).toBe('NOT_APPLICABLE');
+    expect(m.content_sanity?.issue).toBe('ZERO_SAMPLE');
+    expect(m.content_sanity?.sample_total).toBe(0);
+    expect(m.content_sanity?.blocking_defective_count).toBe(0);
+    expect(m.content_sanity?.blocking_defective_rate).toBeNull();
   });
 
   it('2. medio con N noticias → contadores correctos (clean_text/body separados)', async () => {
@@ -77,6 +82,9 @@ describe('buildNewsLakeSnapshot — Fase 1C', () => {
     expect(m.total_news).toBe(3);
     expect(m.clean_text_count).toBe(2);
     expect(m.body_count).toBe(1);
+    expect(m.content_sanity?.availability).toBe('AVAILABLE');
+    expect(m.content_sanity?.sample_total).toBe(3);
+    expect(m.content_sanity?.blocking_defective_count).toBe(0);
   });
 
   it('41. medio fuera de cron se consulta igual si está solicitado explícitamente (no hay filtro de cron en este módulo)', async () => {
@@ -85,6 +93,32 @@ describe('buildNewsLakeSnapshot — Fase 1C', () => {
     expect(result.media[0]!.status).toBe('COMPLETE');
     expect(result.media[0]!.total_news).toBe(1);
     expect(fetchPage).toHaveBeenCalledWith(expect.objectContaining({ medioId: 'MED-FUERA-DE-CRON' }));
+  });
+
+  it('1F. content_sanity resume encoding/placeholder blocking y listing diagnostic (sin doble conteo blocking)', async () => {
+    const fetchPage = fakeFetcher({
+      'MED-A': [
+        {
+          data: [
+            row('good', 'MED-A', 'El gobierno de Guanajuato anunció medidas de apoyo ' + 'contenido '.repeat(40), 'cuerpo'),
+            row('ph', 'MED-A', 'Sin contenido', null),
+            row('moj', 'MED-A', 'Se�alan que el niÃ±o comiÃ³ tacos \uFFFD', 'cuerpo'),
+            row('list', 'MED-A', 'Listado de notas de la sección economía', 'cuerpo', 'https://medio.mx/seccion/economia'),
+            row('empty', 'MED-A', null, null),
+          ],
+        },
+      ],
+    });
+    const result = await buildNewsLakeSnapshot({ ...baseOpts(), mediaIds: ['MED-A'], fetchPage });
+    const s = result.media[0]!.content_sanity!;
+    expect(s.availability).toBe('AVAILABLE');
+    expect(s.sample_total).toBe(5);
+    expect(s.placeholder_count).toBe(1);
+    expect(s.encoding_suspect_count).toBe(1);
+    expect(s.listing_suspect_count).toBe(1);
+    expect(s.blocking_defective_count).toBe(2);
+    expect(s.blocking_defective_rate).toBe(2 / 5);
+    expect(s.boilerplate_suspect_count).toBe(0);
   });
 
   it('39. primera página con error → ERROR, no cero', async () => {
@@ -97,6 +131,8 @@ describe('buildNewsLakeSnapshot — Fase 1C', () => {
     expect(m.body_count).toBeNull();
     expect(m.consistency).toBe('UNKNOWN');
     expect(m.errors.length).toBeGreaterThan(0);
+    expect(m.content_sanity?.availability).toBe('UNAVAILABLE');
+    expect(m.content_sanity?.issue).toBe('SNAPSHOT_NOT_COMPLETE');
   });
 
   it('40. página posterior con error → PARTIAL (no ERROR, no snapshot completo con conteo de la página 1)', async () => {

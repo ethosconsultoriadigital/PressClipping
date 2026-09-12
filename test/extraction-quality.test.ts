@@ -6,6 +6,7 @@ import {
   encodingSospechoso,
   pareceBoilerplate,
   pareceListing,
+  parecePlaceholder,
   fechaValida,
   urlValida,
   clasificarExtraccion,
@@ -46,6 +47,24 @@ describe('pareceListing', () => {
   });
   it('no marca notas individuales', () => {
     expect(pareceListing('https://medio.mx/2026/07/08/alcohol-adulterado-guanajuato-muertos')).toBe(false);
+  });
+  it('no trata un único segmento de path como listing (gap conocido V1: hubs tipo /deportes/)', () => {
+    expect(pareceListing('https://www.uniradioinforma.com/deportes/')).toBe(false);
+    expect(pareceListing('https://www.uniradioinforma.com/viral/')).toBe(false);
+    expect(pareceListing('https://www.uniradioinforma.com/reportajes-especiales/')).toBe(false);
+    expect(pareceListing('https://medio.mx/categoria/economia')).toBe(true);
+  });
+});
+
+describe('parecePlaceholder', () => {
+  it('detecta exactamente "Sin contenido" (trim, case-insensitive)', () => {
+    expect(parecePlaceholder('Sin contenido')).toBe(true);
+    expect(parecePlaceholder('  SIN CONTENIDO  ')).toBe(true);
+  });
+  it('no hace fuzzy matching amplio', () => {
+    expect(parecePlaceholder('Sin contenido adicional en esta nota')).toBe(false);
+    expect(parecePlaceholder('El gobierno anunció medidas')).toBe(false);
+    expect(parecePlaceholder('')).toBe(false);
   });
 });
 
