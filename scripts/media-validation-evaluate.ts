@@ -14,7 +14,7 @@
  * Uso:
  *   npm run media-validation:evaluate -- \
  *     --evidence=data/run-validation-evidence.json \
- *     --profile=data/calibration-profile-APPROVED.json \
+ *     --profile=config/media-validation/calibration-profile-v1.json \
  *     --out=data/shadow-validation-report.json
  */
 import 'dotenv/config';

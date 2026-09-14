@@ -336,12 +336,65 @@ describe('resolveContentSanityFromSnapshot', () => {
 });
 
 describe('evaluateContentSanity — outcomes', () => {
-  it('operational UNSET → NOT_EVALUABLE (nunca PASS)', () => {
-    const summary = computeContentSanitySummary({ snapshotComplete: true, rows: [row('g', GOOD_TEXT)] });
-    const ev = evaluateContentSanity(summary, OPERATIONAL_CONTENT_SANITY_POLICY);
-    expect(ev.outcome).toBe('NOT_EVALUABLE');
-    expect(ev.review_reason).toBe('REVIEW_CONTENT_SANITY_POLICY_UNSET');
+  it('operational V1 ACTIVE: id/count/rate exactos (human-approved, no óptimo estadístico)', () => {
+    expect(OPERATIONAL_CONTENT_SANITY_POLICY.policy_id).toBe('content-sanity-v1-conservative');
+    expect(OPERATIONAL_CONTENT_SANITY_POLICY.status).toBe('ACTIVE');
+    expect(OPERATIONAL_CONTENT_SANITY_POLICY.min_blocking_defective_count).toBe(2);
+    expect(OPERATIONAL_CONTENT_SANITY_POLICY.min_blocking_defective_rate).toBe(0.05);
+  });
+
+  function blockingSummary(sample: number, blocking: number, encoding = blocking, placeholder = 0): ContentSanitySummary {
+    return {
+      schema_version: 1,
+      availability: 'AVAILABLE',
+      issue: null,
+      sample_total: sample,
+      encoding_suspect_count: encoding,
+      listing_suspect_count: 0,
+      boilerplate_suspect_count: 0,
+      placeholder_count: placeholder,
+      blocking_defective_count: blocking,
+      blocking_defective_rate: blocking / sample,
+      example_noticia_ids: blocking > 0 ? ['n1'] : [],
+    };
+  }
+
+  it('operational V1: una anomalía 1/5, 1/10, 1/100 → sanity PASS', () => {
+    for (const sample of [5, 10, 100]) {
+      const ev = evaluateContentSanity(blockingSummary(sample, 1), OPERATIONAL_CONTENT_SANITY_POLICY);
+      expect(ev.outcome).toBe('PASS');
+      expect(ev.review_reason).toBeNull();
+    }
+  });
+
+  it('operational V1: 2/5, 2/10, 2/20, 2/40 → REVIEW; 2/41 → PASS', () => {
+    expect(evaluateContentSanity(blockingSummary(5, 2), OPERATIONAL_CONTENT_SANITY_POLICY).outcome).toBe('REVIEW');
+    expect(evaluateContentSanity(blockingSummary(10, 2), OPERATIONAL_CONTENT_SANITY_POLICY).outcome).toBe('REVIEW');
+    expect(evaluateContentSanity(blockingSummary(20, 2), OPERATIONAL_CONTENT_SANITY_POLICY).outcome).toBe('REVIEW');
+    expect(evaluateContentSanity(blockingSummary(40, 2), OPERATIONAL_CONTENT_SANITY_POLICY).outcome).toBe('REVIEW');
+    const pass = evaluateContentSanity(blockingSummary(41, 2), OPERATIONAL_CONTENT_SANITY_POLICY);
+    expect(pass.summary.blocking_defective_rate).toBe(2 / 41);
+    expect(pass.outcome).toBe('PASS');
+  });
+
+  it('operational V1: MED-0087-like 23/30 → REVIEW (nunca FAIL)', () => {
+    const ev = evaluateContentSanity(blockingSummary(30, 23, 18, 5), OPERATIONAL_CONTENT_SANITY_POLICY);
+    expect(ev.outcome).toBe('REVIEW');
+    expect(ev.review_reason).toBe('REVIEW_CONTENT_SANITY');
     expect(ev.outcome).not.toBe('FAIL' as never);
+  });
+
+  it('operational V1: diagnostic-only listing/boilerplate, 0 blocking → PASS', () => {
+    const rows = [
+      ...Array.from({ length: 5 }, (_, i) => row(`b${i}`, 'Suscríbete a nuestro newsletter')),
+      ...Array.from({ length: 5 }, (_, i) => row(`l${i}`, GOOD_TEXT, 'https://medio.mx/seccion/economia')),
+    ];
+    const summary = computeContentSanitySummary({ snapshotComplete: true, rows });
+    expect(summary.blocking_defective_count).toBe(0);
+    expect(summary.boilerplate_suspect_count).toBeGreaterThan(0);
+    expect(summary.listing_suspect_count).toBeGreaterThan(0);
+    const ev = evaluateContentSanity(summary, OPERATIONAL_CONTENT_SANITY_POLICY);
+    expect(ev.outcome).toBe('PASS');
   });
 
   it('TEST_POLICY: cohorte sana + 1 anomalía aislada encoding → PASS', () => {

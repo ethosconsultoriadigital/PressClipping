@@ -12,6 +12,7 @@ dist/
 !package-lock.json
 !tsconfig.json
 !worker/tsconfig.json
+!config/media-validation/calibration-profile-v1.json
 *-service-account*.json
 
 # Logs

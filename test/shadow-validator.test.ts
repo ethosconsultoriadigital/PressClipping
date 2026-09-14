@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   evaluateMedia as evaluateMediaRaw,
@@ -5,9 +6,15 @@ import {
 } from '../src/mediaValidation/shadowValidator.js';
 import { computeMediaQualityMetrics } from '../src/mediaValidation/qualityMetrics.js';
 import type { MediaQualityMetrics } from '../src/mediaValidation/qualityMetrics.js';
-import type { CalibrationProfile, ThresholdRule, MinimumSampleRule } from '../src/mediaValidation/calibration.js';
+import {
+  OPERATIONAL_CALIBRATION_PROFILE_PATH,
+  type CalibrationProfile,
+  type ThresholdRule,
+  type MinimumSampleRule,
+} from '../src/mediaValidation/calibration.js';
 import type { ContentSanityPolicy, ContentSanitySummary } from '../src/mediaValidation/contentSanity.js';
 import { OPERATIONAL_CONTENT_SANITY_POLICY } from '../src/mediaValidation/contentSanity.js';
+import { validateCalibrationProfile } from '../src/mediaValidation/calibrationSchemas.js';
 import { fakeCrawlEvidence, fakeEnrichEvidence, fakeMediaEvidence } from './fixtures/runEvidenceFixtures.js';
 import { fakeMediaSnapshot, fakeMediaValidationRecord, fakePersistenceEvidence } from './fixtures/validationEvidenceFixtures.js';
 
@@ -423,12 +430,13 @@ describe('evaluateMedia — determinismo, batch y calibration_id (§49/§60-61/�
 });
 
 describe('evaluateMedia — content sanity 1F', () => {
-  it('policy operacional UNSET nunca produce PASS aunque thresholds pasen', () => {
+  it('policy operacional V1 ACTIVE: healthy + threshold PASS → PASS (sanity default operacional)', () => {
+    expect(OPERATIONAL_CONTENT_SANITY_POLICY.status).toBe('ACTIVE');
+    expect(OPERATIONAL_CONTENT_SANITY_POLICY.policy_id).toBe('content-sanity-v1-conservative');
     const r = evaluateMediaRaw(goodMetrics(), approvedThresholdProfile([CLEAN_TEXT_RULE]));
-    expect(r.validation_result).toBe('REVIEW');
-    expect(r.content_sanity.outcome).toBe('NOT_EVALUABLE');
-    expect(r.content_sanity.review_reason).toBe('REVIEW_CONTENT_SANITY_POLICY_UNSET');
-    expect(r.review_reasons).toContain('REVIEW_CONTENT_SANITY_POLICY_UNSET');
+    expect(r.content_sanity.outcome).toBe('PASS');
+    expect(r.validation_result).toBe('PASS');
+    expect(r.recommendation).toBe('ELIGIBLE_FOR_PROMOTION');
   });
 
   it('MED-0087-like: texto presente + defecto prevalente + ratios 1.0 → REVIEW_CONTENT_SANITY (nunca FAIL)', () => {
@@ -594,5 +602,103 @@ describe('evaluateMedia — content sanity 1F', () => {
     expect(r.review_reasons).not.toContain('REVIEW_CONTENT_SANITY');
     expect(r.content_sanity.blocking_defect_types).toEqual([]);
     expect(r.content_sanity.diagnostic_defect_types).toEqual(['listing']);
+  });
+});
+
+describe('evaluateMedia — Profile V1 APPROVED + operational sanity', () => {
+  function loadV1Profile(): CalibrationProfile {
+    const raw = JSON.parse(readFileSync(OPERATIONAL_CALIBRATION_PROFILE_PATH, 'utf8'));
+    return validateCalibrationProfile(raw) as CalibrationProfile;
+  }
+
+  function v1HealthyAfter(overrides: Parameters<typeof goodMetrics>[0] = {}) {
+    return goodMetrics({
+      total_news: 10,
+      clean_text_count: 10,
+      body_count: 10,
+      ...overrides,
+    });
+  }
+
+  it('Profile V1 real valida en runtime y es APPROVED con thresholds canónicos', () => {
+    const profile = loadV1Profile();
+    expect(profile.status).toBe('APPROVED');
+    expect(profile.calibration_id).toBe('media-validation-profile-v1');
+    const clean = profile.rules.find((r) => r.rule_id === 'clean-text-ratio-global');
+    const body = profile.rules.find((r) => r.rule_id === 'body-ratio-global');
+    const min = profile.rules.find((r) => r.rule_id === 'minimum-after-total-news-global');
+    expect(clean).toMatchObject({
+      kind: 'THRESHOLD',
+      pass_threshold: 0.9475138121546961,
+      fail_threshold: null,
+      source_method_scope: 'GLOBAL',
+    });
+    expect(body).toMatchObject({
+      kind: 'THRESHOLD',
+      pass_threshold: 0.9475138121546961,
+      fail_threshold: null,
+      source_method_scope: 'GLOBAL',
+    });
+    expect(min).toMatchObject({ kind: 'MINIMUM_SAMPLE', minimum: 5, metric: 'persisted.after_total_news' });
+  });
+
+  it('gates OK + sample>=5 + clean/body PASS + sanity PASS + dry_run=false → PASS + ELIGIBLE', () => {
+    const r = evaluateMediaRaw(v1HealthyAfter(), loadV1Profile());
+    expect(r.content_sanity.outcome).toBe('PASS');
+    expect(r.validation_result).toBe('PASS');
+    expect(r.recommendation).toBe('ELIGIBLE_FOR_PROMOTION');
+    expect(r.dry_run).toBe(false);
+  });
+
+  it('REQUIRE_BOTH: clean PASS + body below PASS → NO PASS', () => {
+    const r = evaluateMediaRaw(v1HealthyAfter({ clean_text_count: 10, body_count: 9 }), loadV1Profile());
+    expect(r.validation_result).not.toBe('PASS');
+  });
+
+  it('REQUIRE_BOTH: clean below PASS + body PASS → NO PASS', () => {
+    const r = evaluateMediaRaw(v1HealthyAfter({ clean_text_count: 9, body_count: 10 }), loadV1Profile());
+    expect(r.validation_result).not.toBe('PASS');
+  });
+
+  it('minimum sample=4 aunque ratios=1 y sanity PASS → NO PASS', () => {
+    const r = evaluateMediaRaw(
+      v1HealthyAfter({ total_news: 4, clean_text_count: 4, body_count: 4 }),
+      loadV1Profile(),
+    );
+    expect(r.validation_result).not.toBe('PASS');
+    expect(r.review_reasons).toContain('REVIEW_INSUFFICIENT_SAMPLE');
+  });
+
+  it('thresholds PASS + sanity REVIEW → final REVIEW, no eligible', () => {
+    const r = evaluateMediaRaw(
+      v1HealthyAfter({
+        content_sanity: defectiveSanity({
+          sample_total: 10,
+          blocking_defective_count: 8,
+          encoding_suspect_count: 8,
+        }),
+      }),
+      loadV1Profile(),
+    );
+    expect(r.content_sanity.outcome).toBe('REVIEW');
+    expect(r.validation_result).toBe('REVIEW');
+    expect(r.recommendation).toBe('REVIEW_REQUIRED');
+    expect(r.review_reasons).toContain('REVIEW_CONTENT_SANITY');
+  });
+
+  it('hard gate context mismatch no es superado por Profile V1 APPROVED', () => {
+    const metrics = v1HealthyAfter();
+    const mismatched = { ...metrics, gates: { ...metrics.gates, context_identity: 'MISMATCH' as const } };
+    const r = evaluateMediaRaw(mismatched, loadV1Profile());
+    expect(r.validation_result).not.toBe('PASS');
+    expect(r.gates_failed).toContain('context_identity_mismatch');
+  });
+
+  it('dry_run=true nunca ELIGIBLE_FOR_PROMOTION aunque el resto PASS', () => {
+    const r = evaluateMediaRaw(v1HealthyAfter(), loadV1Profile());
+    expect(r.recommendation).toBe('ELIGIBLE_FOR_PROMOTION');
+    const dry = evaluateMediaRaw(goodMetrics({ total_news: 10, clean_text_count: 10, body_count: 10 }, { dry_run: true }), loadV1Profile());
+    expect(dry.dry_run).toBe(true);
+    expect(dry.recommendation).not.toBe('ELIGIBLE_FOR_PROMOTION');
   });
 });

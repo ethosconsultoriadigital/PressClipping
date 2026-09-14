@@ -31,6 +31,9 @@ import { computeCalibrationEligibility, type CalibrationExclusionReason } from '
 export const CALIBRATION_REPORT_SCHEMA_VERSION = 1;
 export const CALIBRATION_PROFILE_SCHEMA_VERSION = 1;
 
+/** Profile V1 APPROVED versionado — se carga vía CLI `--profile=` / Batch Runner. */
+export const OPERATIONAL_CALIBRATION_PROFILE_PATH = 'config/media-validation/calibration-profile-v1.json';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Input — una observación = una (medio_id, context_id) etiquetada.
 // ─────────────────────────────────────────────────────────────────────────────

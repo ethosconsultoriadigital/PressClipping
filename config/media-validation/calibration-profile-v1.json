@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "calibration_id": "media-validation-profile-v1",
+  "status": "APPROVED",
+  "created_at": "2026-09-14T00:00:00.000Z",
+  "source": {
+    "label_sources": ["legacy_readiness", "human_review"],
+    "based_on_calibration_id": "cal01b-combined-a-b1-b2-b3"
+  },
+  "cohort_sizes": [
+    {
+      "label": "GOOD_REFERENCE",
+      "number_of_media": 18,
+      "number_of_observations": 18,
+      "eligible_observations": 18,
+      "excluded_observations": 0
+    },
+    {
+      "label": "NO_NEWS_REFERENCE",
+      "number_of_media": 9,
+      "number_of_observations": 9,
+      "eligible_observations": 9,
+      "excluded_observations": 0
+    },
+    {
+      "label": "SOURCE_REPAIR_REFERENCE",
+      "number_of_media": 1,
+      "number_of_observations": 1,
+      "eligible_observations": 1,
+      "excluded_observations": 0
+    },
+    {
+      "label": "TEXT_BAD_REFERENCE",
+      "number_of_media": 2,
+      "number_of_observations": 2,
+      "eligible_observations": 2,
+      "excluded_observations": 0
+    }
+  ],
+  "rules": [
+    {
+      "rule_id": "clean-text-ratio-global",
+      "kind": "THRESHOLD",
+      "metric": "ratios.persisted_clean_text_ratio",
+      "operator": ">=",
+      "pass_threshold": 0.9475138121546961,
+      "fail_threshold": null,
+      "source_method_scope": "GLOBAL"
+    },
+    {
+      "rule_id": "body-ratio-global",
+      "kind": "THRESHOLD",
+      "metric": "ratios.persisted_body_ratio",
+      "operator": ">=",
+      "pass_threshold": 0.9475138121546961,
+      "fail_threshold": null,
+      "source_method_scope": "GLOBAL"
+    },
+    {
+      "rule_id": "minimum-after-total-news-global",
+      "kind": "MINIMUM_SAMPLE",
+      "metric": "persisted.after_total_news",
+      "minimum": 5,
+      "source_method_scope": "GLOBAL"
+    }
+  ]
+}

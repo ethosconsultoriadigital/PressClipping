@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   validateReferenceLabelManifest,
   validateCalibrationProfile,
@@ -6,7 +7,7 @@ import {
   validateShadowValidationReport,
   validateRunValidationEvidenceEnvelope,
 } from '../src/mediaValidation/calibrationSchemas.js';
-import { buildCalibrationReport, buildDraftCalibrationProfile, type LabeledObservation } from '../src/mediaValidation/calibration.js';
+import { buildCalibrationReport, buildDraftCalibrationProfile, OPERATIONAL_CALIBRATION_PROFILE_PATH, type LabeledObservation } from '../src/mediaValidation/calibration.js';
 import { computeMediaQualityMetrics, computeQualityMetricsForRun } from '../src/mediaValidation/qualityMetrics.js';
 import { evaluateMedia, evaluateRun } from '../src/mediaValidation/shadowValidator.js';
 import { fakeMediaSnapshot, fakeMediaValidationRecord, fakePersistenceEvidence, fakeRunValidationEvidence } from './fixtures/validationEvidenceFixtures.js';
@@ -151,6 +152,19 @@ describe('CalibrationProfile — validación runtime (§36-43 de tests)', () => 
   it('MINIMUM_SAMPLE con minimum negativo rechazado', () => {
     const p = { ...baseProfile(), rules: [{ rule_id: 'R1', kind: 'MINIMUM_SAMPLE', metric: 'x', minimum: -1, source_method_scope: 'GLOBAL' }] };
     expect(() => validateCalibrationProfile(p)).toThrow();
+  });
+
+  it('Profile V1 APPROVED versionado valida en runtime (fail_threshold null aceptado)', () => {
+    const raw = JSON.parse(readFileSync(OPERATIONAL_CALIBRATION_PROFILE_PATH, 'utf8'));
+    const parsed = validateCalibrationProfile(raw);
+    expect(parsed.status).toBe('APPROVED');
+    expect(parsed.rules).toHaveLength(3);
+    const thresholds = parsed.rules.filter((r) => r.kind === 'THRESHOLD');
+    expect(thresholds).toHaveLength(2);
+    for (const r of thresholds) {
+      expect(r.pass_threshold).toBe(0.9475138121546961);
+      expect(r.fail_threshold).toBeNull();
+    }
   });
 });
 

@@ -16,8 +16,8 @@
  * REVIEW/NOT_EVALUABLE (§43).
  *
  * CONTENT SANITY (Fase 1F): invariante fuera del profile. Un CalibrationProfile
- * NO puede apagarlo. Policy operacional UNSET ⇒ NOT_EVALUABLE ⇒ nunca PASS
- * optimista. Sanity NUNCA produce FAIL.
+ * NO puede apagarlo. Policy operacional V1 ACTIVE (`content-sanity-v1-conservative`).
+ * Sanity NUNCA produce FAIL.
  *
  * THRESHOLDS (§26): ninguno se hardcodea aquí. Todos los números
  * (`pass_threshold`, `fail_threshold`, `minimum`) vienen del
@@ -339,9 +339,9 @@ function finishReport(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * `contentSanityPolicy` omitido ⇒ OPERATIONAL UNSET (nunca PASS por sanity).
- * Tests pueden inyectar una policy ACTIVE sintética. No existe bypass para
- * apagar el guard: UNSET también bloquea PASS.
+ * `contentSanityPolicy` omitido ⇒ OPERATIONAL V1 ACTIVE
+ * (`content-sanity-v1-conservative`, count=2 AND rate=0.05).
+ * Tests pueden inyectar otra policy. No existe bypass para apagar el guard.
  */
 export function evaluateMedia(
   metrics: MediaQualityMetrics,

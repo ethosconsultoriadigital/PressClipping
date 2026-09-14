@@ -11,8 +11,8 @@
  *
  * EMPTY puro NO se cuenta aquí: ya reduce las PRIMARY de presencia.
  *
- * Policy operacional: UNSET hasta aprobación humana. UNSET ⇒ NOT_EVALUABLE
- * ⇒ nunca PASS optimista. Un CalibrationProfile NO puede apagar este guard.
+ * Policy operacional V1: ACTIVE, human-approved (`content-sanity-v1-conservative`).
+ * Un CalibrationProfile NO puede apagar este guard. Sanity NUNCA produce FAIL.
  */
 import { z } from 'zod';
 import { encodingSospechoso, pareceBoilerplate, pareceListing, parecePlaceholder } from '../comparators/extractionQuality.js';
@@ -73,7 +73,8 @@ export interface ContentSanityPolicy {
   /**
    * Bloquea (REVIEW) solo si blocking_defective_count >= este valor
    * Y blocking_defective_rate >= min_blocking_defective_rate.
-   * `null` cuando status=UNSET (no se usa). No es cutoff V1 aprobado.
+   * `null` cuando status=UNSET (no se usa). V1 operacional usa 2 / 0.05
+   * (human-approved operational threshold, no un óptimo estadístico).
    */
   min_blocking_defective_count: number | null;
   min_blocking_defective_rate: number | null;
@@ -135,15 +136,16 @@ function zeroSampleSummary(): ContentSanitySummary {
 }
 
 /**
- * Policy operacional V1 — UNSET hasta aprobación humana.
- * No contiene cutoff. evaluateContentSanity con esta policy NUNCA da PASS.
+ * Policy operacional V1 — human-approved.
+ * REVIEW si blocking_defective_count >= 2 AND blocking_defective_rate >= 0.05.
+ * 0.05 no es un óptimo estadístico; es un umbral operacional aprobado.
  */
 export const OPERATIONAL_CONTENT_SANITY_POLICY: ContentSanityPolicy = {
   schema_version: CONTENT_SANITY_POLICY_SCHEMA_VERSION,
-  policy_id: 'content-sanity-operational-v1',
-  status: 'UNSET',
-  min_blocking_defective_count: null,
-  min_blocking_defective_rate: null,
+  policy_id: 'content-sanity-v1-conservative',
+  status: 'ACTIVE',
+  min_blocking_defective_count: 2,
+  min_blocking_defective_rate: 0.05,
 };
 
 const nonNegInt = z.number().int().nonnegative();
