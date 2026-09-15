@@ -20,10 +20,14 @@ import {
 } from '../src/mediaValidation/batchLock.js';
 import {
   BATCH_RUNNER_PROMOTION_MODE,
+  BVR_CHILD_LOG_FORMAT,
+  BVR_EVIDENCE_TRANSPORT,
   BatchRunnerError,
   DEFAULT_WINDOW_DAYS,
   assertBatchCountInvariants,
   batchChunkContextId,
+  childEvidenceEnv,
+  createLiveBatchAdapters,
   parseBatchArgs,
   parseMediaIds,
   runBatch,
@@ -585,6 +589,8 @@ describe('batch execution', () => {
       },
     });
     expect(out.manifest.dry_run).toBe(true);
+    expect(out.manifest.child_log_format).toBe(BVR_CHILD_LOG_FORMAT);
+    expect(out.manifest.evidence_transport).toBe(BVR_EVIDENCE_TRANSPORT);
     expect(out.manifest.overall_status).toBe('COMPLETED');
     expect(out.media.every((m) => m.execution_status === 'SKIPPED_DRY_RUN')).toBe(true);
     expect(out.media.every((m) => m.validation_result === null)).toBe(true);
@@ -801,5 +807,74 @@ describe('owned spawn (Windows / shell:false)', () => {
     expect(result.exitCode).toBe(4);
     expect(result.stdout).toContain('hi');
     expect(result.pid).toBeGreaterThan(0);
+  });
+});
+
+describe('BVR-1B-WIRING-001 child env / stdout isolation', () => {
+  it('createLiveBatchAdapters pasa LOG_FORMAT=json (no NODE_ENV hack)', async () => {
+    const adapters = createLiveBatchAdapters(REPO_ROOT);
+    let captureEnv: NodeJS.ProcessEnv | undefined;
+    let enrichEnv: NodeJS.ProcessEnv | undefined;
+    await adapters.capture(
+      { mediaIds: ['MED-0001'], maxNotas: 3, chunkIndex: 1, chunkCount: 1 },
+      {
+        run: async (spec) => {
+          captureEnv = spec.env;
+          return { pid: 1, exitCode: 0, stdout: '', stderr: '' };
+        },
+      },
+    );
+    await adapters.enrich(
+      { mediaIds: ['MED-0001'], enrichLimit: 20, windowDays: 7, chunkIndex: 1, chunkCount: 1 },
+      {
+        run: async (spec) => {
+          enrichEnv = spec.env;
+          return { pid: 1, exitCode: 0, stdout: '', stderr: '' };
+        },
+      },
+    );
+    expect(captureEnv?.LOG_FORMAT).toBe('json');
+    expect(enrichEnv?.LOG_FORMAT).toBe('json');
+    expect(childEvidenceEnv({ LOG_FORMAT: 'pretty' }).LOG_FORMAT).toBe('json');
+  });
+
+  it('run.log / 1B usan stdout; stderr no entra al compose', async () => {
+    const dir = tempDir();
+    let composedLog = '';
+    const out = await runBatch({
+      ...baseOpts(dir),
+      windowDays: 7,
+      runId: 'stdout-only-1',
+      mediaIds: ['MED-0001'],
+      adapters: {
+        ...adapters({}),
+        capture: async () => ({
+          pid: process.pid,
+          exitCode: 0,
+          stdout: '{"event":"crawl_media_summary","medio_id":"MED-0001"}\n',
+          stderr: 'pretty-or-warn on stderr MUST NOT reach 1B\n',
+        }),
+        enrich: async () => ({
+          pid: process.pid,
+          exitCode: 0,
+          stdout: '{"event":"enrich_media_summary","medio_id":"MED-0001"}\n',
+          stderr: 'enrich stderr noise\n',
+        }),
+        compose: async (input) => {
+          composedLog = input.runLogText;
+          return adapters({}).compose(input);
+        },
+      },
+    });
+    expect(out.media[0]?.execution_status).toBe('COMPLETED');
+    expect(composedLog).toContain('crawl_media_summary');
+    expect(composedLog).toContain('enrich_media_summary');
+    expect(composedLog).not.toContain('MUST NOT reach 1B');
+    expect(composedLog).not.toContain('enrich stderr noise');
+    const runLog = readFileSync(join(dir, 'stdout-only-1', 'chunks', '001', 'run.log'), 'utf-8');
+    expect(runLog).not.toContain('MUST NOT reach 1B');
+    expect(readFileSync(join(dir, 'stdout-only-1', 'chunks', '001', 'capture.stderr.log'), 'utf-8')).toContain(
+      'MUST NOT reach 1B',
+    );
   });
 });

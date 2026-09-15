@@ -55,6 +55,25 @@ export const BATCH_RUNNER_PROMOTION_MODE = 'REPORT_ONLY' as const;
 export const DEFAULT_WINDOW_DAYS = 7;
 
 /**
+ * Transporte de evidencia 1B (BVR-1B-WIRING-001).
+ * Los children crawl/enrich heredan `.env` (`LOG_FORMAT=pretty` → texto humano).
+ * 1B exige JSONL machine-readable. BVR pide JSON de forma explícita;
+ * no interpreta stdout de presentación.
+ */
+export const BVR_CHILD_LOG_FORMAT = 'json' as const;
+export const BVR_EVIDENCE_TRANSPORT = 'STRUCTURED_JSONL' as const;
+
+/** Env de child BVR: conserva el entorno del proceso y fuerza logs JSON (no usa NODE_ENV/CI). */
+export function childEvidenceEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return { ...base, LOG_FORMAT: BVR_CHILD_LOG_FORMAT };
+}
+
+/** 1B consume solo stdout JSONL. stderr queda como artifact separado. */
+export function composeChildEvidenceLogText(captureStdout: string, enrichStdout: string): string {
+  return [captureStdout, enrichStdout].filter((s) => s.length > 0).join('\n');
+}
+
+/**
  * Identidad 1C del CHUNK (no del batch). Determinista: run_id + índice 1-based.
  * BEFORE/AFTER/evidence de un chunk DEBEN compartir este valor; chunks distintos NO.
  */
@@ -166,6 +185,10 @@ export interface BatchManifest {
   scope_hash: string;
   promotion_mode: typeof BATCH_RUNNER_PROMOTION_MODE;
   overall_status: BatchOverallStatus;
+  /** Pedido explícito a children crawl/enrich — ver `childEvidenceEnv`. */
+  child_log_format: typeof BVR_CHILD_LOG_FORMAT;
+  /** Stream que 1B agrega: stdout JSONL de capture+enrich, nunca texto pretty. */
+  evidence_transport: typeof BVR_EVIDENCE_TRANSPORT;
 }
 
 export interface BatchSummary {
@@ -477,6 +500,7 @@ export function createLiveBatchAdapters(repoRoot: string): BatchRunnerAdapters {
           `--max-notas=${input.maxNotas}`,
         ],
         cwd: repoRoot,
+        env: childEvidenceEnv(),
       }),
     enrich: async (input, guard) =>
       guard.run({
@@ -491,6 +515,7 @@ export function createLiveBatchAdapters(repoRoot: string): BatchRunnerAdapters {
           '--only-missing-clean-text',
         ],
         cwd: repoRoot,
+        env: childEvidenceEnv(),
       }),
     compose: async (input) => composeFromArtifacts(input),
   };
@@ -872,6 +897,8 @@ export async function runBatch(options: BatchRunnerOptions): Promise<BatchRunOut
     scope_hash: scopeHash,
     promotion_mode: BATCH_RUNNER_PROMOTION_MODE,
     overall_status: 'RUNNING',
+    child_log_format: BVR_CHILD_LOG_FORMAT,
+    evidence_transport: BVR_EVIDENCE_TRANSPORT,
   };
 
   const acquired = acquireLock({
@@ -1090,9 +1117,7 @@ export async function runBatch(options: BatchRunnerOptions): Promise<BatchRunOut
           });
           writeJson(join(chunkDir, 'after.json'), after);
 
-          const runLogText = [captureResult.stdout, captureResult.stderr, enrichResult.stdout, enrichResult.stderr]
-            .filter((s) => s.length > 0)
-            .join('\n');
+          const runLogText = composeChildEvidenceLogText(captureResult.stdout, enrichResult.stdout);
           writeFileSync(join(chunkDir, 'run.log'), runLogText, 'utf-8');
 
           const evidence = await adapters.compose({
