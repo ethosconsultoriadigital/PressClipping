@@ -452,6 +452,21 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED: readonly ShadowMedioDaily[] = [
   { medio_id: 'MED-0202', nombre: 'A Fondo Jalisco', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0203', nombre: 'Siker', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0204', nombre: 'Página 24 Jalisco', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  // ── OPERATIONALIZATION-BATCH-01 (2026-09-17) ───────────────────────────────
+  // 10 medios B2 PASS Validator V1, RSS, evidence COMPLETE, ELIGIBLE_FOR_PROMOTION,
+  // human-reviewed, NOT_IN_CRON. Alta neta al daily-validated (máx. 10 por fase).
+  // No toca base / nacional B / crisis. max_notas_shadow=15 igual que el lote RSS
+  // 200 MEDIA MILESTONE. Captura real queda pendiente del próximo schedule diario.
+  { medio_id: 'MED-0029', nombre: 'La Jornada', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0039', nombre: 'El Occidental', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0057', nombre: 'Linea Directa Portal', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0069', nombre: 'El Sol de San Luis', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0099', nombre: 'BCS Noticias', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0115', nombre: 'DK 1250', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0126', nombre: 'Noticias PV', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0149', nombre: 'Líderes Mexicanos', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0150', nombre: 'Coolhuntermx', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0168', nombre: 'López Dóriga Digital', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
 ] as const;
 
 /**

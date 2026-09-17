@@ -38,6 +38,9 @@ describe('config Tier Daily Validated — dedupe', () => {
     'MED-0192', 'MED-0193', 'MED-0194', 'MED-0195', 'MED-0196', 'MED-0197', 'MED-0198', 'MED-0199',
     // Mery Jalisco Priority (2026-07-29): 4 medios regionales Jalisco.
     'MED-0201', 'MED-0202', 'MED-0203', 'MED-0204',
+    // OPERATIONALIZATION-BATCH-01 (2026-09-17): 10 RSS PASS Validator, net-new.
+    'MED-0029', 'MED-0039', 'MED-0057', 'MED-0069', 'MED-0099',
+    'MED-0115', 'MED-0126', 'MED-0149', 'MED-0150', 'MED-0168',
   ].sort();
 
   it('la lista contiene todos los medios activos del tier incluyendo los lotes NEWS LAKE 200 FINAL PUSH + 200 MEDIA MILESTONE + Mery Jalisco Priority', () => {
