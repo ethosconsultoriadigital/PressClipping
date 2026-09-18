@@ -19,7 +19,7 @@ import {
   type PromocionUpdate,
 } from '../crawlers/promocion.js';
 import { childLogger } from '../utils/logger.js';
-import { ejecutarPorLotes } from '../utils/chunk.js';
+import { chunkArray, ejecutarPorLotes } from '../utils/chunk.js';
 import {
   type MencionExportRow,
   SELECT_MENCION_EXPORT,
@@ -128,6 +128,34 @@ export async function getMediosActivos(): Promise<MedioRow[]> {
     );
   }
   return (data ?? []) as unknown as MedioRow[];
+}
+
+/**
+ * Lee la EXISTENCIA en catálogo de un conjunto de `medio_id`, sin filtrar por
+ * `activo`. Alimenta la invariante cron→catálogo
+ * (`src/config/cronCatalogIntegrity.ts`): un medio inactivo existe y NO es
+ * huérfano, así que `getMediosActivos()` no sirve para este chequeo.
+ *
+ * Lanza si la lectura falla; el llamador traduce el throw a INFRA_ERROR y
+ * nunca a "catálogo vacío".
+ */
+export async function getCatalogoMediosPorIds(
+  medioIds: readonly string[],
+): Promise<Array<{ medio_id: string; activo: boolean | null }>> {
+  if (medioIds.length === 0) return [];
+  const out: Array<{ medio_id: string; activo: boolean | null }> = [];
+  for (const lote of chunkArray([...new Set(medioIds)], CHUNK)) {
+    const { data, error } = await retryPostgrest('getCatalogoMediosPorIds', () =>
+      getSupabase().from('medios').select('medio_id, activo').in('medio_id', lote),
+    );
+    if (error) {
+      throw new Error(
+        `No se pudo leer el catálogo de medios: ${describeSupabaseError(error)}. ${hintForSupabaseError(error)}`,
+      );
+    }
+    out.push(...((data ?? []) as unknown as Array<{ medio_id: string; activo: boolean | null }>));
+  }
+  return out;
 }
 
 /** Actualiza el estado de scraping de un medio tras procesarlo. */

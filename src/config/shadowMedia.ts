@@ -443,15 +443,21 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED: readonly ShadowMedioDaily[] = [
   { medio_id: 'MED-0198', nombre: '8 Columnas', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0199', nombre: 'DesInformémonos', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   // ── Mery Jalisco Priority (2026-07-29) ─────────────────────────────────────
-  // 4 medios Jalisco/regional con señal histórica de Mery Pozos — nuevos en catálogo.
+  // Medios Jalisco/regional con señal histórica de Mery Pozos — nuevos en catálogo.
   // Los 5 medios ACTIVAR_EN_CRON (UDG TV/Canal 44, Notisistema, Tráfico ZMG,
   // Vallarta Independiente, Partidero) ya existen en Supabase; ejecutar:
   //   npm run catalog-mery-jalisco-priority -- --upsert --patch-shadowmedia
   // para descubrir sus IDs y agregar sus entradas a este bloque automáticamente.
+  //
+  // MED-0204 (Página 24 Jalisco) se RETIRA del cron (2026-09-18): quedó como
+  // PLANNED_NOT_ONBOARDED — el alta del lote nunca insertó su fila en `medios`
+  // (RSS y sitio base con timeout 3/3, ver docs/MERY_GAP_CLOSURE_2026-08-24.md
+  // §3.2). Configurarlo sin fila de catálogo hacía que el tier pidiera 48 IDs y
+  // resolviera 47 en silencio. Reonboardearlo exige alta de fuente aprobada, no
+  // reponer la entrada aquí.
   { medio_id: 'MED-0201', nombre: 'Semanario Conciencia Pública', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0202', nombre: 'A Fondo Jalisco', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0203', nombre: 'Siker', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
-  { medio_id: 'MED-0204', nombre: 'Página 24 Jalisco', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   // ── OPERATIONALIZATION-BATCH-01 (2026-09-17) ───────────────────────────────
   // 10 medios B2 PASS Validator V1, RSS, evidence COMPLETE, ELIGIBLE_FOR_PROMOTION,
   // human-reviewed, NOT_IN_CRON. Alta neta al daily-validated (máx. 10 por fase).

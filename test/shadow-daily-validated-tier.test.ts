@@ -36,8 +36,10 @@ describe('config Tier Daily Validated — dedupe', () => {
     // 200 MEDIA MILESTONE (2026-07-22): 8 nuevos A_PUBLICO_FACIL RSS.
     // Eje Central (MED-0200) NO en daily-validated — alto volumen, evaluar primero.
     'MED-0192', 'MED-0193', 'MED-0194', 'MED-0195', 'MED-0196', 'MED-0197', 'MED-0198', 'MED-0199',
-    // Mery Jalisco Priority (2026-07-29): 4 medios regionales Jalisco.
-    'MED-0201', 'MED-0202', 'MED-0203', 'MED-0204',
+    // Mery Jalisco Priority (2026-07-29): medios regionales Jalisco.
+    // MED-0204 (Página 24 Jalisco) retirado del cron el 2026-09-18:
+    // PLANNED_NOT_ONBOARDED, nunca tuvo fila en `medios`.
+    'MED-0201', 'MED-0202', 'MED-0203',
     // OPERATIONALIZATION-BATCH-01 (2026-09-17): 10 RSS PASS Validator, net-new.
     'MED-0029', 'MED-0039', 'MED-0057', 'MED-0069', 'MED-0099',
     'MED-0115', 'MED-0126', 'MED-0149', 'MED-0150', 'MED-0168',
@@ -50,6 +52,11 @@ describe('config Tier Daily Validated — dedupe', () => {
 
   it('NO incluye boilerplate MED-0118 (El Respetable)', () => {
     expect(SHADOW_MEDIOS_DAILY_VALIDATED.map((m) => m.medio_id)).not.toContain('MED-0118');
+  });
+
+  it('NO incluye MED-0204 (Página 24 Jalisco): PLANNED_NOT_ONBOARDED, sin fila en `medios`', () => {
+    expect(SHADOW_MEDIOS_DAILY_VALIDATED.map((m) => m.medio_id)).not.toContain('MED-0204');
+    expect(mediosDailyNetNew().map((m) => m.medio_id)).not.toContain('MED-0204');
   });
 
   it('net-new excluye cualquier medio ya cubierto por base/nacional B/crisis', () => {
