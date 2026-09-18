@@ -46,6 +46,10 @@ import {
 import { runEnrichDrain } from '../src/enrichers/enrichDrain.js';
 import { crearProcesadorDeArticulos } from '../src/enrichers/drainArticle.js';
 import {
+  articleEnrichBloqueado,
+  particionarMediosParaEnrich,
+} from '../src/config/cloudEnrichExclusions.js';
+import {
   getCatalogoMediosPorIds,
   getNoticiasDrainPage,
   updateNoticiaDrain,
@@ -156,7 +160,7 @@ function findNum(lines: Record<string, unknown>[], field: string): number | unde
  * sesión (attempted_this_run, cursores, fairness) solo tiene sentido si vive
  * en una sola memoria.
  */
-async function ejecutarDrain(medioIds: string[], jobStartedAt: string | null) {
+async function ejecutarDrain(medioIds: readonly string[], jobStartedAt: string | null) {
   const ahora = new Date();
   const jobStart = resolverJobStart({ explicito: jobStartedAt, now: ahora });
   const budget = resolverTimeBudget();
@@ -182,6 +186,9 @@ async function ejecutarDrain(medioIds: string[], jobStartedAt: string | null) {
       processArticle,
       persist: updateNoticiaDrain,
       now: () => new Date(),
+      // Un 403 de un medio bloqueado en cloud no se reprograma a ciegas:
+      // queda BLOCKED_REVIEW para que no vuelva a gastar intentos cada ciclo.
+      isEnvironmentBlocked: (medioId) => articleEnrichBloqueado(medioId),
     },
     opciones,
   );
@@ -293,16 +300,27 @@ async function main(): Promise<void> {
     // 2. Enrich AISLADO por medio (no toca backlog global). Una sola
     // invocación por corrida: legacy mientras ENRICH_DRAIN_V1 esté OFF, drain
     // acotado cuando se active.
+    //
+    // La captura (paso 1) usa la lista COMPLETA; el enrich excluye los medios
+    // con article enrich bloqueado en este entorno (hoy: MED-0029 en cloud).
+    const enrichMedios = particionarMediosParaEnrich(medios.map((m) => m.medio_id));
+    if (enrichMedios.excluidos.length > 0) {
+      logger.warn(
+        { excluidos: enrichMedios.excluidos, captura: 'ACTIVA' },
+        'Article enrich bloqueado en este entorno para algunos medios (su captura sigue activa).',
+      );
+    }
+    const enrichMedioIds = enrichMedios.permitidos.join(',');
     const enrich = await ejecutarPasoEnrich({
       drainEnabled: drainHabilitado(),
       runLegacyEnrich: async () => {
         // --recent-first prioriza notas recientes (ver fix equivalente en
         // run-live-comparison.ts).
         const r = await runStep('2. enrich aislado (legacy)', 'scripts/enrich-news.ts',
-          [`--medio-ids=${medioIds}`, `--limit=${args.enrichLimit}`, '--recent-first', '--only-pending-mentions', '--only-missing-clean-text']);
+          [`--medio-ids=${enrichMedioIds}`, `--limit=${args.enrichLimit}`, '--recent-first', '--only-pending-mentions', '--only-missing-clean-text']);
         return { code: r.code };
       },
-      runDrain: () => ejecutarDrain(medioIds.split(','), args.jobStartedAt),
+      runDrain: () => ejecutarDrain(enrichMedios.permitidos, args.jobStartedAt),
     });
     logger.info(
       {
