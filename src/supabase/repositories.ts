@@ -9,6 +9,7 @@ import {
   retryPostgrest,
   describeSupabaseError,
   hintForSupabaseError,
+  classifySupabaseError,
   type SupabaseErrorLike,
 } from './errors.js';
 import {
@@ -837,6 +838,35 @@ export async function getNoticiasDrainPage(
     );
   }
   return (data ?? []) as unknown as NoticiaDrainCandidateRow[];
+}
+
+/**
+ * ¿La migración 0014 (metadata de reintento) está aplicada en la base viva?
+ *
+ * Distingue los tres casos que importan antes de correr un drain: aplicada,
+ * NO aplicada (columna inexistente) e indeterminada por fallo de base. Nunca
+ * intenta aplicarla.
+ */
+export async function verificarMigracionDrain(): Promise<{
+  estado: 'APLICADA' | 'NO_APLICADA' | 'INDETERMINADA';
+  detalle: string;
+}> {
+  const { error } = await retryPostgrest('verificarMigracionDrain', () =>
+    getSupabase()
+      .from('noticias')
+      .select('noticia_id, enrich_last_attempt_at, enrich_next_attempt_at, enrich_failure_class')
+      .limit(1),
+  );
+  if (!error) return { estado: 'APLICADA', detalle: 'Columnas de drain presentes en `noticias`.' };
+  if (classifySupabaseError(error) === 'missing_column') {
+    return {
+      estado: 'NO_APLICADA',
+      detalle:
+        'Faltan las columnas enrich_last_attempt_at / enrich_next_attempt_at / enrich_failure_class. ' +
+        'Aplica supabase/migrations/0014_enrich_retry_metadata.sql antes de correr el drain.',
+    };
+  }
+  return { estado: 'INDETERMINADA', detalle: describeSupabaseError(error) };
 }
 
 /** Campos de contenido + metadata de reintento que el drain puede escribir. */

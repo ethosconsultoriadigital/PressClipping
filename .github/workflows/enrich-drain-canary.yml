@@ -1,0 +1,95 @@
+# ============================================================================
+# ENRICH DRAIN V1 — CANARY MANUAL
+# ----------------------------------------------------------------------------
+# SOLO `workflow_dispatch`. NO tiene `schedule` y NO debe tenerlo: este
+# workflow existe para observar el drain una vez, sobre medios explícitos, en
+# el entorno cloud, antes de plantear siquiera encenderlo en un cron.
+#
+# Corre ÚNICAMENTE la ruta de enrich drain. NO hace: crawl del tier, detect,
+# comparativo, Sheets, Twilio, correo ni ningún output de cliente.
+#
+# Precondiciones que el script verifica y que NO auto-repara:
+#   1. `media_ids` explícito (no existe default "todos los medios").
+#   2. Migración 0014_enrich_retry_metadata aplicada en la base viva.
+#   3. Los medios pedidos existen en el catálogo `medios`.
+#   4. ENRICH_DRAIN_V1 encendido (aquí, solo aquí).
+#
+# Si la migración no está aplicada, el job FALLA con mensaje legible.
+#
+# Secrets requeridos: SUPABASE_URL · SUPABASE_SERVICE_ROLE_KEY
+# (no usa Google Sheets: el canary no escribe outputs de cliente).
+# ============================================================================
+name: enrich-drain-canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      media_ids:
+        description: 'OBLIGATORIO. medio_id separados por coma (ej. MED-0039,MED-0069).'
+        required: true
+      page_size:
+        description: 'Tamaño de página/buffer del drain (default 100).'
+        required: false
+        default: ''
+      time_budget_minutes:
+        description: 'Presupuesto total del job en minutos (conservador, default 15).'
+        required: false
+        default: '15'
+      fresh_share:
+        description: 'Cuota de la cola FRESH entre 0 y 1 (default 0.7).'
+        required: false
+        default: ''
+
+concurrency:
+  group: enrich-drain-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    name: Enrich drain canary (manual, solo drain, medios explícitos)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      LOG_FORMAT: json
+      RUN_BY: github-actions-enrich-drain-canary
+      # Único lugar del repositorio donde el flag se enciende, y solo bajo
+      # dispatch manual con medios explícitos.
+      ENRICH_DRAIN_V1: '1'
+    steps:
+      # Primer paso: el presupuesto de tiempo cuenta el job completo.
+      - name: Registrar inicio del job
+        run: echo "JOB_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Validar media_ids
+        run: |
+          IDS="${{ github.event.inputs.media_ids }}"
+          if [ -z "$(echo "$IDS" | tr -d '[:space:],')" ]; then
+            echo "::error::media_ids es obligatorio. El canary nunca corre sobre todos los medios."
+            exit 2
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Enrich drain canary
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+          JOB_TIMEOUT_MINUTES: ${{ github.event.inputs.time_budget_minutes || '15' }}
+        run: |
+          ARGS="--media-ids=${{ github.event.inputs.media_ids }} --job-started-at=$JOB_STARTED_AT"
+          if [ -n "${{ github.event.inputs.page_size }}" ]; then
+            ARGS="$ARGS --page-size=${{ github.event.inputs.page_size }}"
+          fi
+          if [ -n "${{ github.event.inputs.fresh_share }}" ]; then
+            ARGS="$ARGS --fresh-share=${{ github.event.inputs.fresh_share }}"
+          fi
+          npm run enrich-drain-canary -- $ARGS

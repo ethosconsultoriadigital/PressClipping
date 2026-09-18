@@ -95,6 +95,7 @@
     "update-media-coverage-jumex-cov": "tsx scripts/update-media-coverage-jumex-cov.ts",
     "update-media-coverage-parity": "tsx scripts/update-media-coverage-parity.ts",
     "shadow-daily-validated-tier": "tsx scripts/run-shadow-daily-validated-tier.ts",
+    "enrich-drain-canary": "tsx scripts/run-enrich-drain-canary.ts",
     "send-internal-alerts": "tsx scripts/send-internal-alerts.ts",
     "import-pc-media-catalog": "tsx scripts/import-pressclipping-media-catalog.ts",
     "audit-extraction-quality": "tsx scripts/audit-extraction-quality.ts",
