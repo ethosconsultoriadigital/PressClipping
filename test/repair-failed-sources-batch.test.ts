@@ -9,10 +9,10 @@ import {
 } from '../scripts/repair-failed-sources-batch.js';
 
 describe('repair-failed-sources-batch', () => {
-  it('tiene 12 patches de IDs únicos', () => {
+  it('tiene 13 patches de IDs únicos', () => {
     const ids = REPAIR_PATCHES.map((p) => p.medio_id);
-    expect(ids).toHaveLength(12);
-    expect(new Set(ids).size).toBe(12);
+    expect(ids).toHaveLength(13);
+    expect(new Set(ids).size).toBe(13);
   });
 
   it('no incluye medios NXDOMAIN, paywall Reforma ni sin fuente pública', () => {

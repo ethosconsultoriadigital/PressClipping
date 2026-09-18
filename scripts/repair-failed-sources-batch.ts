@@ -137,6 +137,15 @@ export const REPAIR_PATCHES: RepairPatch[] = [
       'sitemap.xml es índice de secciones (home/portada/ciudad), lastmod global del día; crawl 30/30 duplicados, lake n7=0. ' +
       'robots.txt declara sitemapforgoogle.xml: news sitemap del mismo host con notas del día (título + publication_date).',
   },
+  {
+    medio_id: 'MED-0119',
+    nombre_medio: 'Conciencia Publica',
+    metodo_extraccion: 'RSS',
+    rss_url: 'https://concienciapublica.com.mx/feed/',
+    motivo:
+      'sitemap.xml es índice Yoast (post+category+tag). El crawl mezcla CollectionPage /category/ y /tag/ con notas; body 0.60. ' +
+      '/feed/ WordPress entrega 10/10 POST recientes del mismo host, sin archivos de taxonomía.',
+  },
 ];
 
 export interface RepairBatchArgs {
