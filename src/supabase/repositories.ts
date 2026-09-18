@@ -9,7 +9,13 @@ import {
   retryPostgrest,
   describeSupabaseError,
   hintForSupabaseError,
+  type SupabaseErrorLike,
 } from './errors.js';
+import {
+  buildDrainPageQueryPlan,
+  type DrainPageQueryPlan,
+  type DrainPageRequest,
+} from '../enrichers/enrichDrainQuery.js';
 import type { Medio, Cliente, Keyword, ConfigRow } from '../types/schemas.js';
 import type { NoticiaInsert } from '../normalizers/noticia.js';
 import {
@@ -750,6 +756,117 @@ export async function getNoticiasParaEnriquecer(
   const { data, error } = await query;
   if (error) throw new Error(`No se pudieron leer noticias para enriquecer: ${error.message}`);
   return (data ?? []) as unknown as NoticiaEnriquecibleRow[];
+}
+
+// =============================================================================
+// ENRICH DRAIN V1 — lectura keyset y escritura confirmada
+// =============================================================================
+//
+// Ruta NUEVA y separada de `getNoticiasParaEnriquecer` (que sigue sirviendo al
+// enrich legacy sin cambios). La elegibilidad y el keyset viven en
+// `src/enrichers/enrichDrainQuery.ts` (puro); aquí solo se traduce el plan a
+// PostgREST.
+
+/** Fila del drain: lo que necesita el enrich + cursor + metadata de reintento. */
+export interface NoticiaDrainCandidateRow extends NoticiaEnriquecibleRow {
+  created_at: string | null;
+  enrich_last_attempt_at: string | null;
+  enrich_next_attempt_at: string | null;
+  enrich_failure_class: string | null;
+}
+
+/** Builder mínimo de PostgREST necesario para aplicar un plan de drain. */
+export interface DrainQueryBuilder {
+  select: (columns: string) => DrainQueryBuilder;
+  is: (column: string, value: null) => DrainQueryBuilder;
+  lte: (column: string, value: string) => DrainQueryBuilder;
+  gte: (column: string, value: string) => DrainQueryBuilder;
+  lt: (column: string, value: string) => DrainQueryBuilder;
+  gt: (column: string, value: string) => DrainQueryBuilder;
+  in: (column: string, values: string[]) => DrainQueryBuilder;
+  or: (expression: string) => DrainQueryBuilder;
+  order: (column: string, opts: { ascending: boolean }) => DrainQueryBuilder;
+  limit: (n: number) => DrainQueryBuilder;
+}
+
+/**
+ * Aplica un plan de drain a un query builder. Exportado para poder verificar
+ * con un builder falso, en un test, que el plan se traduce entero (y que no se
+ * cuela un `range`/`offset`).
+ */
+export function aplicarPlanDrain<B extends DrainQueryBuilder>(
+  builder: B,
+  plan: DrainPageQueryPlan,
+): B {
+  let q = builder.select(plan.select) as B;
+  for (const filtro of plan.filters) {
+    switch (filtro.kind) {
+      case 'is': q = q.is(filtro.column, filtro.value) as B; break;
+      case 'lte': q = q.lte(filtro.column, filtro.value) as B; break;
+      case 'gte': q = q.gte(filtro.column, filtro.value) as B; break;
+      case 'lt': q = q.lt(filtro.column, filtro.value) as B; break;
+      case 'gt': q = q.gt(filtro.column, filtro.value) as B; break;
+      case 'in': q = q.in(filtro.column, filtro.values) as B; break;
+      case 'or': q = q.or(filtro.expression) as B; break;
+    }
+  }
+  for (const orden of plan.order) {
+    q = q.order(orden.column, { ascending: orden.ascending }) as B;
+  }
+  return q.limit(plan.limit) as B;
+}
+
+/**
+ * Lee UNA página keyset de candidatos del drain. Sin OFFSET y sin `NOT IN`: la
+ * continuidad la da el cursor (created_at, noticia_id) de la última fila leída.
+ */
+export async function getNoticiasDrainPage(
+  req: DrainPageRequest,
+): Promise<NoticiaDrainCandidateRow[]> {
+  const plan = buildDrainPageQueryPlan(req);
+  const { data, error } = await retryPostgrest('getNoticiasDrainPage', () =>
+    aplicarPlanDrain(
+      getSupabase().from('noticias') as unknown as DrainQueryBuilder,
+      plan,
+    ) as unknown as PromiseLike<{ data: unknown; error: SupabaseErrorLike | null }>,
+  );
+  if (error) {
+    throw new Error(
+      `No se pudo leer la página del drain (${req.queue}): ${describeSupabaseError(error)}. ` +
+        hintForSupabaseError(error),
+    );
+  }
+  return (data ?? []) as unknown as NoticiaDrainCandidateRow[];
+}
+
+/** Campos de contenido + metadata de reintento que el drain puede escribir. */
+export interface NoticiaDrainUpdate extends NoticiaEnriquecidaUpdate {
+  enrich_last_attempt_at?: string | null;
+  enrich_next_attempt_at?: string | null;
+  enrich_failure_class?: string | null;
+}
+
+/**
+ * Escribe el resultado de un intento del drain y CONFIRMA la escritura: el
+ * contrato de éxito exige fila actualizada, no "update preparado". Devuelve
+ * `false` si la fila no volvió (p. ej. borrada entre lectura y escritura).
+ */
+export async function updateNoticiaDrain(
+  noticiaId: string,
+  fields: NoticiaDrainUpdate,
+): Promise<boolean> {
+  if (Object.keys(fields).length === 0) return false;
+  const { data, error } = await getSupabase()
+    .from('noticias')
+    .update(fields)
+    .eq('noticia_id', noticiaId)
+    .select('noticia_id');
+  if (error) {
+    throw new Error(
+      `No se pudo escribir el intento de drain de ${noticiaId}: ${describeSupabaseError(error)}`,
+    );
+  }
+  return Array.isArray(data) && data.length > 0;
 }
 
 /**
