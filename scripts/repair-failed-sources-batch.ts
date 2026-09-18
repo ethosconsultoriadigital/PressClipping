@@ -128,6 +128,15 @@ export const REPAIR_PATCHES: RepairPatch[] = [
       'sitemap.xml da 403 intermitente (WAF). /rss/edicion.xml entrega RSS público con 104/104 notas del día (2026-09-02). ' +
       'No se toca Grupo Reforma (Mural/Reforma/El Norte): D_PAGO_CONVENIO_API.',
   },
+  {
+    medio_id: 'MED-0055',
+    nombre_medio: 'Noroeste',
+    metodo_extraccion: 'SITEMAP',
+    sitemap_url: 'https://www.noroeste.com.mx/sitemapforgoogle.xml',
+    motivo:
+      'sitemap.xml es índice de secciones (home/portada/ciudad), lastmod global del día; crawl 30/30 duplicados, lake n7=0. ' +
+      'robots.txt declara sitemapforgoogle.xml: news sitemap del mismo host con notas del día (título + publication_date).',
+  },
 ];
 
 export interface RepairBatchArgs {
