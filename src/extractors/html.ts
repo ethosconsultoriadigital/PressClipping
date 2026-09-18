@@ -14,7 +14,7 @@
  * manejo de error por URL (nunca lanza: encapsula el fallo en el resultado).
  */
 import * as cheerio from 'cheerio';
-import { fetchText } from '../utils/http.js';
+import { fetchTextWithMeta, HttpRequestError, type HttpFailureKind } from '../utils/http.js';
 import { tituloDesdeUrl } from './titleFromUrl.js';
 
 /** Método con el que se obtuvo el título. */
@@ -765,11 +765,31 @@ export function extractFromHtml(
 export interface FetchExtractOpts extends ExtractOpts {
   /** Timeout por URL en ms (default 10000). */
   timeoutMs?: number;
+  /**
+   * El timeout cubre también la lectura del cuerpo. Default `false` (legacy:
+   * el temporizador muere al recibir cabeceras). El drain lo activa para que
+   * su presupuesto por artículo sea real.
+   */
+  boundBodyRead?: boolean;
+  /** Tope duro de intentos HTTP. El drain usa 1: el reintento es persistente. */
+  maxAttempts?: number;
+}
+
+/** Detalle estructurado del fallo HTTP, para clasificarlo sin leer el mensaje. */
+export interface FetchExtractHttpError {
+  kind: HttpFailureKind;
+  status: number | null;
+  retryAfterSeconds: number | null;
+  finalUrl: string | null;
 }
 
 export interface FetchExtractResult extends HtmlExtract {
   ok: boolean;
   error: string | null;
+  /** Presente solo cuando el fallo vino del transporte HTTP. */
+  httpError?: FetchExtractHttpError;
+  /** URL final tras redirecciones, cuando la descarga llegó a completarse. */
+  finalUrl?: string | null;
 }
 
 /** Timeout por defecto de la descarga de una URL para enriquecer. */
@@ -804,21 +824,33 @@ export async function fetchAndExtract(
   };
 
   try {
-    const html = await fetchText(url, {
+    const { text: html, finalUrl } = await fetchTextWithMeta(url, {
       timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      boundBodyRead: opts.boundBodyRead,
+      maxAttempts: opts.maxAttempts,
     });
     const extracto = extractFromHtml(html, url, opts);
-    return { ...extracto, ok: true, error: null };
+    return { ...extracto, ok: true, error: null, finalUrl };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     // Aun en fallo de red intentamos un título mínimo desde el slug.
     const fallback = tituloDesdeUrl(url);
-    return {
+    const base: FetchExtractResult = {
       ...vacio,
       titulo: fallback,
       metodo_titulo: fallback ? 'fallback_url_slug' : null,
       ok: false,
       error: msg,
     };
+    if (err instanceof HttpRequestError) {
+      base.httpError = {
+        kind: err.kind,
+        status: err.status,
+        retryAfterSeconds: err.retryAfterSeconds,
+        finalUrl: err.finalUrl,
+      };
+      base.finalUrl = err.finalUrl;
+    }
+    return base;
   }
 }
