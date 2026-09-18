@@ -316,7 +316,7 @@ async function main(): Promise<void> {
       runLegacyEnrich: async () => {
         // --recent-first prioriza notas recientes (ver fix equivalente en
         // run-live-comparison.ts).
-        const r = await runStep('2. enrich aislado (legacy)', 'scripts/enrich-news.ts',
+        const r = await runStep('2. enrich aislado', 'scripts/enrich-news.ts',
           [`--medio-ids=${enrichMedioIds}`, `--limit=${args.enrichLimit}`, '--recent-first', '--only-pending-mentions', '--only-missing-clean-text']);
         return { code: r.code };
       },

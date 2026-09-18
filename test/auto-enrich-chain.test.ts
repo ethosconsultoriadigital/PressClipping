@@ -62,11 +62,14 @@ describe('auto-enrich chain — tiers aislados (nacional B / daily-validated / c
     expect(bloque).toContain('--recent-first');
   });
 
+  // `enrichMedioIds` (daily-validated, 2026-09-18) es la MISMA lista del tier
+  // menos los medios con article enrich bloqueado en cloud (MED-0029): sigue
+  // siendo una lista acotada del ciclo, nunca la cola global.
   it.each(archivos)('%s: sigue acotado por --medio-ids (no toca backlog global)', (rel) => {
     const src = leer(rel);
     const idxEnrich = src.indexOf("enrich aislado'");
     const bloque = src.slice(idxEnrich, idxEnrich + 300);
-    expect(bloque).toMatch(/--medio-ids=\$\{medioIds\}/);
+    expect(bloque).toMatch(/--medio-ids=\$\{(medioIds|enrichMedioIds)\}/);
   });
 });
 
