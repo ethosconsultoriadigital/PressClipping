@@ -40,14 +40,17 @@ import {
 } from './enrichRetryPolicy.js';
 import type { NoticiaEnriquecidaUpdate } from './enrichNews.js';
 
-/** Fila candidata tal como la entrega el repositorio del drain. */
+/**
+ * Fila candidata tal como la entrega el repositorio del drain. Solo se
+ * declaran los campos que el coordinador usa (cursor, atribución, URL); el
+ * resto del contenido viaja intacto hasta el extractor.
+ */
 export interface DrainCandidateRow {
   noticia_id: string;
   medio_id: string | null;
   url_original: string | null;
   created_at: string | null;
   texto_nota_limpia: string | null;
-  [extra: string]: unknown;
 }
 
 /** Campos de contenido + metadata de reintento que el drain escribe. */

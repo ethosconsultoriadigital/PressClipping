@@ -31,6 +31,25 @@ import { mediosDailyNetNew, type ShadowMedioDaily } from '../src/config/shadowMe
 import { evaluarGateDaily } from '../src/matching/shadowDailyGate.js';
 import { mergeOutputRowsByKey } from '../src/sheets/write.js';
 import { OUTPUT_TABS } from '../src/sheets/client.js';
+import {
+  drainHabilitado,
+  resolverJobStart,
+  resolverTimeBudget,
+  calcularDeadlineDrain,
+  resolverOpcionesDrain,
+} from '../src/config/enrichDrainConfig.js';
+import {
+  preflightCronCatalogo,
+  ejecutarPasoEnrich,
+  etiquetaDecisionEnrich,
+} from '../src/enrichers/drainRunner.js';
+import { runEnrichDrain } from '../src/enrichers/enrichDrain.js';
+import { crearProcesadorDeArticulos } from '../src/enrichers/drainArticle.js';
+import {
+  getCatalogoMediosPorIds,
+  getNoticiasDrainPage,
+  updateNoticiaDrain,
+} from '../src/supabase/repositories.js';
 
 const DEFAULT_XML_URL = 'https://tabla.ethosconsultoriadigital.workers.dev/read-xml';
 
@@ -45,6 +64,11 @@ interface DailyArgs {
   dryRun: boolean;
   /** Actualiza 08_Cobertura_Medios con el resultado del ciclo (default true). */
   update08: boolean;
+  /**
+   * Inicio real del JOB (ISO), no del script: el workflow lo registra antes
+   * del setup pesado. Solo lo usa el deadline del drain.
+   */
+  jobStartedAt: string | null;
 }
 
 function parseArgs(argv: string[]): DailyArgs {
@@ -63,6 +87,7 @@ function parseArgs(argv: string[]): DailyArgs {
     appendMetricsHistory: false,
     dryRun: false,
     update08: true,
+    jobStartedAt: null,
   };
   for (const arg of argv) {
     if (!arg.startsWith('--')) continue;
@@ -78,6 +103,7 @@ function parseArgs(argv: string[]): DailyArgs {
       case 'detect-limit': out.detectLimit = Number(val) || out.detectLimit; break;
       case 'output': out.output = (val as 'console' | 'sheet') || out.output; break;
       case 'append-metrics-history': out.appendMetricsHistory = true; break;
+      case 'job-started-at': out.jobStartedAt = val || null; break;
       case 'dry-run': out.dryRun = true; break;
       case 'no-update-08': out.update08 = false; break;
       // Confirmaciones de seguridad (no habilitan nada):
@@ -123,6 +149,42 @@ function runStep(label: string, script: string, args: string[]): Promise<StepRes
 function findNum(lines: Record<string, unknown>[], field: string): number | undefined {
   for (const l of lines) if (typeof l[field] === 'number') return l[field] as number;
   return undefined;
+}
+
+/**
+ * UNA sesión de drain, en ESTE proceso. No hay procesos hijos: el estado de la
+ * sesión (attempted_this_run, cursores, fairness) solo tiene sentido si vive
+ * en una sola memoria.
+ */
+async function ejecutarDrain(medioIds: string[], jobStartedAt: string | null) {
+  const ahora = new Date();
+  const jobStart = resolverJobStart({ explicito: jobStartedAt, now: ahora });
+  const budget = resolverTimeBudget();
+  const deadline = calcularDeadlineDrain({ jobStart: jobStart.at, now: ahora, budget });
+  const opciones = resolverOpcionesDrain({ deadline, medioIds });
+
+  logger.info(
+    {
+      job_start: jobStart.at.toISOString(),
+      job_start_source: jobStart.source,
+      deadline: deadline.toISOString(),
+      budget,
+      page_size: opciones.pageSize,
+      fresh_share: opciones.freshShare,
+    },
+    'ENRICH DRAIN V1 activo: iniciando sesión única',
+  );
+
+  const processArticle = crearProcesadorDeArticulos();
+  return runEnrichDrain(
+    {
+      fetchPage: getNoticiasDrainPage,
+      processArticle,
+      persist: updateNoticiaDrain,
+      now: () => new Date(),
+    },
+    opciones,
+  );
 }
 
 /** Actualiza 08 con la decisión del ciclo para los medios net-new (sin romper filas). */
@@ -189,6 +251,35 @@ async function main(): Promise<void> {
   let decisionDetect = 'DRY_RUN';
 
   if (!args.dryRun) {
+    // 0. Preflight cron→catálogo: todo medio configurado DEBE existir en
+    // `medios`. Antes esto era un log informativo ("48 pedidos / 47 hallados")
+    // y por eso MED-0204 sobrevivió semanas en el cron sin fila en DB.
+    const preflight = await preflightCronCatalogo({
+      cargarCatalogo: getCatalogoMediosPorIds,
+      tiers: ['daily_validated'],
+    });
+    if (!preflight.ok) {
+      logger.error(
+        {
+          status: preflight.report.status,
+          configurados: preflight.report.configured_count,
+          catalogo: preflight.report.catalog_count,
+          huerfanos: preflight.report.orphan_ids,
+          error: preflight.report.error,
+        },
+        preflight.mensaje,
+      );
+      process.exit(preflight.exitCode ?? 2);
+    }
+    logger.info(
+      {
+        configurados: preflight.report.configured_count,
+        catalogo: preflight.report.catalog_count,
+        inactivos: preflight.report.inactive_ids,
+      },
+      preflight.mensaje,
+    );
+
     // 1. Crawl dirigido SOLO por medio_id del tier (fuente auto salvo forzada).
     const crawlArgs = [`--medio-ids=${medioIds}`, `--limit=${medios.length}`, `--max-notas=${maxNotas}`];
     // Si algún medio fuerza fuente específica y TODOS comparten la misma, se pasa.
@@ -199,10 +290,42 @@ async function main(): Promise<void> {
     const crawl = await runStep('1. crawl dirigido', 'scripts/crawl.ts', crawlArgs);
     if (crawl.code !== 0) logger.warn({ code: crawl.code }, 'Crawl daily terminó con código no-cero (continuamos).');
 
-    // 2. Enrich AISLADO por medio (no toca backlog global). --recent-first
-    // prioriza notas recientes (ver fix equivalente en run-live-comparison.ts).
-    await runStep('2. enrich aislado', 'scripts/enrich-news.ts',
-      [`--medio-ids=${medioIds}`, `--limit=${args.enrichLimit}`, '--recent-first', '--only-pending-mentions', '--only-missing-clean-text']);
+    // 2. Enrich AISLADO por medio (no toca backlog global). Una sola
+    // invocación por corrida: legacy mientras ENRICH_DRAIN_V1 esté OFF, drain
+    // acotado cuando se active.
+    const enrich = await ejecutarPasoEnrich({
+      drainEnabled: drainHabilitado(),
+      runLegacyEnrich: async () => {
+        // --recent-first prioriza notas recientes (ver fix equivalente en
+        // run-live-comparison.ts).
+        const r = await runStep('2. enrich aislado (legacy)', 'scripts/enrich-news.ts',
+          [`--medio-ids=${medioIds}`, `--limit=${args.enrichLimit}`, '--recent-first', '--only-pending-mentions', '--only-missing-clean-text']);
+        return { code: r.code };
+      },
+      runDrain: () => ejecutarDrain(medioIds.split(','), args.jobStartedAt),
+    });
+    logger.info(
+      {
+        modo: enrich.modo,
+        invocaciones: enrich.invocaciones,
+        decision: etiquetaDecisionEnrich(enrich),
+        continuar: enrich.continuar,
+        degradado: enrich.degradado,
+        motivo: enrich.motivo,
+        drain: enrich.drain,
+      },
+      `2. enrich (${enrich.modo}) completado`,
+    );
+    if (!enrich.continuar) {
+      // Un drain fatal NO puede convertirse en SHADOW_OK: se corta aquí, sin
+      // detect ni comparativo.
+      logger.error({ motivo: enrich.motivo }, 'Enrich fatal: se detiene el pipeline downstream.');
+      if (args.update08) await actualizar08(medios, etiquetaDecisionEnrich(enrich), FECHA);
+      process.exit(enrich.exitCode ?? 1);
+    }
+    if (enrich.degradado) {
+      logger.warn({ motivo: enrich.motivo }, 'Enrich degradado: queda deuda de texto para el próximo ciclo.');
+    }
 
     // 3. Detect dry-run AISLADO (gate de seguridad).
     const dry = await runStep('3. detect dry-run aislado', 'scripts/detect-mentions.ts',

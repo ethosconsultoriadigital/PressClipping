@@ -61,7 +61,19 @@ jobs:
       GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
       LOG_FORMAT: json
       RUN_BY: github-actions-shadow-daily-validated
+      # Debe coincidir con `timeout-minutes` de arriba: el deadline del enrich
+      # se calcula desde el inicio del JOB, no desde el arranque del script.
+      JOB_TIMEOUT_MINUTES: '25'
+      # ENRICH DRAIN V1 permanece APAGADO en el cron programado. La capacidad
+      # está construida y testeada, pero se activa por canary manual
+      # (.github/workflows/enrich-drain-canary.yml) tras aplicar la migración
+      # 0014. NO añadir ENRICH_DRAIN_V1 aquí sin revisión humana.
     steps:
+      # Primer paso del job, antes de checkout/setup/npm ci: el presupuesto de
+      # tiempo debe contar TODO el job, no solo la parte de scripts.
+      - name: Registrar inicio del job
+        run: echo "JOB_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
@@ -81,6 +93,7 @@ jobs:
           WINDOW="${{ github.event.inputs.window_hours || '48' }}"
           npm run shadow-daily-validated-tier -- \
             --window-hours=$WINDOW \
+            --job-started-at="$JOB_STARTED_AT" \
             --max-notas=30 \
             --output=sheet \
             --append-metrics-history \
