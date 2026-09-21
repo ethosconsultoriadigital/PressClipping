@@ -42,6 +42,11 @@ on:
         description: 'Tamaño de la ventana móvil en horas.'
         required: false
         default: '48'
+      use_enrich_drain_v1:
+        description: 'Usar Enrich Drain V1 en esta ejecución manual.'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: live-comparison-shadow   # MISMO grupo que base/nacional B/crisis → lock compartido de 05/07
@@ -64,11 +69,11 @@ jobs:
       # Debe coincidir con `timeout-minutes` de arriba: el deadline del enrich
       # se calcula desde el inicio del JOB, no desde el arranque del script.
       JOB_TIMEOUT_MINUTES: '25'
-      # ENRICH DRAIN V1: ON únicamente en el evento `schedule` de ESTE workflow.
-      # `workflow_dispatch` conserva el comportamiento previo (legacy enrich).
+      # ENRICH DRAIN V1: ON en `schedule`. En `workflow_dispatch` solo si el
+      # input `use_enrich_drain_v1` es true (default false = legacy enrich).
       # El default de aplicación sigue OFF; rollback = revertir esta línea.
       # No encender en otros tiers ni workflows.
-      ENRICH_DRAIN_V1: "${{ github.event_name == 'schedule' && '1' || '0' }}"
+      ENRICH_DRAIN_V1: "${{ (github.event_name == 'schedule' || inputs.use_enrich_drain_v1) && '1' || '0' }}"
     steps:
       # Primer paso del job, antes de checkout/setup/npm ci: el presupuesto de
       # tiempo debe contar TODO el job, no solo la parte de scripts.

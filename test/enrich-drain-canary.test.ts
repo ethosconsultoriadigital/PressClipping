@@ -84,15 +84,16 @@ describe('workflow del canary', () => {
     expect(WF).not.toMatch(/migrat/i);
   });
 
-  it('el daily validated no hardcodea ON: el flag queda scoped al evento schedule', () => {
+  it('el daily validated no hardcodea ON: schedule siempre, dispatch solo con checkbox', () => {
     const diario = readFileSync(
       join(process.cwd(), '.github/workflows/live-comparison-shadow-daily-validated.yml'),
       'utf-8',
     );
     expect(diario).toMatch(
-      /^\s*ENRICH_DRAIN_V1:\s*"\$\{\{\s*github\.event_name\s*==\s*'schedule'\s*&&\s*'1'\s*\|\|\s*'0'\s*\}\}"\s*$/m,
+      /^\s*ENRICH_DRAIN_V1:\s*"\$\{\{\s*\(github\.event_name\s*==\s*'schedule'\s*\|\|\s*inputs\.use_enrich_drain_v1\)\s*&&\s*'1'\s*\|\|\s*'0'\s*\}\}"\s*$/m,
     );
     expect(diario).not.toContain("ENRICH_DRAIN_V1: '1'");
+    expect(diario).toMatch(/use_enrich_drain_v1:[\s\S]*?type:\s*boolean[\s\S]*?default:\s*false/);
   });
 
   it('el script está registrado en package.json', () => {

@@ -1,7 +1,8 @@
 /**
  * S4 — integración del drain en el runner del tier diario.
  * El default de aplicación sigue OFF; el workflow daily-validated enciende
- * el flag SOLO en el evento `schedule`.
+ * el flag en `schedule` y, en `workflow_dispatch`, solo si
+ * `use_enrich_drain_v1` es true (default false = legacy).
  *
  * Verifica el feature flag, el reloj de inicio de job, el deadline, el
  * preflight cron→catálogo y el manejo de terminaciones.
@@ -276,11 +277,13 @@ describe('ejecutarPasoEnrich — manejo de terminaciones', () => {
   });
 });
 
-describe('workflow daily-validated — reloj de job y flag scoped a schedule', () => {
+describe('workflow daily-validated — reloj de job y flag scoped a schedule + checkbox', () => {
   const wf = readFileSync(
     join(process.cwd(), '.github/workflows/live-comparison-shadow-daily-validated.yml'),
     'utf-8',
   );
+  const FLAG_EXPR =
+    /^\s*ENRICH_DRAIN_V1:\s*"\$\{\{\s*\(github\.event_name\s*==\s*'schedule'\s*\|\|\s*inputs\.use_enrich_drain_v1\)\s*&&\s*'1'\s*\|\|\s*'0'\s*\}\}"\s*$/m;
 
   it('registra el inicio del job antes de checkout', () => {
     expect(wf).toContain('JOB_STARTED_AT=');
@@ -296,10 +299,17 @@ describe('workflow daily-validated — reloj de job y flag scoped a schedule', (
     expect(wf).toContain("JOB_TIMEOUT_MINUTES: '25'");
   });
 
-  it('enciende ENRICH_DRAIN_V1 solo en el evento schedule', () => {
-    expect(wf).toMatch(
-      /^\s*ENRICH_DRAIN_V1:\s*"\$\{\{\s*github\.event_name\s*==\s*'schedule'\s*&&\s*'1'\s*\|\|\s*'0'\s*\}\}"\s*$/m,
-    );
+  it('expone use_enrich_drain_v1 boolean default false en workflow_dispatch', () => {
+    const bloque = wf.slice(wf.indexOf('workflow_dispatch:'), wf.indexOf('concurrency:'));
+    expect(bloque).toContain('use_enrich_drain_v1:');
+    expect(bloque).toMatch(/type:\s*boolean/);
+    expect(bloque).toMatch(/default:\s*false/);
+    expect(bloque).toMatch(/required:\s*false/);
+    expect(bloque).toContain('window_hours:');
+  });
+
+  it('enciende ENRICH_DRAIN_V1 en schedule y en dispatch solo si el checkbox es true', () => {
+    expect(wf).toMatch(FLAG_EXPR);
     expect(wf).toContain('workflow_dispatch:');
     expect(wf).toMatch(/^\s*schedule:/m);
     expect(wf).not.toContain("ENRICH_DRAIN_V1: '1'");
