@@ -42,7 +42,7 @@ describe('workflow del canary', () => {
     }
   });
 
-  it('activa ENRICH_DRAIN_V1 solo dentro de este canary', () => {
+  it('enciende ENRICH_DRAIN_V1 de forma estática en este canary manual', () => {
     expect(WF).toContain("ENRICH_DRAIN_V1: '1'");
   });
 
@@ -84,12 +84,15 @@ describe('workflow del canary', () => {
     expect(WF).not.toMatch(/migrat/i);
   });
 
-  it('el cron programado del tier diario sigue SIN el flag', () => {
+  it('el daily validated no hardcodea ON: el flag queda scoped al evento schedule', () => {
     const diario = readFileSync(
       join(process.cwd(), '.github/workflows/live-comparison-shadow-daily-validated.yml'),
       'utf-8',
     );
-    expect(diario).not.toMatch(/^\s*ENRICH_DRAIN_V1:/m);
+    expect(diario).toMatch(
+      /^\s*ENRICH_DRAIN_V1:\s*"\$\{\{\s*github\.event_name\s*==\s*'schedule'\s*&&\s*'1'\s*\|\|\s*'0'\s*\}\}"\s*$/m,
+    );
+    expect(diario).not.toContain("ENRICH_DRAIN_V1: '1'");
   });
 
   it('el script está registrado en package.json', () => {

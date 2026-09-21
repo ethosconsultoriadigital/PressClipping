@@ -64,10 +64,11 @@ jobs:
       # Debe coincidir con `timeout-minutes` de arriba: el deadline del enrich
       # se calcula desde el inicio del JOB, no desde el arranque del script.
       JOB_TIMEOUT_MINUTES: '25'
-      # ENRICH DRAIN V1 permanece APAGADO en el cron programado. La capacidad
-      # está construida y testeada, pero se activa por canary manual
-      # (.github/workflows/enrich-drain-canary.yml) tras aplicar la migración
-      # 0014. NO añadir ENRICH_DRAIN_V1 aquí sin revisión humana.
+      # ENRICH DRAIN V1: ON únicamente en el evento `schedule` de ESTE workflow.
+      # `workflow_dispatch` conserva el comportamiento previo (legacy enrich).
+      # El default de aplicación sigue OFF; rollback = revertir esta línea.
+      # No encender en otros tiers ni workflows.
+      ENRICH_DRAIN_V1: "${{ github.event_name == 'schedule' && '1' || '0' }}"
     steps:
       # Primer paso del job, antes de checkout/setup/npm ci: el presupuesto de
       # tiempo debe contar TODO el job, no solo la parte de scripts.

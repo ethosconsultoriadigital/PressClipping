@@ -1,11 +1,13 @@
 /**
- * S4 — integración del drain en el runner del tier diario, SIN activarlo.
+ * S4 — integración del drain en el runner del tier diario.
+ * El default de aplicación sigue OFF; el workflow daily-validated enciende
+ * el flag SOLO en el evento `schedule`.
  *
  * Verifica el feature flag, el reloj de inicio de job, el deadline, el
  * preflight cron→catálogo y el manejo de terminaciones.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ENRICH_DRAIN_FLAG,
@@ -274,7 +276,7 @@ describe('ejecutarPasoEnrich — manejo de terminaciones', () => {
   });
 });
 
-describe('workflow daily-validated — reloj de job y flag apagado', () => {
+describe('workflow daily-validated — reloj de job y flag scoped a schedule', () => {
   const wf = readFileSync(
     join(process.cwd(), '.github/workflows/live-comparison-shadow-daily-validated.yml'),
     'utf-8',
@@ -294,9 +296,27 @@ describe('workflow daily-validated — reloj de job y flag apagado', () => {
     expect(wf).toContain("JOB_TIMEOUT_MINUTES: '25'");
   });
 
-  it('NO activa ENRICH_DRAIN_V1 en el cron programado', () => {
-    expect(wf).not.toMatch(/^\s*ENRICH_DRAIN_V1:/m);
+  it('enciende ENRICH_DRAIN_V1 solo en el evento schedule', () => {
+    expect(wf).toMatch(
+      /^\s*ENRICH_DRAIN_V1:\s*"\$\{\{\s*github\.event_name\s*==\s*'schedule'\s*&&\s*'1'\s*\|\|\s*'0'\s*\}\}"\s*$/m,
+    );
+    expect(wf).toContain('workflow_dispatch:');
+    expect(wf).toMatch(/^\s*schedule:/m);
+    expect(wf).not.toContain("ENRICH_DRAIN_V1: '1'");
     expect(wf).not.toContain('ENRICH_DRAIN_V1=1');
+  });
+
+  it('no activa el drain en otros workflows/tiers', () => {
+    const dir = join(process.cwd(), '.github/workflows');
+    const permitidos = new Set([
+      'live-comparison-shadow-daily-validated.yml',
+      'enrich-drain-canary.yml',
+    ]);
+    for (const f of readdirSync(dir).filter((x) => x.endsWith('.yml') || x.endsWith('.yaml'))) {
+      if (permitidos.has(f)) continue;
+      const body = readFileSync(join(dir, f), 'utf-8');
+      expect(body, f).not.toMatch(/^\s*ENRICH_DRAIN_V1:/m);
+    }
   });
 });
 
