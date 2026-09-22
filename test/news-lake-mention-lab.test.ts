@@ -260,6 +260,41 @@ describe('Mention Lab — paginación y dedupe de candidatos', () => {
     expect(r2.deduped).toBe(2);
     expect(index.byId.size).toBe(1);
   });
+
+  it('no llama ILIKE si FTS ya trajo candidatos', async () => {
+    const modos: string[] = [];
+    const retrieved = await retrieveCandidatesPaged(
+      [kw({ keyword_id: 'KEY-0001', keyword: 'Jumex' })],
+      freezeWindow('2026-09-22T12:00:00.000Z', 30),
+      {
+        fetchPage: async (q) => {
+          modos.push(q.modo);
+          if (q.modo === 'ilike') throw new Error('ILIKE no debería ejecutarse');
+          return [news({ noticia_id: 'N-FTS', titulo: 'Grupo Jumex anuncia planta' })];
+        },
+      },
+    );
+    expect(modos).toEqual(['fts']);
+    expect(retrieved.infraError).toBeNull();
+    expect(retrieved.index.byId.size).toBe(1);
+  });
+
+  it('usa ILIKE si FTS no trae filas', async () => {
+    const modos: string[] = [];
+    const retrieved = await retrieveCandidatesPaged(
+      [kw({ keyword_id: 'KEY-0001', keyword: 'Jumex' })],
+      freezeWindow('2026-09-22T12:00:00.000Z', 30),
+      {
+        fetchPage: async (q) => {
+          modos.push(q.modo);
+          if (q.modo === 'fts') return [];
+          return [news({ noticia_id: 'N-IL', titulo: 'Grupo Jumex anuncia planta' })];
+        },
+      },
+    );
+    expect(modos).toEqual(['fts', 'ilike']);
+    expect(retrieved.index.byId.size).toBe(1);
+  });
 });
 
 describe('Mention Lab — matching y consolidación', () => {

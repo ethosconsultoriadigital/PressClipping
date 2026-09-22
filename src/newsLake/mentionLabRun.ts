@@ -89,22 +89,23 @@ export async function fetchLabPage(q: PageQuery): Promise<LabNewsRow[]> {
   if (q.afterId) query = query.gt('noticia_id', q.afterId);
 
   if (q.modo === 'fts') {
-    query = query.textSearch('fts', q.term, { type: 'plain', config: 'spanish' });
+    query = query.textSearch('fts', q.term, { type: 'websearch', config: 'spanish' });
   } else {
     const like = `%${escapeIlikeTerm(q.term)}%`;
+    // Metadatos cortos: el OR de 6 columnas (incluye cuerpos) dispara
+    // statement timeout 57014 en ventanas de 30d. El FTS ya cubre
+    // titulo+subtitulo+resumen+texto_extraido.
     query = query.or(
       [
         `titulo.ilike.${like}`,
         `subtitulo.ilike.${like}`,
         `resumen.ilike.${like}`,
-        `texto_nota_limpia.ilike.${like}`,
-        `texto_cuerpo_nota.ilike.${like}`,
-        `texto_extraido.ilike.${like}`,
       ].join(','),
     );
   }
 
-  const { data, error } = await retryPostgrest('fetchLabPage', () => query);
+  const intentos = q.modo === 'ilike' ? 1 : 2;
+  const { data, error } = await retryPostgrest('fetchLabPage', () => query, intentos);
   if (error) {
     throw new Error(
       `News Lake page failed: ${describeSupabaseError(error)}. ${hintForSupabaseError(error)}`,
@@ -170,36 +171,67 @@ export async function retrieveCandidatesPaged(
   let safetyHit = false;
   let infraError: string | null = null;
 
-  const modos: Array<'fts' | 'ilike'> = ['fts', 'ilike'];
-
   outer: for (const t of terms) {
-    for (const modo of modos) {
-      let afterId: string | null = null;
-      for (;;) {
-        let rows: LabNewsRow[] = [];
-        try {
-          rows = await fetchPage({
-            term: t.term,
-            modo,
-            afterId,
-            pageSize,
-            windowStart: window.windowStart,
-            cutoff: window.cutoff,
-          });
-        } catch (err) {
-          if (modo === 'fts') break;
+    let ftsOk = false;
+    let ftsRows = 0;
+    let afterId: string | null = null;
+    for (;;) {
+      let rows: LabNewsRow[] = [];
+      try {
+        rows = await fetchPage({
+          term: t.term,
+          modo: 'fts',
+          afterId,
+          pageSize,
+          windowStart: window.windowStart,
+          cutoff: window.cutoff,
+        });
+        ftsOk = true;
+      } catch {
+        break;
+      }
+      pages += 1;
+      rawFetched += rows.length;
+      ftsRows += rows.length;
+      const r = ingestCandidates(index, rows, t.term, safetyLimit);
+      safetyHit = safetyHit || r.safetyHit;
+      if (safetyHit) break outer;
+      if (rows.length === 0) break;
+      afterId = rows[rows.length - 1]!.noticia_id;
+      if (rows.length < pageSize) break;
+    }
+
+    // ILIKE: fallback de recall (acentos/frases) SOLO si FTS falló o no trajo nada.
+    // Correrlo siempre + 6 columnas OR agota el statement timeout de Postgres.
+    if (ftsOk && ftsRows > 0) continue;
+
+    afterId = null;
+    for (;;) {
+      let rows: LabNewsRow[] = [];
+      try {
+        rows = await fetchPage({
+          term: t.term,
+          modo: 'ilike',
+          afterId,
+          pageSize,
+          windowStart: window.windowStart,
+          cutoff: window.cutoff,
+        });
+      } catch (err) {
+        if (!ftsOk) {
           infraError = err instanceof Error ? err.message : String(err);
           break outer;
         }
-        pages += 1;
-        rawFetched += rows.length;
-        const r = ingestCandidates(index, rows, t.term, safetyLimit);
-        safetyHit = safetyHit || r.safetyHit;
-        if (safetyHit) break outer;
-        if (rows.length === 0) break;
-        afterId = rows[rows.length - 1]!.noticia_id;
-        if (rows.length < pageSize) break;
+        break;
       }
+      pages += 1;
+      rawFetched += rows.length;
+      const r = ingestCandidates(index, rows, t.term, safetyLimit);
+      safetyHit = safetyHit || r.safetyHit;
+      if (safetyHit) break outer;
+      if (rows.length === 0) break;
+      afterId = rows[rows.length - 1]!.noticia_id;
+      if (rows.length < pageSize) break;
     }
   }
 
