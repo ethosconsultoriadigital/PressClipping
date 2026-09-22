@@ -83,24 +83,28 @@ const REGLA_TEQUILA_PATRON: KeywordRule = {
   keyword_id: 'KEY-0060',
   cliente_id: 'CLI-0002',
   keyword: 'Tequila Patrón',
-  terminos: splitTerminos('Tequila Patrón', 'Tequila Patron|Patrón Tequila|Patron Tequila'),
+  terminos: splitTerminos('Tequila Patrón', 'Tequila Patron'),
   tipo: 'frase_exacta',
   regla: null,
   contextoIncluir: [],
   contextoExcluir: [],
 };
 
-describe('KEY-0060 orden invertido "Patrón Tequila"', () => {
+describe('KEY-0060 Tequila Patrón sin orden invertido (KEYWORD_POLICY_V1)', () => {
   it('"Tequila Patrón" (orden original) PASA', () => {
     expect(matchKeyword(REGLA_TEQUILA_PATRON, campos('Tequila Patrón gana premio internacional'))).not.toBeNull();
   });
 
-  it('"Patrón Tequila" (orden invertido, alias nuevo) PASA', () => {
-    expect(matchKeyword(REGLA_TEQUILA_PATRON, campos('Patrón Tequila expands its US distribution'))).not.toBeNull();
+  it('"Tequila Patron" sin acento PASA', () => {
+    expect(matchKeyword(REGLA_TEQUILA_PATRON, campos('Tequila Patron announces new bottling'))).not.toBeNull();
   });
 
-  it('"Patron Tequila" sin acento PASA', () => {
-    expect(matchKeyword(REGLA_TEQUILA_PATRON, campos('Patron Tequila announces new bottling'))).not.toBeNull();
+  it('"Patrón Tequila" (orden invertido) NO MATCH', () => {
+    expect(matchKeyword(REGLA_TEQUILA_PATRON, campos('Patrón Tequila expands its US distribution'))).toBeNull();
+  });
+
+  it('"Patron Tequila" invertido sin acento NO MATCH', () => {
+    expect(matchKeyword(REGLA_TEQUILA_PATRON, campos('Patron Tequila announces new bottling'))).toBeNull();
   });
 });
 

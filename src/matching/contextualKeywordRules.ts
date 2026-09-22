@@ -427,9 +427,16 @@ export function pasaPuertaContextualTequilaCli0002(
 // Solo aplica a CLI-0001 + keyword amplia; el resto de clientes no se toca.
 // La keyword `Museo Jumex` (marca específica del museo de arte) NO se gatea.
 
-/** Keywords amplias de CLI-0001 que exigen puerta contextual. */
+/**
+ * Keywords amplias de CLI-0001 que exigen puerta contextual.
+ *
+ * KEYWORD_POLICY_V1: la marca literal `Jumex` NO entra aquí.
+ * Debe matchear como palabra exacta vía matchKeyword, en cualquier contexto
+ * (promo retail, Museo, corporativo). La puerta sigue aplicando a categorías
+ * amplias (bebidas azucaradas / jugos / néctares / IEPS).
+ */
 export const KEYWORDS_JUMEX_AMPLIAS: string[] = [
-  'jumex', 'bebidas azucaradas', 'bebida azucarada', 'jugos', 'jugo',
+  'bebidas azucaradas', 'bebida azucarada', 'jugos', 'jugo',
   'nectares', 'nectar', 'ieps bebidas azucaradas', 'ieps jugos', 'ieps refrescos',
 ];
 

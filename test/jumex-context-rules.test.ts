@@ -27,23 +27,36 @@ function campos(parts: Partial<Record<string, string>>): CampoBuscable[] {
   ];
 }
 
-/** Regla Jumex amplia (KEY-0001) para probar el gate a través del matcher. */
+/** Regla Jumex literal (KEY-0001) — KEYWORD_POLICY_V1: exacta, sin gate contextual. */
 function reglaJumex(keyword = 'Jumex', keyword_id = 'KEY-0001'): KeywordRule {
   return {
     keyword_id,
     cliente_id: 'CLI-0001',
     keyword,
-    terminos: keyword === 'Jumex' ? ['jumex', 'grupo jumex'] : [keyword.toLowerCase()],
-    tipo: 'contiene',
-    regla: 'contiene',
+    terminos: keyword === 'Jumex' ? ['Jumex', 'Grupo Jumex', 'Jugos Jumex'] : [keyword],
+    tipo: 'exacta',
+    regla: 'exacta',
+    contextoIncluir: [],
+    contextoExcluir: [],
+  };
+}
+
+function reglaBebidasAzucaradas(): KeywordRule {
+  return {
+    keyword_id: 'KEY-0009',
+    cliente_id: 'CLI-0001',
+    keyword: 'bebidas azucaradas',
+    terminos: ['bebidas azucaradas'],
+    tipo: 'frase_exacta',
+    regla: null,
     contextoIncluir: [],
     contextoExcluir: [],
   };
 }
 
 describe('CLI-0001 Jumex — identificación de keyword amplia', () => {
-  it('reconoce las keywords amplias que se gatean', () => {
-    expect(esKeywordJumexAmpliaCli0001('Jumex')).toBe(true);
+  it('reconoce las keywords amplias que se gatean (Jumex literal ya NO)', () => {
+    expect(esKeywordJumexAmpliaCli0001('Jumex')).toBe(false);
     expect(esKeywordJumexAmpliaCli0001('bebidas azucaradas')).toBe(true);
     expect(esKeywordJumexAmpliaCli0001('jugos')).toBe(true);
     expect(esKeywordJumexAmpliaCli0001('néctares')).toBe(true);
@@ -138,15 +151,23 @@ describe('CLI-0001 Jumex — crisis domina sobre promo en título', () => {
   });
 });
 
-describe('CLI-0001 Jumex — integración con matchKeyword (bypass contexto BD)', () => {
-  it('bloquea promo retail Soriana aun con Jumex en título', () => {
-    expect(matchKeyword(reglaJumex(), campos({ titulo: 'Julio Regalado en Soriana: ofertas de Jumex 3x2' }))).toBeNull();
+describe('CLI-0001 Jumex — integración con matchKeyword (KEYWORD_POLICY_V1)', () => {
+  it('Jumex literal MATCH en promo retail (ya no pasa por la puerta contextual)', () => {
+    expect(matchKeyword(reglaJumex(), campos({ titulo: 'Julio Regalado en Soriana: ofertas de Jumex 3x2' }))).not.toBeNull();
   });
   it('permite crisis real de Jumex', () => {
     expect(matchKeyword(reglaJumex(), campos({ titulo: 'Profeco sanciona a Jumex por etiquetado' }))).not.toBeNull();
   });
   it('permite corporativo real de Jumex', () => {
     expect(matchKeyword(reglaJumex(), campos({ titulo: 'Grupo Jumex anuncia inversión en planta' }))).not.toBeNull();
+  });
+  it('bebidas azucaradas SIN contexto suficiente sigue BLOQUEADA por la puerta', () => {
+    expect(
+      matchKeyword(
+        reglaBebidasAzucaradas(),
+        campos({ titulo: 'Consejos para reducir el consumo de bebidas azucaradas en verano', texto: 'Nutriólogos recomiendan agua simple.' }),
+      ),
+    ).toBeNull();
   });
 });
 
@@ -184,5 +205,26 @@ describe('no regresión — otros clientes no se afectan por el gate Jumex', () 
   it('CLI-0001 keyword NO amplia (Museo Jumex) no pasa por el gate (pasa por defecto)', () => {
     const r = pasaPuertaContextualClienteKeyword({ cliente_id: 'CLI-0001', keyword: 'Museo Jumex', texto: 'Exposición en el Museo Jumex', titulo: 'Exposición en el Museo Jumex', cuerpo: '' });
     expect(r.pasa).toBe(true);
+  });
+  it('CLI-0001 literal Jumex BYPASSES la puerta contextual (KEYWORD_POLICY_V1)', () => {
+    const r = pasaPuertaContextualClienteKeyword({
+      cliente_id: 'CLI-0001',
+      keyword: 'Jumex',
+      texto: 'productos Jumex en supermercado',
+      titulo: 'productos Jumex en supermercado',
+      cuerpo: '',
+    });
+    expect(r.pasa).toBe(true);
+  });
+  it('CLI-0001 bebidas azucaradas SIGUE gated', () => {
+    const r = pasaPuertaContextualClienteKeyword({
+      cliente_id: 'CLI-0001',
+      keyword: 'bebidas azucaradas',
+      texto: 'Consejos para reducir el consumo de bebidas azucaradas en verano',
+      titulo: 'Consejos para reducir el consumo de bebidas azucaradas en verano',
+      cuerpo: 'Nutriólogos recomiendan agua simple.',
+      terminos: ['bebidas azucaradas'],
+    });
+    expect(r.pasa).toBe(false);
   });
 });

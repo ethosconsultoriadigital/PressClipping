@@ -42,6 +42,7 @@
     "audit-patron-brand-keywords": "tsx scripts/audit-patron-brand-keywords.ts",
     "simulate-patron-brand-mentions": "tsx scripts/simulate-patron-brand-mentions.ts",
     "tune-patron-brand-keywords": "tsx scripts/tune-patron-brand-keywords.ts",
+    "keywords:priority-v1": "tsx scripts/apply-priority-client-keywords-v1.ts",
     "audit-patron-important-media-readiness": "tsx scripts/audit-patron-important-media-readiness.ts",
     "catalog-patron-p1-gap-media": "tsx scripts/catalog-patron-p1-gap-media.ts",
     "audit-all-media-clean-capture-readiness": "tsx scripts/audit-all-media-clean-capture-readiness.ts",

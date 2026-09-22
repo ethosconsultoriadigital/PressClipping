@@ -102,9 +102,9 @@ export function matchKeyword(
   // exigir términos industriales. El resto de keywords mantiene sus puertas BD.
   const usarGateTequilaCli0002 =
     rule.cliente_id === 'CLI-0002' && esKeywordTequilaAmpliaCli0002(rule.keyword);
-  // Ídem para CLI-0001: las keywords amplias de Jumex (Jumex/bebidas azucaradas/
-  // jugos/néctares) se rigen por la puerta contextual de 3 niveles (crisis/
-  // regulatorio → corporativo → bloquea promo retail), no por contexto BD.
+  // Ídem para CLI-0001: keywords AMPLIAS (bebidas azucaradas/jugos/néctares/IEPS)
+  // se rigen por la puerta contextual de 3 niveles. KEYWORD_POLICY_V1: la marca
+  // literal `Jumex` ya NO pasa por esa puerta — matchKeyword exacto de palabra.
   const usarGateJumexCli0001 =
     rule.cliente_id === 'CLI-0001' && esKeywordJumexAmpliaCli0001(rule.keyword);
 
