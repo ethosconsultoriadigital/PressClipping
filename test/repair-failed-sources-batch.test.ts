@@ -9,10 +9,10 @@ import {
 } from '../scripts/repair-failed-sources-batch.js';
 
 describe('repair-failed-sources-batch', () => {
-  it('tiene 13 patches de IDs únicos', () => {
+  it('tiene 14 patches de IDs únicos', () => {
     const ids = REPAIR_PATCHES.map((p) => p.medio_id);
-    expect(ids).toHaveLength(13);
-    expect(new Set(ids).size).toBe(13);
+    expect(ids).toHaveLength(14);
+    expect(new Set(ids).size).toBe(14);
   });
 
   it('no incluye medios NXDOMAIN, paywall Reforma ni sin fuente pública', () => {
@@ -78,6 +78,12 @@ describe('repair-failed-sources-batch', () => {
     const p = REPAIR_PATCHES.find((x) => x.medio_id === 'MED-0191')!;
     expect(p.sitemap_url).toBe('https://lasillarota.com/sitemaps/news.xml');
     expect(p.metodo_extraccion).toBe('SITEMAP');
+  });
+
+  it('Alto Nivel propone RSS del día, no el sitemap_index de 2017', () => {
+    const p = REPAIR_PATCHES.find((x) => x.medio_id === 'MED-0174')!;
+    expect(p.rss_url).toBe('https://www.altonivel.com.mx/feed/');
+    expect(p.metodo_extraccion).toBe('RSS');
   });
 
   it('filaNueva01Medios copia catálogo y pisa solo la fuente reparada', () => {

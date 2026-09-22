@@ -146,6 +146,16 @@ export const REPAIR_PATCHES: RepairPatch[] = [
       'sitemap.xml es índice Yoast (post+category+tag). El crawl mezcla CollectionPage /category/ y /tag/ con notas; body 0.60. ' +
       '/feed/ WordPress entrega 10/10 POST recientes del mismo host, sin archivos de taxonomía.',
   },
+  {
+    medio_id: 'MED-0174',
+    nombre_medio: 'Alto Nivel',
+    metodo_extraccion: 'RSS',
+    rss_url: 'https://www.altonivel.com.mx/feed/',
+    motivo:
+      'sitemap_index.xml resuelve sub-sitemaps de 2017 (n30=0, crawl 30/30 duplicados viejos). ' +
+      'https://www.altonivel.com.mx/feed/ es RSS WordPress público del mismo host con notas del día. ' +
+      'No se borra sitemap_url; el método pasa a RSS para que la cascada no empiece por el índice obsoleto.',
+  },
 ];
 
 export interface RepairBatchArgs {
