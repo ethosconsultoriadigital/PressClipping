@@ -192,6 +192,8 @@ describe('workflow daily-validated sombra', () => {
 const IDS_B = [
   'MED-0019', 'MED-0024', 'MED-0026', 'MED-0040',
   'MED-0041', 'MED-0042', 'MED-0051', 'MED-0103',
+  'MED-0107', 'MED-0191', 'MED-0007', 'MED-0058',
+  'MED-0092', 'MED-0111', 'MED-0064', 'MED-0109',
 ] as const;
 
 describe('DailyValidatedShard — A default y B acotado', () => {
@@ -211,11 +213,12 @@ describe('DailyValidatedShard — A default y B acotado', () => {
     expect(mediosDailyNetNew('A').map((m) => m.medio_id).sort()).toEqual(IDS_ESPERADOS);
   });
 
-  it('--shard=B resuelve exactamente los 8 IDs aprobados', () => {
+  it('--shard=B resuelve exactamente los 16 IDs aprobados', () => {
     expect(parseDailyValidatedShard('B')).toEqual({ ok: true, shard: 'B' });
     expect(mediosDailyNetNew('B').map((m) => m.medio_id).sort()).toEqual([...IDS_B].sort());
-    expect(SHADOW_MEDIOS_DAILY_VALIDATED_B).toHaveLength(8);
-    expect(IDS_DAILY_VALIDATED_B).toHaveLength(8);
+    expect(SHADOW_MEDIOS_DAILY_VALIDATED_B).toHaveLength(16);
+    expect(IDS_DAILY_VALIDATED_B).toHaveLength(16);
+    expect(new Set(IDS_DAILY_VALIDATED_B).size).toBe(16);
   });
 
   it('shard inválido falla de forma segura (sin default silencioso a A)', () => {
@@ -236,10 +239,10 @@ describe('DailyValidatedShard — A default y B acotado', () => {
     for (const id of IDS_B) expect(cubiertos.has(id)).toBe(false);
   });
 
-  it('mediosEnCualquierCron incluye B y el unique global es 88', () => {
+  it('mediosEnCualquierCron incluye B y el unique global es 96', () => {
     const cron = mediosEnCualquierCron();
     for (const id of IDS_B) expect(cron.has(id)).toBe(true);
-    expect(cron.size).toBe(88);
+    expect(cron.size).toBe(96);
   });
 
   it('ningún medio de B está en el shard A', () => {
@@ -247,11 +250,16 @@ describe('DailyValidatedShard — A default y B acotado', () => {
     for (const id of IDS_B) expect(a.has(id)).toBe(false);
   });
 
-  it('B no incluye MED-0204 ni los 8 READY restantes', () => {
+  it('B no incluye MED-0204 y conserva el lote 1 + lote 2 exactos', () => {
     const b = new Set(IDS_DAILY_VALIDATED_B);
     expect(b.has('MED-0204')).toBe(false);
-    for (const id of ['MED-0107', 'MED-0191', 'MED-0007', 'MED-0058', 'MED-0092', 'MED-0111', 'MED-0064', 'MED-0109']) {
-      expect(b.has(id)).toBe(false);
+    for (const id of [
+      'MED-0019', 'MED-0024', 'MED-0026', 'MED-0040',
+      'MED-0041', 'MED-0042', 'MED-0051', 'MED-0103',
+      'MED-0107', 'MED-0191', 'MED-0007', 'MED-0058',
+      'MED-0092', 'MED-0111', 'MED-0064', 'MED-0109',
+    ]) {
+      expect(b.has(id)).toBe(true);
     }
   });
 

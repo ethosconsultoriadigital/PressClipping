@@ -482,9 +482,10 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED: readonly ShadowMedioDaily[] = [
 // TIER DAILY VALIDATED — SHARD B (ramp controlado, 2026-09-22).
 // ----------------------------------------------------------------------------
 // Bloque SEPARADO de SHADOW_MEDIOS_DAILY_VALIDATED (shard A, 47 IDs). El motor
-// es el mismo (`run-shadow-daily-validated-tier.ts --shard=B`). Solo entran
-// 8 medios B_READY_TO_DEPLOY / LOW_RISK ya aprobados, net-new respecto de
-// base / nacional B / crisis / shard A. Nombres desde catálogo live.
+// es el mismo (`run-shadow-daily-validated-tier.ts --shard=B`). Ramp 8→16:
+// lote 1 LOW_RISK + lote 2 B_READY_TO_DEPLOY restantes (incl. MED-0064 /
+// MED-0109, MEDIUM_RISK de censo con fuente live viable). Net-new respecto
+// de base / nacional B / crisis / shard A. Nombres desde catálogo live.
 // ============================================================================
 
 export const SHADOW_MEDIOS_DAILY_VALIDATED_B: readonly ShadowMedioDaily[] = [
@@ -496,6 +497,14 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED_B: readonly ShadowMedioDaily[] = [
   { medio_id: 'MED-0042', nombre: 'Partidero', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
   { medio_id: 'MED-0051', nombre: 'Posta', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
   { medio_id: 'MED-0103', nombre: 'El Peninsular Digital', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0107', nombre: 'Diario Humano', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0191', nombre: 'La Silla Rota', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0007', nombre: 'Fortuna y Poder', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0058', nombre: 'Luz Noticias', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0092', nombre: 'Radar BC', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0111', nombre: 'MetrópoliMx BCS', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0064', nombre: 'Mazatlan Interactivo', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0109', nombre: 'Canal 8 BCS', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
 ] as const;
 
 export const IDS_DAILY_VALIDATED_B: readonly string[] = SHADOW_MEDIOS_DAILY_VALIDATED_B.map(
