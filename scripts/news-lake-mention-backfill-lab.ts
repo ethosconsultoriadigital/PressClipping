@@ -67,6 +67,20 @@ function formatValue(value: string | number | boolean | null | undefined): strin
 }
 
 const APPEND_CHUNK = 200;
+const MIN_LAB_COLUMNS = 40;
+
+async function ensureLabSheetWidth(
+  sheet: { columnCount: number; rowCount: number; resize: (dims: { rowCount: number; columnCount: number }) => Promise<unknown> },
+  columns: number,
+  title: string,
+): Promise<void> {
+  const need = Math.max(columns, MIN_LAB_COLUMNS);
+  if ((sheet.columnCount ?? 0) >= need) return;
+  await withSheetsRetry(
+    () => sheet.resize({ rowCount: Math.max(sheet.rowCount ?? 1000, 1000), columnCount: need }),
+    `resize ${title}`,
+  );
+}
 
 export function googleLabPort(doc: GoogleSpreadsheet): LabSheetPort {
   return {
@@ -76,6 +90,7 @@ export function googleLabPort(doc: GoogleSpreadsheet): LabSheetPort {
       }
       const existing = doc.sheetsByTitle[title];
       if (existing) {
+        await ensureLabSheetWidth(existing, headers.length, title);
         try {
           await withSheetsRetry(() => existing.loadHeaderRow(), `loadHeaderRow ${title}`);
           if (!existing.headerValues || existing.headerValues.length === 0) {
@@ -88,9 +103,16 @@ export function googleLabPort(doc: GoogleSpreadsheet): LabSheetPort {
       }
       logger.info({ tab: title }, 'Creando pestaña Mention Lab');
       await withSheetsRetry(
-        () => doc.addSheet({ title, headerValues: [...headers] }),
+        () =>
+          doc.addSheet({
+            title,
+            headerValues: [...headers],
+            gridProperties: { rowCount: 2000, columnCount: Math.max(headers.length, MIN_LAB_COLUMNS) },
+          }),
         `addSheet ${title}`,
       );
+      const created = doc.sheetsByTitle[title];
+      if (created) await ensureLabSheetWidth(created, headers.length, title);
     },
     async readKeys(title) {
       const sheet = doc.sheetsByTitle[title];

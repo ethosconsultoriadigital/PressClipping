@@ -13,6 +13,7 @@ import {
   LAB_CLIENT_IDS,
   LAB_TABS,
   LAB_FORBIDDEN_TABS,
+  TODAS_HEADERS,
   extraerTerminosBusquedaLab,
   emptyCandidateIndex,
   ingestCandidates,
@@ -506,6 +507,10 @@ describe('Mention Lab — freeze, args, clientes fijos, no writes de producción
     expect(parseLabArgs([]).dryRun).toBe(true);
     expect(parseLabArgs(['--dry-run=false', '--window-days=30']).dryRun).toBe(false);
     expect(parseLabArgs(['--window-days=30']).windowDays).toBe(30);
+  });
+
+  it('TODAS tiene más de 26 columnas (requiere resize en Sheets)', () => {
+    expect(TODAS_HEADERS.length).toBeGreaterThan(26);
   });
 
   it('clientes V1 fijos', () => {
