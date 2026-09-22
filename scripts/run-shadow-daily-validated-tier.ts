@@ -13,13 +13,16 @@
  * procesa backlog global (todo va acotado por --medio-ids). NUNCA envía
  * WhatsApp/correo ni llama Twilio/Gmail/SMTP.
  *
- * Dedupe estructural: usa `mediosDailyNetNew()`, que excluye cualquier medio ya
- * cubierto por otro cron. Si no hay medios net-new, ABORTA (exit 2) sin escribir.
+ * Dedupe estructural: usa `mediosDailyNetNew(shard)`, que para el shard A
+ * excluye cualquier medio ya cubierto por otro cron. Shard default: A
+ * (backward compatible). `--shard=B` corre el segundo shard. Shard inválido:
+ * exit 2, sin writes.
  *
  * Uso:
  *   npm run shadow-daily-validated-tier -- --window-hours=48 --max-notas=30 \
  *     --output=sheet --append-metrics-history --no-export-results \
  *     --no-generate-xml --no-send --no-whatsapp --no-email
+ *   npm run shadow-daily-validated-tier -- --shard=B --window-hours=48
  *   npm run shadow-daily-validated-tier -- --dry-run
  */
 import { spawn } from 'node:child_process';
@@ -27,7 +30,14 @@ import { pathToFileURL } from 'node:url';
 import { logger } from '../src/utils/logger.js';
 import { verificarFlagsSombra } from '../src/utils/shadowGuard.js';
 import { ventanaMovil } from '../src/utils/dateWindow.js';
-import { mediosDailyNetNew, type ShadowMedioDaily } from '../src/config/shadowMedia.js';
+import {
+  mediosDailyNetNew,
+  mediosDailyValidatedActivos,
+  parseDailyValidatedShard,
+  describirSolapeDailyShard,
+  type DailyValidatedShard,
+  type ShadowMedioDaily,
+} from '../src/config/shadowMedia.js';
 import { evaluarGateDaily } from '../src/matching/shadowDailyGate.js';
 import { mergeOutputRowsByKey } from '../src/sheets/write.js';
 import { OUTPUT_TABS } from '../src/sheets/client.js';
@@ -38,6 +48,7 @@ import {
   calcularDeadlineDrain,
   resolverOpcionesDrain,
 } from '../src/config/enrichDrainConfig.js';
+import type { CronConfiguredMedio } from '../src/config/cronCatalogIntegrity.js';
 import {
   preflightCronCatalogo,
   ejecutarPasoEnrich,
@@ -73,6 +84,11 @@ interface DailyArgs {
    * del setup pesado. Solo lo usa el deadline del drain.
    */
   jobStartedAt: string | null;
+  /**
+   * Valor crudo de `--shard`. `undefined` = flag ausente (default A).
+   * Vacío u otro valor lo rechaza `parseDailyValidatedShard`.
+   */
+  shardRaw: string | undefined;
 }
 
 function parseArgs(argv: string[]): DailyArgs {
@@ -92,6 +108,7 @@ function parseArgs(argv: string[]): DailyArgs {
     dryRun: false,
     update08: true,
     jobStartedAt: null,
+    shardRaw: undefined,
   };
   for (const arg of argv) {
     if (!arg.startsWith('--')) continue;
@@ -108,6 +125,7 @@ function parseArgs(argv: string[]): DailyArgs {
       case 'output': out.output = (val as 'console' | 'sheet') || out.output; break;
       case 'append-metrics-history': out.appendMetricsHistory = true; break;
       case 'job-started-at': out.jobStartedAt = val || null; break;
+      case 'shard': out.shardRaw = val; break;
       case 'dry-run': out.dryRun = true; break;
       case 'no-update-08': out.update08 = false; break;
       // Confirmaciones de seguridad (no habilitan nada):
@@ -160,7 +178,11 @@ function findNum(lines: Record<string, unknown>[], field: string): number | unde
  * sesión (attempted_this_run, cursores, fairness) solo tiene sentido si vive
  * en una sola memoria.
  */
-async function ejecutarDrain(medioIds: readonly string[], jobStartedAt: string | null) {
+async function ejecutarDrain(
+  medioIds: readonly string[],
+  jobStartedAt: string | null,
+  shard: DailyValidatedShard,
+) {
   const ahora = new Date();
   const jobStart = resolverJobStart({ explicito: jobStartedAt, now: ahora });
   const budget = resolverTimeBudget();
@@ -175,6 +197,7 @@ async function ejecutarDrain(medioIds: readonly string[], jobStartedAt: string |
       budget,
       page_size: opciones.pageSize,
       fresh_share: opciones.freshShare,
+      shard,
     },
     'ENRICH DRAIN V1 activo: iniciando sesión única',
   );
@@ -194,15 +217,39 @@ async function ejecutarDrain(medioIds: readonly string[], jobStartedAt: string |
   );
 }
 
+function labelsDelShard(shard: DailyValidatedShard): {
+  workflowLabel: string;
+  tierLabel: string;
+  ultimoLote: string;
+  modo: string;
+} {
+  if (shard === 'B') {
+    return {
+      workflowLabel: 'shadow-daily-validated-tier-b',
+      tierLabel: 'daily_validated',
+      ultimoLote: 'daily-validated-b',
+      modo: 'shadow_daily_validated_b',
+    };
+  }
+  return {
+    workflowLabel: 'shadow-daily-validated-tier',
+    tierLabel: 'daily_validated',
+    ultimoLote: 'daily-validated',
+    modo: 'shadow_daily_validated',
+  };
+}
+
 /** Actualiza 08 con la decisión del ciclo para los medios net-new (sin romper filas). */
 async function actualizar08(
   medios: ShadowMedioDaily[],
   decision: string,
   fecha: string,
+  shard: DailyValidatedShard,
 ): Promise<void> {
+  const labels = labelsDelShard(shard);
   const updates = medios.map((m) => ({
     medio_id: m.medio_id,
-    ultimo_lote: 'daily-validated',
+    ultimo_lote: labels.ultimoLote,
     fecha_ultimo_lote: fecha,
     decision_detect: decision,
     recomendacion_cron: 'CANDIDATO_CRON_DIARIO_SHADOW',
@@ -220,6 +267,7 @@ async function actualizar08(
       readback: resumen.readback_filas,
       mismatch: resumen.mismatch,
       filas_actualizadas: resumen.filas_actualizadas,
+      shard,
     },
     'Update 08_Cobertura_Medios (ciclo daily-validated) completado',
   );
@@ -236,11 +284,27 @@ async function main(): Promise<void> {
   }
 
   const args = parseArgs(rawArgv);
+  const shardParse = parseDailyValidatedShard(args.shardRaw);
+  if (!shardParse.ok) {
+    logger.error(
+      { shard: args.shardRaw },
+      `Shard daily-validated inválido: "${args.shardRaw}". Usa --shard=A o --shard=B. Abortando sin escribir.`,
+    );
+    process.exit(2);
+  }
+  const shard = shardParse.shard;
+  const labels = labelsDelShard(shard);
 
-  // Dedupe estructural: solo medios net-new (no cubiertos por otro cron).
-  const medios = mediosDailyNetNew();
+  const solape = describirSolapeDailyShard(shard);
+  if (solape) {
+    logger.error({ shard, solape }, `Overlap de shard daily-validated: ${solape}. Abortando sin escribir.`);
+    process.exit(2);
+  }
+
+  // Dedupe estructural: solo medios net-new del shard (A filtra vs otros crons).
+  const medios = mediosDailyNetNew(shard);
   if (medios.length === 0) {
-    logger.error({}, 'Tier daily-validated sin medios NET-NEW (todos ya cubiertos por otro cron). Abortando sin escribir.');
+    logger.error({ shard }, 'Tier daily-validated sin medios NET-NEW (todos ya cubiertos por otro cron). Abortando sin escribir.');
     process.exit(2);
   }
   const medioIds = medios.map((m) => m.medio_id).join(',');
@@ -250,7 +314,7 @@ async function main(): Promise<void> {
   const FECHA = new Date().toISOString().slice(0, 10);
 
   logger.info(
-    { modo: 'shadow_daily_validated', medios: medios.map((m) => `${m.medio_id}:${m.nombre}`), medioIds,
+    { modo: labels.modo, shard, medios: medios.map((m) => `${m.medio_id}:${m.nombre}`), medioIds,
       maxNotas, windowHours: args.windowHours, fechaDesde: desde, fechaHasta: hasta, dryRun: args.dryRun },
     '=== Iniciando SHADOW DAILY VALIDATED TIER (no producción) ===',
   );
@@ -261,13 +325,19 @@ async function main(): Promise<void> {
     // 0. Preflight cron→catálogo: todo medio configurado DEBE existir en
     // `medios`. Antes esto era un log informativo ("48 pedidos / 47 hallados")
     // y por eso MED-0204 sobrevivió semanas en el cron sin fila en DB.
+    const configured: CronConfiguredMedio[] = mediosDailyValidatedActivos(shard).map((m) => ({
+      medio_id: m.medio_id,
+      tier: 'daily_validated',
+      nombre: m.nombre,
+    }));
     const preflight = await preflightCronCatalogo({
       cargarCatalogo: getCatalogoMediosPorIds,
-      tiers: ['daily_validated'],
+      configured,
     });
     if (!preflight.ok) {
       logger.error(
         {
+          shard,
           status: preflight.report.status,
           configurados: preflight.report.configured_count,
           catalogo: preflight.report.catalog_count,
@@ -280,6 +350,7 @@ async function main(): Promise<void> {
     }
     logger.info(
       {
+        shard,
         configurados: preflight.report.configured_count,
         catalogo: preflight.report.catalog_count,
         inactivos: preflight.report.inactive_ids,
@@ -295,7 +366,7 @@ async function main(): Promise<void> {
       if (unica.size === 1) crawlArgs.push(`--source=${[...unica][0]}`);
     }
     const crawl = await runStep('1. crawl dirigido', 'scripts/crawl.ts', crawlArgs);
-    if (crawl.code !== 0) logger.warn({ code: crawl.code }, 'Crawl daily terminó con código no-cero (continuamos).');
+    if (crawl.code !== 0) logger.warn({ shard, code: crawl.code }, 'Crawl daily terminó con código no-cero (continuamos).');
 
     // 2. Enrich AISLADO por medio (no toca backlog global). Una sola
     // invocación por corrida: legacy mientras ENRICH_DRAIN_V1 esté OFF, drain
@@ -320,10 +391,11 @@ async function main(): Promise<void> {
           [`--medio-ids=${enrichMedioIds}`, `--limit=${args.enrichLimit}`, '--recent-first', '--only-pending-mentions', '--only-missing-clean-text']);
         return { code: r.code };
       },
-      runDrain: () => ejecutarDrain(enrichMedios.permitidos, args.jobStartedAt),
+      runDrain: () => ejecutarDrain(enrichMedios.permitidos, args.jobStartedAt, shard),
     });
     logger.info(
       {
+        shard,
         modo: enrich.modo,
         invocaciones: enrich.invocaciones,
         decision: etiquetaDecisionEnrich(enrich),
@@ -337,12 +409,12 @@ async function main(): Promise<void> {
     if (!enrich.continuar) {
       // Un drain fatal NO puede convertirse en SHADOW_OK: se corta aquí, sin
       // detect ni comparativo.
-      logger.error({ motivo: enrich.motivo }, 'Enrich fatal: se detiene el pipeline downstream.');
-      if (args.update08) await actualizar08(medios, etiquetaDecisionEnrich(enrich), FECHA);
+      logger.error({ shard, motivo: enrich.motivo }, 'Enrich fatal: se detiene el pipeline downstream.');
+      if (args.update08) await actualizar08(medios, etiquetaDecisionEnrich(enrich), FECHA, shard);
       process.exit(enrich.exitCode ?? 1);
     }
     if (enrich.degradado) {
-      logger.warn({ motivo: enrich.motivo }, 'Enrich degradado: queda deuda de texto para el próximo ciclo.');
+      logger.warn({ shard, motivo: enrich.motivo }, 'Enrich degradado: queda deuda de texto para el próximo ciclo.');
     }
 
     // 3. Detect dry-run AISLADO (gate de seguridad).
@@ -351,20 +423,20 @@ async function main(): Promise<void> {
     const sinTexto = findNum(dry.jsonLines, 'sinTexto');
     const potenciales = findNum(dry.jsonLines, 'menciones_potenciales') ?? 0;
     const gate = evaluarGateDaily({ detectCode: dry.code, sinTexto, potenciales });
-    logger.info({ sinTexto, potenciales, gate_pasa: gate.pasa, gate_motivo: gate.motivo }, 'Resultado del gate detect dry-run');
+    logger.info({ shard, sinTexto, potenciales, gate_pasa: gate.pasa, gate_motivo: gate.motivo }, 'Resultado del gate detect dry-run');
 
     // 4. Detect real AISLADO (solo si el gate pasa).
     if (gate.pasa) {
       const real = await runStep('4. detect real aislado', 'scripts/detect-mentions.ts',
         [`--medio-ids=${medioIds}`, `--limit=${args.detectLimit}`, '--only-with-text']);
-      logger.info({ menciones: findNum(real.jsonLines, 'menciones') ?? 0 }, 'Detect real aislado completado');
+      logger.info({ shard, menciones: findNum(real.jsonLines, 'menciones') ?? 0 }, 'Detect real aislado completado');
       decisionDetect = 'SHADOW_OK';
     } else {
-      logger.warn({ motivo: gate.motivo }, 'Gate NO pasa: se OMITE detect real y comparativo.');
+      logger.warn({ shard, motivo: gate.motivo }, 'Gate NO pasa: se OMITE detect real y comparativo.');
       decisionDetect = 'SKIP_GATE_FAILED';
     }
   } else {
-    logger.info({}, 'Modo --dry-run: se omiten crawl/enrich/detect real.');
+    logger.info({ shard }, 'Modo --dry-run: se omiten crawl/enrich/detect real.');
   }
 
   // 5. Comparativo 48h SOLO si el gate pasó (o dry-run de infraestructura).
@@ -375,8 +447,8 @@ async function main(): Promise<void> {
       `--fecha-desde=${desde}`, `--fecha-hasta=${hasta}`,
       `--window-hours=${args.windowHours}`, `--medios-curados=${medios.length}`,
       `--output=${args.output}`, '--replace-window',
-      '--workflow-label=shadow-daily-validated-tier',
-      '--tier-label=daily_validated',
+      '--workflow-label=' + labels.workflowLabel,
+      '--tier-label=' + labels.tierLabel,
       `--notas-medios=${medioIds}`,
       '--fuente=auto',
       '--frecuencia=diaria',
@@ -384,17 +456,17 @@ async function main(): Promise<void> {
     if (args.appendMetricsHistory) liveArgs.push('--append-metrics-history');
     if (args.dryRun) liveArgs.push('--dry-run');
     const comp = await runStep('5. live-comparison (import + compare + 07)', 'scripts/run-live-comparison.ts', liveArgs);
-    if (comp.code !== 0) { logger.error({ code: comp.code }, 'live-comparison terminó con error.'); process.exit(comp.code); }
+    if (comp.code !== 0) { logger.error({ shard, code: comp.code }, 'live-comparison terminó con error.'); process.exit(comp.code); }
   } else {
-    logger.warn({ decisionDetect }, 'Gate no pasó: se OMITE el comparativo (no se escribe 05/07 del ciclo).');
+    logger.warn({ shard, decisionDetect }, 'Gate no pasó: se OMITE el comparativo (no se escribe 05/07 del ciclo).');
   }
 
   // 6. Update 08 con la decisión del ciclo (sin romper filas). No en dry-run.
   if (args.update08 && !args.dryRun) {
-    await actualizar08(medios, decisionDetect, FECHA);
+    await actualizar08(medios, decisionDetect, FECHA, shard);
   }
 
-  logger.info({ modo: 'shadow_daily_validated', decisionDetect }, '=== Shadow daily-validated tier completado ===');
+  logger.info({ modo: labels.modo, shard, decisionDetect }, '=== Shadow daily-validated tier completado ===');
 }
 
 export { main, actualizar08 };

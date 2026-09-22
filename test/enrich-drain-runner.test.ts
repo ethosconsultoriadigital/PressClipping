@@ -320,6 +320,7 @@ describe('workflow daily-validated — reloj de job y flag scoped a schedule + c
     const dir = join(process.cwd(), '.github/workflows');
     const permitidos = new Set([
       'live-comparison-shadow-daily-validated.yml',
+      'live-comparison-shadow-daily-validated-b.yml',
       'enrich-drain-canary.yml',
     ]);
     for (const f of readdirSync(dir).filter((x) => x.endsWith('.yml') || x.endsWith('.yaml'))) {

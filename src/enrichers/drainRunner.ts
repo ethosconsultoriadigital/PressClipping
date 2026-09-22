@@ -14,6 +14,7 @@ import {
   describirIntegridadCronCatalogo,
   type CatalogLoader,
   type CronCatalogIntegrityReport,
+  type CronConfiguredMedio,
   type CronTierId,
 } from '../config/cronCatalogIntegrity.js';
 import type { DrainResult } from './enrichDrain.js';
@@ -38,10 +39,12 @@ export interface PreflightResult {
 export async function preflightCronCatalogo(opts: {
   cargarCatalogo: CatalogLoader;
   tiers?: readonly CronTierId[];
+  configured?: readonly CronConfiguredMedio[];
 }): Promise<PreflightResult> {
   const report = await verificarIntegridadCronCatalogo({
     cargarCatalogo: opts.cargarCatalogo,
     tiers: opts.tiers,
+    configured: opts.configured,
   });
   const mensaje = describirIntegridadCronCatalogo(report);
   if (report.status === 'ORPHANS_FOUND') {

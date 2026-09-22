@@ -191,6 +191,16 @@ describe('cronConfiguredMedios — cobertura de tiers', () => {
   it('MED-0204 ya no está configurado en ningún tier', () => {
     expect(cronConfiguredMedios().map((m) => m.medio_id)).not.toContain('MED-0204');
   });
+
+  it('incluye los 8 del shard B en daily_validated y no hay huérfanos de config B', () => {
+    const daily = cronConfiguredMedios(['daily_validated']).map((m) => m.medio_id);
+    const b = [
+      'MED-0019', 'MED-0024', 'MED-0026', 'MED-0040',
+      'MED-0041', 'MED-0042', 'MED-0051', 'MED-0103',
+    ];
+    for (const id of b) expect(daily).toContain(id);
+    expect(new Set(daily).size).toBe(daily.length);
+  });
 });
 
 describe('describirIntegridadCronCatalogo', () => {

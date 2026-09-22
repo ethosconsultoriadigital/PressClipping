@@ -1,0 +1,86 @@
+# ============================================================================
+# LIVE COMPARISON — TIER DAILY VALIDATED SHARD B (shadow, diario, desfasado)
+# ----------------------------------------------------------------------------
+# WORKFLOW ACTIVO EN MODO SOMBRA (NO producción). Mismo motor que el shard A
+# (`scripts/run-shadow-daily-validated-tier.ts --shard=B`). NO duplica el
+# runner. Procesa SOLO los 8 medios LOW_RISK aprobados, net-new respecto de
+# base / nacional B / crisis / shard A.
+#
+# CONCURRENCY: MISMO grupo `live-comparison-shadow` que base/nacional B/crisis
+# y daily A. cancel-in-progress=false → si otro writer corre, este se ENCOLA.
+# Schedule 13:20 UTC para desfasarse de A (12:45 UTC).
+#
+# Por código impide: export-results · generate-xml · classify-ia · export-raw-news
+# · WhatsApp/correos/Twilio/Gmail/SMTP.
+# ============================================================================
+name: live-comparison-shadow-daily-validated-b
+
+on:
+  schedule:
+    - cron: '20 13 * * *'   # diario, 13:20 UTC, desfasado del shard A (12:45 UTC)
+  workflow_dispatch:
+    inputs:
+      window_hours:
+        description: 'Tamaño de la ventana móvil en horas.'
+        required: false
+        default: '48'
+      use_enrich_drain_v1:
+        description: 'Usar Enrich Drain V1 en esta ejecución manual.'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: live-comparison-shadow   # MISMO grupo que base/nacional B/crisis/daily A
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Shadow daily-validated shard B (net-new, aislado por medio, sin envíos)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+      GOOGLE_OUTPUT_SHEET_ID: ${{ secrets.GOOGLE_OUTPUT_SHEET_ID }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      LOG_FORMAT: json
+      RUN_BY: github-actions-shadow-daily-validated-b
+      JOB_TIMEOUT_MINUTES: '25'
+      # ENRICH DRAIN V1: ON en `schedule`. En `workflow_dispatch` solo si el
+      # input `use_enrich_drain_v1` es true (default false = legacy enrich).
+      # El default de aplicación sigue OFF.
+      ENRICH_DRAIN_V1: "${{ (github.event_name == 'schedule' || inputs.use_enrich_drain_v1) && '1' || '0' }}"
+    steps:
+      - name: Registrar inicio del job
+        run: echo "JOB_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Shadow daily-validated shard B (ventana móvil 48h, net-new, sin envíos)
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+        run: |
+          WINDOW="${{ github.event.inputs.window_hours || '48' }}"
+          npm run shadow-daily-validated-tier -- \
+            --shard=B \
+            --window-hours=$WINDOW \
+            --job-started-at="$JOB_STARTED_AT" \
+            --max-notas=30 \
+            --output=sheet \
+            --append-metrics-history \
+            --no-export-results \
+            --no-generate-xml \
+            --no-send \
+            --no-whatsapp \
+            --no-email

@@ -23,7 +23,7 @@ import {
   SHADOW_MEDIOS,
   SHADOW_MEDIOS_NACIONALES_B,
   SHADOW_MEDIOS_CRISIS,
-  mediosDailyValidatedActivos,
+  mediosDailyValidatedTodosActivos,
 } from './shadowMedia.js';
 
 /** Tiers de cron sombra cubiertos por la invariante. */
@@ -102,7 +102,7 @@ export function cronConfiguredMedios(
     }
   }
   if (seleccion.has('daily_validated')) {
-    for (const m of mediosDailyValidatedActivos()) {
+    for (const m of mediosDailyValidatedTodosActivos()) {
       out.push({ medio_id: m.medio_id, tier: 'daily_validated', nombre: m.nombre });
     }
   }

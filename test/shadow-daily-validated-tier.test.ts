@@ -13,37 +13,34 @@ import {
   SHADOW_MEDIOS_NACIONALES_B,
   SHADOW_MEDIOS_CRISIS,
   SHADOW_MEDIOS_DAILY_VALIDATED,
+  SHADOW_MEDIOS_DAILY_VALIDATED_B,
+  IDS_DAILY_VALIDATED_B,
   mediosDailyValidatedActivos,
+  mediosDailyValidatedTodosActivos,
   mediosDailyNetNew,
   mediosYaCubiertosPorCron,
+  mediosEnCualquierCron,
+  parseDailyValidatedShard,
+  solapesEntreDailyShards,
+  solapesDailyVsOtrosCrons,
+  describirSolapeDailyShard,
 } from '../src/config/shadowMedia.js';
 import { evaluarGateDaily } from '../src/matching/shadowDailyGate.js';
 
+const IDS_ESPERADOS = [
+  'MED-0005', 'MED-0006', 'MED-0012', 'MED-0028', 'MED-0049', 'MED-0055', 'MED-0066', 'MED-0083', 'MED-0084',
+  'MED-0172', 'MED-0173',
+  'MED-0174', 'MED-0175', 'MED-0176', 'MED-0177', 'MED-0178', 'MED-0179', 'MED-0180', 'MED-0181', 'MED-0182', 'MED-0183',
+  'MED-0186', 'MED-0187',
+  'MED-0184', 'MED-0185',
+  'MED-0189',
+  'MED-0192', 'MED-0193', 'MED-0194', 'MED-0195', 'MED-0196', 'MED-0197', 'MED-0198', 'MED-0199',
+  'MED-0201', 'MED-0202', 'MED-0203',
+  'MED-0029', 'MED-0039', 'MED-0057', 'MED-0069', 'MED-0099',
+  'MED-0115', 'MED-0126', 'MED-0149', 'MED-0150', 'MED-0168',
+].sort();
+
 describe('config Tier Daily Validated — dedupe', () => {
-  const IDS_ESPERADOS = [
-    'MED-0005', 'MED-0006', 'MED-0012', 'MED-0028', 'MED-0049', 'MED-0055', 'MED-0066', 'MED-0083', 'MED-0084',
-    'MED-0172', 'MED-0173',
-    // Lote ETHOS 200 MEDIA NEWS LAKE (2026-07-20): 10 medios.
-    'MED-0174', 'MED-0175', 'MED-0176', 'MED-0177', 'MED-0178', 'MED-0179', 'MED-0180', 'MED-0181', 'MED-0182', 'MED-0183',
-    // 2da expansión (2026-07-20): Político MX y AF Medios.
-    'MED-0186', 'MED-0187',
-    // NEWS LAKE 200 FINAL PUSH (2026-07-22): Merca2.0 y El CEO activados en cron.
-    // Estaban catalogados desde 2026-07-20 (MED-0184 / MED-0185) pero sin cron.
-    // Se activan ahora para ampliar cobertura. Catálogo no aumenta.
-    'MED-0184', 'MED-0185',
-    // PorEsto (MED-0189) — A_PUBLICO_FACIL RSS, alta catálogo + cron simultáneos (2026-07-22).
-    'MED-0189',
-    // 200 MEDIA MILESTONE (2026-07-22): 8 nuevos A_PUBLICO_FACIL RSS.
-    // Eje Central (MED-0200) NO en daily-validated — alto volumen, evaluar primero.
-    'MED-0192', 'MED-0193', 'MED-0194', 'MED-0195', 'MED-0196', 'MED-0197', 'MED-0198', 'MED-0199',
-    // Mery Jalisco Priority (2026-07-29): medios regionales Jalisco.
-    // MED-0204 (Página 24 Jalisco) retirado del cron el 2026-09-18:
-    // PLANNED_NOT_ONBOARDED, nunca tuvo fila en `medios`.
-    'MED-0201', 'MED-0202', 'MED-0203',
-    // OPERATIONALIZATION-BATCH-01 (2026-09-17): 10 RSS PASS Validator, net-new.
-    'MED-0029', 'MED-0039', 'MED-0057', 'MED-0069', 'MED-0099',
-    'MED-0115', 'MED-0126', 'MED-0149', 'MED-0150', 'MED-0168',
-  ].sort();
 
   it('la lista contiene todos los medios activos del tier incluyendo los lotes NEWS LAKE 200 FINAL PUSH + 200 MEDIA MILESTONE + Mery Jalisco Priority', () => {
     const ids = SHADOW_MEDIOS_DAILY_VALIDATED.map((m) => m.medio_id).sort();
@@ -184,5 +181,165 @@ describe('workflow daily-validated sombra', () => {
     expect(cmd).not.toMatch(/(?<!no-)\bgenerate-xml\b/);
     expect(cmd).not.toContain('classify-ia');
     expect(cmd).not.toContain('export-raw-news');
+  });
+
+  it('NO pasa --shard (default A, backward compatible)', () => {
+    const cmd = wf.slice(wf.indexOf('npm run shadow-daily-validated-tier'));
+    expect(cmd).not.toContain('--shard');
+  });
+});
+
+const IDS_B = [
+  'MED-0019', 'MED-0024', 'MED-0026', 'MED-0040',
+  'MED-0041', 'MED-0042', 'MED-0051', 'MED-0103',
+] as const;
+
+describe('DailyValidatedShard — A default y B acotado', () => {
+  it('sin argumento el shard es A y conserva los 47 net-new', () => {
+    expect(parseDailyValidatedShard(undefined)).toEqual({ ok: true, shard: 'A' });
+    expect(mediosDailyNetNew().map((m) => m.medio_id).sort()).toEqual(
+      mediosDailyNetNew('A').map((m) => m.medio_id).sort(),
+    );
+    expect(mediosDailyNetNew().map((m) => m.medio_id).sort()).toEqual(IDS_ESPERADOS);
+    expect(mediosDailyNetNew().length).toBe(47);
+    expect(SHADOW_MEDIOS_DAILY_VALIDATED).toHaveLength(47);
+  });
+
+  it('--shard=A resuelve los mismos 47 IDs', () => {
+    expect(parseDailyValidatedShard('A')).toEqual({ ok: true, shard: 'A' });
+    expect(parseDailyValidatedShard('a')).toEqual({ ok: true, shard: 'A' });
+    expect(mediosDailyNetNew('A').map((m) => m.medio_id).sort()).toEqual(IDS_ESPERADOS);
+  });
+
+  it('--shard=B resuelve exactamente los 8 IDs aprobados', () => {
+    expect(parseDailyValidatedShard('B')).toEqual({ ok: true, shard: 'B' });
+    expect(mediosDailyNetNew('B').map((m) => m.medio_id).sort()).toEqual([...IDS_B].sort());
+    expect(SHADOW_MEDIOS_DAILY_VALIDATED_B).toHaveLength(8);
+    expect(IDS_DAILY_VALIDATED_B).toHaveLength(8);
+  });
+
+  it('shard inválido falla de forma segura (sin default silencioso a A)', () => {
+    expect(parseDailyValidatedShard('')).toEqual({ ok: false, raw: '' });
+    expect(parseDailyValidatedShard('C')).toMatchObject({ ok: false });
+    expect(parseDailyValidatedShard('daily')).toMatchObject({ ok: false });
+  });
+
+  it('A/B overlap = 0', () => {
+    expect(solapesEntreDailyShards()).toEqual([]);
+    expect(describirSolapeDailyShard('A')).toBeNull();
+    expect(describirSolapeDailyShard('B')).toBeNull();
+  });
+
+  it('B vs base/nacional/crisis overlap = 0', () => {
+    expect(solapesDailyVsOtrosCrons('B')).toEqual([]);
+    const cubiertos = mediosYaCubiertosPorCron();
+    for (const id of IDS_B) expect(cubiertos.has(id)).toBe(false);
+  });
+
+  it('mediosEnCualquierCron incluye B y el unique global es 88', () => {
+    const cron = mediosEnCualquierCron();
+    for (const id of IDS_B) expect(cron.has(id)).toBe(true);
+    expect(cron.size).toBe(88);
+  });
+
+  it('ningún medio de B está en el shard A', () => {
+    const a = new Set(SHADOW_MEDIOS_DAILY_VALIDATED.map((m) => m.medio_id));
+    for (const id of IDS_B) expect(a.has(id)).toBe(false);
+  });
+
+  it('B no incluye MED-0204 ni los 8 READY restantes', () => {
+    const b = new Set(IDS_DAILY_VALIDATED_B);
+    expect(b.has('MED-0204')).toBe(false);
+    for (const id of ['MED-0107', 'MED-0191', 'MED-0007', 'MED-0058', 'MED-0092', 'MED-0111', 'MED-0064', 'MED-0109']) {
+      expect(b.has(id)).toBe(false);
+    }
+  });
+
+  it('todos los shards respetan max_notas<=30', () => {
+    for (const m of mediosDailyValidatedTodosActivos()) {
+      expect(m.max_notas_shadow).toBeLessThanOrEqual(30);
+    }
+  });
+});
+
+describe('workflow daily-validated shard B', () => {
+  const wfB = readFileSync(
+    join(process.cwd(), '.github/workflows/live-comparison-shadow-daily-validated-b.yml'),
+    'utf-8',
+  );
+  const FLAG_EXPR =
+    /^\s*ENRICH_DRAIN_V1:\s*"\$\{\{\s*\(github\.event_name\s*==\s*'schedule'\s*\|\|\s*inputs\.use_enrich_drain_v1\)\s*&&\s*'1'\s*\|\|\s*'0'\s*\}\}"\s*$/m;
+
+  it('schedule 13:20 UTC y mismo concurrency group', () => {
+    expect(wfB).toContain("cron: '20 13 * * *'");
+    expect(wfB).toMatch(/group:\s*live-comparison-shadow\b/);
+    expect(wfB).toMatch(/cancel-in-progress:\s*false/);
+  });
+
+  it('timeout 25 y JOB_TIMEOUT_MINUTES 25', () => {
+    expect(wfB).toContain('timeout-minutes: 25');
+    expect(wfB).toContain("JOB_TIMEOUT_MINUTES: '25'");
+  });
+
+  it('invoca el runner común con --shard=B', () => {
+    expect(wfB).toContain('npm run shadow-daily-validated-tier');
+    expect(wfB).toContain('--shard=B');
+    expect(wfB).toContain('--max-notas=30');
+  });
+
+  it('schedule drain ON; manual default OFF; checkbox true ON', () => {
+    expect(wfB).toMatch(FLAG_EXPR);
+    const bloque = wfB.slice(wfB.indexOf('workflow_dispatch:'), wfB.indexOf('concurrency:'));
+    expect(bloque).toContain('use_enrich_drain_v1:');
+    expect(bloque).toMatch(/type:\s*boolean/);
+    expect(bloque).toMatch(/default:\s*false/);
+    expect(bloque).toMatch(/required:\s*false/);
+    expect(bloque).toContain('window_hours:');
+    expect(bloque).toContain("default: '48'");
+    expect(wfB).not.toContain("ENRICH_DRAIN_V1: '1'");
+  });
+
+  it('flags de seguridad y sin envíos', () => {
+    const cmd = wfB.slice(wfB.indexOf('npm run shadow-daily-validated-tier'));
+    expect(cmd).toContain('--no-export-results');
+    expect(cmd).toContain('--no-generate-xml');
+    expect(cmd).toContain('--no-send');
+    expect(cmd).toContain('--no-whatsapp');
+    expect(cmd).toContain('--no-email');
+    expect(cmd).not.toMatch(/--send\b/);
+    expect(cmd).not.toContain('classify-ia');
+    expect(cmd).not.toContain('export-raw-news');
+    expect(cmd).not.toMatch(/twilio|smtp|gmail/i);
+  });
+});
+
+describe('runner daily-validated — shard wiring', () => {
+  const src = readFileSync(
+    join(process.cwd(), 'scripts/run-shadow-daily-validated-tier.ts'),
+    'utf-8',
+  );
+
+  it('detect limit permanece 300', () => {
+    expect(src).toContain('detectLimit: 300');
+  });
+
+  it('A conserva workflow-label y ultimo_lote históricos', () => {
+    expect(src).toContain("workflowLabel: 'shadow-daily-validated-tier'");
+    expect(src).toContain("ultimoLote: 'daily-validated'");
+    expect(src).toContain("tierLabel: 'daily_validated'");
+  });
+
+  it('B se distingue por workflow-label y ultimo_lote, no por tier-label', () => {
+    expect(src).toContain("workflowLabel: 'shadow-daily-validated-tier-b'");
+    expect(src).toContain("ultimoLote: 'daily-validated-b'");
+  });
+
+  it('MED-0029 y MED-0196 siguen en A; MED-0204 ausente', () => {
+    expect(mediosDailyNetNew('A').map((m) => m.medio_id)).toContain('MED-0029');
+    expect(mediosDailyNetNew('A').map((m) => m.medio_id)).toContain('MED-0196');
+    expect(mediosDailyNetNew('A').map((m) => m.medio_id)).not.toContain('MED-0204');
+    expect(mediosDailyNetNew('B').map((m) => m.medio_id)).not.toContain('MED-0029');
+    expect(mediosDailyNetNew('B').map((m) => m.medio_id)).not.toContain('MED-0196');
+    expect(mediosDailyNetNew('B').map((m) => m.medio_id)).not.toContain('MED-0204');
   });
 });

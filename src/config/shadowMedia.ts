@@ -238,6 +238,9 @@ export function mediosCrisisActivos(): ShadowMedioCrisis[] {
 // (MED-0066) — ambos net-new, EXCELENTE, detección CLI-0003 laboral limpia.
 // ============================================================================
 
+export const DAILY_VALIDATED_SHARDS = ['A', 'B'] as const;
+export type DailyValidatedShard = (typeof DAILY_VALIDATED_SHARDS)[number];
+
 export type FuenteDaily = 'auto' | 'rss' | 'sitemap';
 
 export interface ShadowMedioDaily {
@@ -475,6 +478,44 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED: readonly ShadowMedioDaily[] = [
   { medio_id: 'MED-0168', nombre: 'López Dóriga Digital', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
 ] as const;
 
+// ============================================================================
+// TIER DAILY VALIDATED — SHARD B (ramp controlado, 2026-09-22).
+// ----------------------------------------------------------------------------
+// Bloque SEPARADO de SHADOW_MEDIOS_DAILY_VALIDATED (shard A, 47 IDs). El motor
+// es el mismo (`run-shadow-daily-validated-tier.ts --shard=B`). Solo entran
+// 8 medios B_READY_TO_DEPLOY / LOW_RISK ya aprobados, net-new respecto de
+// base / nacional B / crisis / shard A. Nombres desde catálogo live.
+// ============================================================================
+
+export const SHADOW_MEDIOS_DAILY_VALIDATED_B: readonly ShadowMedioDaily[] = [
+  { medio_id: 'MED-0019', nombre: 'Noticias de Cuautla', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0024', nombre: 'Revista 360 Grados', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0026', nombre: 'Exclusivas Puebla', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0040', nombre: 'UDG TV Canal 44', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0041', nombre: 'Quadratin Jalisco', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0042', nombre: 'Partidero', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0051', nombre: 'Posta', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0103', nombre: 'El Peninsular Digital', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+] as const;
+
+export const IDS_DAILY_VALIDATED_B: readonly string[] = SHADOW_MEDIOS_DAILY_VALIDATED_B.map(
+  (m) => m.medio_id,
+);
+
+/** Parsea `--shard`. Ausente → A. Vacío u otro valor → inválido. */
+export function parseDailyValidatedShard(
+  raw: string | undefined,
+): { ok: true; shard: DailyValidatedShard } | { ok: false; raw: string } {
+  if (raw === undefined) return { ok: true, shard: 'A' };
+  const v = raw.trim().toUpperCase();
+  if (v === 'A' || v === 'B') return { ok: true, shard: v };
+  return { ok: false, raw };
+}
+
+export function configDailyValidated(shard: DailyValidatedShard = 'A'): readonly ShadowMedioDaily[] {
+  return shard === 'B' ? SHADOW_MEDIOS_DAILY_VALIDATED_B : SHADOW_MEDIOS_DAILY_VALIDATED;
+}
+
 /**
  * Conjunto de medio_id YA cubiertos por algún cron sombra existente
  * (base + nacional B + crisis). Fuente de verdad para el dedupe.
@@ -486,28 +527,93 @@ export function mediosYaCubiertosPorCron(): Set<string> {
   return s;
 }
 
-/** medio_id (config) activos del tier daily-validated. */
-export function mediosDailyValidatedActivos(): ShadowMedioDaily[] {
-  return SHADOW_MEDIOS_DAILY_VALIDATED.filter((m) => m.activo_shadow);
+/** medio_id (config) activos de un shard daily-validated. Default: A. */
+export function mediosDailyValidatedActivos(shard: DailyValidatedShard = 'A'): ShadowMedioDaily[] {
+  return configDailyValidated(shard).filter((m) => m.activo_shadow);
+}
+
+/** Todos los medios activos de todos los shards daily-validated. */
+export function mediosDailyValidatedTodosActivos(): ShadowMedioDaily[] {
+  const out: ShadowMedioDaily[] = [];
+  for (const shard of DAILY_VALIDATED_SHARDS) out.push(...mediosDailyValidatedActivos(shard));
+  return out;
+}
+
+export interface DailyShardOverlap {
+  medio_id: string;
+  shards: DailyValidatedShard[];
+}
+
+/** Un medio en más de un shard daily activo. */
+export function solapesEntreDailyShards(): DailyShardOverlap[] {
+  const visto = new Map<string, DailyValidatedShard[]>();
+  for (const shard of DAILY_VALIDATED_SHARDS) {
+    for (const m of mediosDailyValidatedActivos(shard)) {
+      const arr = visto.get(m.medio_id) ?? [];
+      arr.push(shard);
+      visto.set(m.medio_id, arr);
+    }
+  }
+  return [...visto.entries()]
+    .filter(([, shards]) => shards.length > 1)
+    .map(([medio_id, shards]) => ({ medio_id, shards }));
+}
+
+/** Medios de un shard que también están en base / nacional B / crisis. */
+export function solapesDailyVsOtrosCrons(shard: DailyValidatedShard): string[] {
+  const otros = mediosYaCubiertosPorCron();
+  return mediosDailyValidatedActivos(shard)
+    .filter((m) => otros.has(m.medio_id))
+    .map((m) => m.medio_id)
+    .sort();
 }
 
 /**
- * Medios NET-NEW del tier daily-validated: activos y NO cubiertos por ningún
- * otro cron. Deduplicación estructural: garantiza que el tier nunca crawlee por
- * cron un medio ya cubierto por base/nacional B/crisis.
+ * Guarda dura de aislamiento. No filtra: si hay overlap, el llamador DEBE
+ * abortar. Shard A conserva el filtro silencioso histórico vs otros crons en
+ * `mediosDailyNetNew('A')`; esta función cubre A↔B y B vs base/nacional/crisis.
  */
-export function mediosDailyNetNew(): ShadowMedioDaily[] {
-  const cubiertos = mediosYaCubiertosPorCron();
-  return mediosDailyValidatedActivos().filter((m) => !cubiertos.has(m.medio_id));
+export function describirSolapeDailyShard(shard: DailyValidatedShard): string | null {
+  const intra = solapesEntreDailyShards();
+  const partes: string[] = [];
+  if (intra.length > 0) {
+    partes.push(
+      `overlap entre shards daily: ${intra.map((s) => `${s.medio_id}[${s.shards.join('+')}]`).join(', ')}`,
+    );
+  }
+  if (shard !== 'A') {
+    const vsOtros = solapesDailyVsOtrosCrons(shard);
+    if (vsOtros.length > 0) {
+      partes.push(`overlap shard ${shard} vs base/nacional_b/crisis: ${vsOtros.join(', ')}`);
+    }
+  }
+  return partes.length > 0 ? partes.join('; ') : null;
+}
+
+/**
+ * Medios NET-NEW de un shard daily-validated. Default: A (47 históricos).
+ *
+ * Shard A: filtra en silencio contra base/nacional B/crisis (semántica histórica).
+ * Shard B: NO filtra en silencio; el runner aborta si `describirSolapeDailyShard`
+ * reporta overlap. Aquí se devuelven los activos del shard.
+ */
+export function mediosDailyNetNew(shard: DailyValidatedShard = 'A'): ShadowMedioDaily[] {
+  const activos = mediosDailyValidatedActivos(shard);
+  if (shard === 'A') {
+    const cubiertos = mediosYaCubiertosPorCron();
+    return activos.filter((m) => !cubiertos.has(m.medio_id));
+  }
+  return activos;
 }
 
 /**
  * medio_id cubiertos por CUALQUIER tier de cron shadow activo (base + nacional
- * B + crisis + daily-validated). Fuente de verdad única para "¿este medio
- * corre en algún cron?" — usada por auditorías read-only fuera del pipeline.
+ * B + crisis + daily-validated A + daily-validated B). Fuente de verdad única
+ * para "¿este medio corre en algún cron?" — usada por auditorías read-only
+ * fuera del pipeline.
  */
 export function mediosEnCualquierCron(): Set<string> {
   const s = mediosYaCubiertosPorCron();
-  for (const m of mediosDailyValidatedActivos()) s.add(m.medio_id);
+  for (const m of mediosDailyValidatedTodosActivos()) s.add(m.medio_id);
   return s;
 }
