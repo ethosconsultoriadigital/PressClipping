@@ -1,0 +1,73 @@
+# ============================================================================
+# NEWS LAKE — MENTION LAB BACKFILL V1 (manual, dry-run por defecto)
+# ----------------------------------------------------------------------------
+# Backfill exhaustivo de menciones sobre News Lake para:
+#   CLI-MERY-TEST · CLI-0001 · CLI-0002
+#
+# SOLO workflow_dispatch. NO schedule.
+# Concurrency propia `news-lake-mentions-lab` (NO live-comparison-shadow):
+# este job NO escribe noticias/menciones; solo tabs LAB en el Output Sheet.
+#
+# NO inserta `menciones`. NO marca menciones_procesado. NO alertas.
+# NO email / WhatsApp / Twilio / SMTP. NO toca hojas finales de clientes.
+# ============================================================================
+name: news-lake-mentions-lab
+
+on:
+  workflow_dispatch:
+    inputs:
+      window_days:
+        description: 'Ventana de backfill en días (congelada al cutoff del run).'
+        required: false
+        default: '30'
+        type: string
+      dry_run:
+        description: 'Dry-run (true = no escribe Sheets). Default true.'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+
+concurrency:
+  group: news-lake-mentions-lab
+  cancel-in-progress: false
+
+jobs:
+  lab:
+    name: Mention Lab backfill (News Lake → tabs LAB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+      GOOGLE_OUTPUT_SHEET_ID: ${{ secrets.GOOGLE_OUTPUT_SHEET_ID }}
+      LOG_FORMAT: json
+      RUN_BY: github-actions-news-lake-mentions-lab
+      NO_SEND: 'true'
+      NO_EMAIL: 'true'
+      NO_WHATSAPP: 'true'
+      NO_TWILIO: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Mention Lab backfill
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+          INPUT_DRY_RUN: ${{ inputs.dry_run || 'true' }}
+          INPUT_WINDOW_DAYS: ${{ inputs.window_days || '30' }}
+        run: |
+          ARGS=( "--dry-run=${INPUT_DRY_RUN}" )
+          ARGS+=( "--window-days=${INPUT_WINDOW_DAYS}" )
+          npm run news-lake:mentions:lab -- "${ARGS[@]}"

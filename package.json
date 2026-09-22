@@ -70,6 +70,7 @@
     "media-validation:evaluate": "tsx scripts/media-validation-evaluate.ts",
     "media-validation:batch": "tsx scripts/media-validation-batch.ts",
     "client-live:sheet": "tsx scripts/client-live-sheet-export.ts",
+    "news-lake:mentions:lab": "tsx scripts/news-lake-mention-backfill-lab.ts",
     "catalog-mery-jalisco-priority": "tsx scripts/catalog-mery-jalisco-priority.ts",
     "audit-mery-media-coverage": "tsx scripts/audit-mery-media-coverage.ts",
     "audit-mery-gap-sources": "tsx scripts/audit-mery-gap-sources.ts",
