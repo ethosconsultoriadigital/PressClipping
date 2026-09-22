@@ -483,9 +483,9 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED: readonly ShadowMedioDaily[] = [
 // ----------------------------------------------------------------------------
 // Bloque SEPARADO de SHADOW_MEDIOS_DAILY_VALIDATED (shard A, 47 IDs). El motor
 // es el mismo (`run-shadow-daily-validated-tier.ts --shard=B`). Ramp 8→16:
-// lote 1 LOW_RISK + lote 2 B_READY_TO_DEPLOY restantes (incl. MED-0064 /
-// MED-0109, MEDIUM_RISK de censo con fuente live viable). Net-new respecto
-// de base / nacional B / crisis / shard A. Nombres desde catálogo live.
+// Ramp 8→16→21: lote 1 + lote 2 + wave-05 LOW_RISK (5 IDs). MED-0118
+// (boilerplate) queda fuera. Net-new respecto de base / nacional B / crisis /
+// shard A. Nombres desde catálogo live.
 // ============================================================================
 
 export const SHADOW_MEDIOS_DAILY_VALIDATED_B: readonly ShadowMedioDaily[] = [
@@ -505,6 +505,11 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED_B: readonly ShadowMedioDaily[] = [
   { medio_id: 'MED-0111', nombre: 'MetrópoliMx BCS', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
   { medio_id: 'MED-0064', nombre: 'Mazatlan Interactivo', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
   { medio_id: 'MED-0109', nombre: 'Canal 8 BCS', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0113', nombre: 'Jalisco TV', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0044', nombre: 'Lider Informativo', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0014', nombre: 'Ola Noticias', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0086', nombre: 'El Mexicano', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0130', nombre: 'Letra Fria', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
 ] as const;
 
 export const IDS_DAILY_VALIDATED_B: readonly string[] = SHADOW_MEDIOS_DAILY_VALIDATED_B.map(

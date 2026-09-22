@@ -192,17 +192,19 @@ describe('cronConfiguredMedios — cobertura de tiers', () => {
     expect(cronConfiguredMedios().map((m) => m.medio_id)).not.toContain('MED-0204');
   });
 
-  it('incluye los 16 del shard B en daily_validated y no hay huérfanos de config B', () => {
+  it('incluye los 21 del shard B en daily_validated y no hay huérfanos de config B', () => {
     const daily = cronConfiguredMedios(['daily_validated']).map((m) => m.medio_id);
     const b = [
       'MED-0019', 'MED-0024', 'MED-0026', 'MED-0040',
       'MED-0041', 'MED-0042', 'MED-0051', 'MED-0103',
       'MED-0107', 'MED-0191', 'MED-0007', 'MED-0058',
       'MED-0092', 'MED-0111', 'MED-0064', 'MED-0109',
+      'MED-0113', 'MED-0044', 'MED-0014', 'MED-0086', 'MED-0130',
     ];
     for (const id of b) expect(daily).toContain(id);
     expect(new Set(daily).size).toBe(daily.length);
     expect(daily).not.toContain('MED-0204');
+    expect(daily).not.toContain('MED-0118');
   });
 });
 

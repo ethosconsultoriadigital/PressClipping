@@ -3,7 +3,7 @@
 # ----------------------------------------------------------------------------
 # WORKFLOW ACTIVO EN MODO SOMBRA (NO producción). Mismo motor que el shard A
 # (`scripts/run-shadow-daily-validated-tier.ts --shard=B`). NO duplica el
-# runner. Procesa los 16 medios B_READY_TO_DEPLOY del shard B, net-new respecto de
+# runner. Procesa los 21 medios B_READY_TO_DEPLOY del shard B, net-new respecto de
 # base / nacional B / crisis / shard A.
 #
 # CONCURRENCY: MISMO grupo `live-comparison-shadow` que base/nacional B/crisis
