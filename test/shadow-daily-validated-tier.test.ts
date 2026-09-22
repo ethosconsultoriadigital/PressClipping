@@ -195,6 +195,7 @@ const IDS_B = [
   'MED-0107', 'MED-0191', 'MED-0007', 'MED-0058',
   'MED-0092', 'MED-0111', 'MED-0064', 'MED-0109',
   'MED-0113', 'MED-0044', 'MED-0014', 'MED-0086', 'MED-0130',
+  'MED-0081', 'MED-0063', 'MED-0105',
 ] as const;
 
 describe('DailyValidatedShard — A default y B acotado', () => {
@@ -214,13 +215,14 @@ describe('DailyValidatedShard — A default y B acotado', () => {
     expect(mediosDailyNetNew('A').map((m) => m.medio_id).sort()).toEqual(IDS_ESPERADOS);
   });
 
-  it('--shard=B resuelve exactamente los 21 IDs aprobados', () => {
+  it('--shard=B resuelve exactamente los 24 IDs aprobados', () => {
     expect(parseDailyValidatedShard('B')).toEqual({ ok: true, shard: 'B' });
     expect(mediosDailyNetNew('B').map((m) => m.medio_id).sort()).toEqual([...IDS_B].sort());
-    expect(SHADOW_MEDIOS_DAILY_VALIDATED_B).toHaveLength(21);
-    expect(IDS_DAILY_VALIDATED_B).toHaveLength(21);
-    expect(new Set(IDS_DAILY_VALIDATED_B).size).toBe(21);
+    expect(SHADOW_MEDIOS_DAILY_VALIDATED_B).toHaveLength(24);
+    expect(IDS_DAILY_VALIDATED_B).toHaveLength(24);
+    expect(new Set(IDS_DAILY_VALIDATED_B).size).toBe(24);
     expect(IDS_DAILY_VALIDATED_B).not.toContain('MED-0118');
+    expect(IDS_DAILY_VALIDATED_B).not.toContain('MED-0106');
   });
 
   it('shard inválido falla de forma segura (sin default silencioso a A)', () => {
@@ -241,10 +243,10 @@ describe('DailyValidatedShard — A default y B acotado', () => {
     for (const id of IDS_B) expect(cubiertos.has(id)).toBe(false);
   });
 
-  it('mediosEnCualquierCron incluye B y el unique global es 101', () => {
+  it('mediosEnCualquierCron incluye B y el unique global es 104', () => {
     const cron = mediosEnCualquierCron();
     for (const id of IDS_B) expect(cron.has(id)).toBe(true);
-    expect(cron.size).toBe(101);
+    expect(cron.size).toBe(104);
   });
 
   it('ningún medio de B está en el shard A', () => {
@@ -265,6 +267,10 @@ describe('DailyValidatedShard — A default y B acotado', () => {
       expect(b.has(id)).toBe(true);
     }
     expect(b.has('MED-0118')).toBe(false);
+    expect(b.has('MED-0081')).toBe(true);
+    expect(b.has('MED-0063')).toBe(true);
+    expect(b.has('MED-0105')).toBe(true);
+    expect(b.has('MED-0106')).toBe(false);
   });
 
   it('todos los shards respetan max_notas<=30', () => {

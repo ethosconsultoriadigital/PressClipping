@@ -482,8 +482,9 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED: readonly ShadowMedioDaily[] = [
 // TIER DAILY VALIDATED — SHARD B (ramp controlado, 2026-09-22).
 // ----------------------------------------------------------------------------
 // Bloque SEPARADO de SHADOW_MEDIOS_DAILY_VALIDATED (shard A, 47 IDs). El motor
-// es el mismo (`run-shadow-daily-validated-tier.ts --shard=B`). Ramp 8→16:
-// Ramp 8→16→21: lote 1 + lote 2 + wave-05 LOW_RISK (5 IDs). MED-0118
+// es el mismo (`run-shadow-daily-validated-tier.ts --shard=B`).
+// Ramp 8→16→21→24: lote 1 + lote 2 + wave-05 LOW_RISK (5 IDs) + repair
+// sprint 06 (La Brecha, Punto MX, Radar Político BCS). MED-0118
 // (boilerplate) queda fuera. Net-new respecto de base / nacional B / crisis /
 // shard A. Nombres desde catálogo live.
 // ============================================================================
@@ -510,6 +511,9 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED_B: readonly ShadowMedioDaily[] = [
   { medio_id: 'MED-0014', nombre: 'Ola Noticias', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
   { medio_id: 'MED-0086', nombre: 'El Mexicano', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
   { medio_id: 'MED-0130', nombre: 'Letra Fria', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0081', nombre: 'La Brecha', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0063', nombre: 'Punto MX', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
+  { medio_id: 'MED-0105', nombre: 'Radar Político BCS', fuente: 'auto', max_notas_shadow: 30, activo_shadow: true },
 ] as const;
 
 export const IDS_DAILY_VALIDATED_B: readonly string[] = SHADOW_MEDIOS_DAILY_VALIDATED_B.map(
