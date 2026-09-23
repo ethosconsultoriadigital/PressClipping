@@ -172,14 +172,15 @@ export function mencionToOutputRow(m: MencionExportRow): OutRow {
     noticia_id: m.noticia_id,
     fecha_publicacion: m.fecha_publicacion,
     fecha_captura: m.fecha_captura,
-    cliente_id: null, // pendiente: requiere ampliar el SELECT de menciones
+    cliente_id: m.cliente_id ?? null,
     cliente: m.cliente,
     grupo_monitoreo: null,
-    keyword_id: null, // pendiente: requiere ampliar el SELECT de menciones
+    keyword_id: m.keyword_id ?? null,
     keyword: m.keyword,
+    // UNAVAILABLE_IN_CURRENT_SCHEMA: menciones no persiste el término/alias exacto del match.
     alias_detectado: null,
-    tipo_keyword: null,
-    prioridad: null,
+    tipo_keyword: m.tipo_keyword ?? null,
+    prioridad: m.prioridad ?? null,
     medio: m.medio,
     estado: m.estado,
     region: m.region,

@@ -19,7 +19,11 @@ function mencion(over: Partial<MencionExportRow> = {}): MencionExportRow {
     fecha_publicacion: '2026-01-01T00:00:00Z',
     fecha_captura: '2026-01-02T00:00:00Z',
     cliente: 'Cliente A',
+    cliente_id: 'CLI-0001',
     keyword: 'gas natural',
+    keyword_id: 'KEY-0001',
+    tipo_keyword: 'exacta',
+    prioridad: 'Alta',
     medio: 'Medio X',
     estado: 'Jalisco',
     region: 'Occidente',
@@ -65,8 +69,13 @@ describe('mapeo de columnas a la Sheet de salida', () => {
     const row = mencionToOutputRow(mencion());
     expect(row.mencion_id).toBe('m1');
     expect(row.cliente).toBe('Cliente A');
+    expect(row.cliente_id).toBe('CLI-0001');
     expect(row.keyword).toBe('gas natural');
+    expect(row.keyword_id).toBe('KEY-0001');
+    expect(row.tipo_keyword).toBe('exacta');
+    expect(row.prioridad).toBe('Alta');
     expect(row.score_match).toBe(1);
+    expect(row.alias_detectado).toBeNull();
     expect(row.exportado_xml).toBe(false);
   });
 

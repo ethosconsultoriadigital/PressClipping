@@ -14,7 +14,11 @@ export interface MencionExportRow {
   fecha_publicacion: string | null;
   fecha_captura: string | null;
   cliente: string | null;
+  cliente_id: string | null;
   keyword: string | null;
+  keyword_id: string | null;
+  tipo_keyword: string | null;
+  prioridad: string | null;
   medio: string | null;
   estado: string | null;
   region: string | null;
@@ -32,21 +36,27 @@ export interface MencionExportRow {
 }
 
 /** SELECT (PostgREST) con los joins necesarios para construir MencionExportRow. */
-export const SELECT_MENCION_EXPORT = `mencion_id, noticia_id, keyword, texto_match, sentimiento, score_relevancia, tema, subtema,
+export const SELECT_MENCION_EXPORT = `mencion_id, noticia_id, cliente_id, keyword_id, keyword, texto_match, sentimiento, score_relevancia, tema, subtema,
    requiere_alerta, estado_revision, exportado_xml,
    clientes(nombre_cliente),
+   keywords(tipo_keyword, prioridad),
    noticias!inner(titulo, url_original, resumen, fecha_publicacion, fecha_captura, estado,
                   medios(nombre_medio, region))`;
 
 /** Transforma una fila cruda de Supabase (con joins anidados) a MencionExportRow. */
 export function mapMencionExport(m: any): MencionExportRow {
+  const kw = Array.isArray(m.keywords) ? m.keywords[0] : m.keywords;
   return {
     mencion_id: m.mencion_id,
     noticia_id: m.noticia_id,
     fecha_publicacion: m.noticias?.fecha_publicacion ?? null,
     fecha_captura: m.noticias?.fecha_captura ?? null,
     cliente: m.clientes?.nombre_cliente ?? null,
+    cliente_id: m.cliente_id ?? null,
     keyword: m.keyword ?? null,
+    keyword_id: m.keyword_id ?? null,
+    tipo_keyword: kw?.tipo_keyword ?? null,
+    prioridad: kw?.prioridad ?? null,
     medio: m.noticias?.medios?.nombre_medio ?? null,
     estado: m.noticias?.estado ?? null,
     region: m.noticias?.medios?.region ?? null,

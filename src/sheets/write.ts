@@ -10,6 +10,7 @@ import { getTab, getOutputTab, getOutputSpreadsheet, getTabById, withSheetsRetry
 import { normalizeHeader } from '../utils/parse.js';
 import { planMergeByKey, type MergeUpdate } from './mergePlan.js';
 import { planEnsureTabHeaders } from './tabPlan.js';
+import { planUniqueAppendByKey, evaluarReadbackUnique } from './uniqueAppendPlan.js';
 
 export type OutRow = Record<string, string | number | boolean | null | undefined>;
 
@@ -87,6 +88,91 @@ export async function appendRows(title: string, rows: OutRow[]): Promise<number>
 export async function appendOutputRows(title: string, rows: OutRow[]): Promise<number> {
   if (rows.length === 0) return 0;
   return appendToSheet(await getOutputTab(title), rows);
+}
+
+/** Lectura de IDs de una columna clave. NO escribe. Filas blank se cuentan aparte. */
+export async function readOutputKeyIds(
+  title: string,
+  keyColumn: string,
+): Promise<{ filas: number; ids: string[]; blank: number; key_header: string }> {
+  const sheet = await getOutputTab(title);
+  await withSheetsRetry(() => sheet.loadHeaderRow(), `loadHeaderRow ${title}`);
+  const headers = [...sheet.headerValues];
+  const keyNorm = normalizeHeader(keyColumn);
+  const keyHeaderReal = headers.find((h) => normalizeHeader(h) === keyNorm);
+  if (!keyHeaderReal) {
+    throw new Error(`La pestaña ${title} no tiene la columna clave "${keyColumn}".`);
+  }
+  const rows = await withSheetsRetry(() => sheet.getRows(), `getRows ${title}`);
+  const raw = rows.map((r) => String(r.get(keyHeaderReal) ?? '').trim());
+  const ids = raw.filter((id) => id.length > 0);
+  return { filas: rows.length, ids: raw, blank: raw.length - ids.length, key_header: keyHeaderReal };
+}
+
+export interface UniqueAppendResumen {
+  filas_antes: number;
+  filas_despues: number;
+  already_present: number;
+  appended: number;
+  duplicates_in_batch: number;
+  preexisting_duplicate_ids: string[];
+  missing_ids: string[];
+  duplicate_ids_after: string[];
+  mismatch: boolean;
+  selected_ids: string[];
+  appended_ids: string[];
+  already_present_ids: string[];
+}
+
+/**
+ * Append idempotente a una pestaña de SALIDA por columna clave (p.ej. mencion_id).
+ *
+ * NUNCA borra filas. NUNCA hace replace. Filas antiguas sin clave se preservan.
+ * Si el readback no encuentra todos los IDs seleccionados, `mismatch=true`
+ * y el llamador NO debe marcar exportado.
+ */
+export async function appendOutputRowsUniqueByKey(
+  title: string,
+  rows: OutRow[],
+  keyColumn: string,
+): Promise<UniqueAppendResumen> {
+  const sheet = await getOutputTab(title);
+  await withSheetsRetry(() => sheet.loadHeaderRow(), `loadHeaderRow ${title}`);
+  const headers = [...sheet.headerValues];
+  const keyNorm = normalizeHeader(keyColumn);
+  const keyHeaderReal = headers.find((h) => normalizeHeader(h) === keyNorm);
+  if (!keyHeaderReal) {
+    throw new Error(`La pestaña ${title} no tiene la columna clave "${keyColumn}".`);
+  }
+
+  const existingRows = await withSheetsRetry(() => sheet.getRows(), `getRows ${title}`);
+  const filasAntes = existingRows.length;
+  const existingIds = existingRows.map((r) => String(r.get(keyHeaderReal) ?? ''));
+
+  const plan = planUniqueAppendByKey(existingIds, rows, keyColumn);
+
+  if (plan.to_append.length > 0) {
+    await appendToSheet(sheet, plan.to_append);
+  }
+
+  const afterRows = await withSheetsRetry(() => sheet.getRows(), `getRows(readback) ${title}`);
+  const afterIds = afterRows.map((r) => String(r.get(keyHeaderReal) ?? ''));
+  const rb = evaluarReadbackUnique(plan.selected_ids, afterIds);
+
+  return {
+    filas_antes: filasAntes,
+    filas_despues: afterRows.length,
+    already_present: plan.already_present_ids.length,
+    appended: plan.to_append.length,
+    duplicates_in_batch: plan.duplicates_in_batch.length,
+    preexisting_duplicate_ids: plan.preexisting_duplicate_ids,
+    missing_ids: rb.missing_ids,
+    duplicate_ids_after: rb.duplicate_ids,
+    mismatch: rb.mismatch,
+    selected_ids: plan.selected_ids,
+    appended_ids: plan.to_append.map((r) => String(r[keyColumn] ?? '')),
+    already_present_ids: plan.already_present_ids,
+  };
 }
 
 function formatValue(value: OutRow[string]): string {

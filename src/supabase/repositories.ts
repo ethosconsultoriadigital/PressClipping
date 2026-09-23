@@ -553,14 +553,35 @@ export async function markNoticiasProcesadas(ids: string[]): Promise<void> {
 // Fase 5 — Exportación a Sheets
 // =============================================================================
 
-/** Lee menciones aún no exportadas a 06_Resultados, con datos de la noticia. */
-export async function getMencionesPendientesExport(limit: number): Promise<MencionExportRow[]> {
-  const { data, error } = await getSupabase()
+/** Lee menciones aún no exportadas a 02_Menciones, con datos de la noticia. */
+export interface MencionesPendientesExportOpts {
+  limit: number;
+  clients?: string[];
+  since?: string;
+  recentFirst?: boolean;
+}
+
+export async function getMencionesPendientesExport(
+  limitOrOpts: number | MencionesPendientesExportOpts,
+): Promise<MencionExportRow[]> {
+  const opts: MencionesPendientesExportOpts =
+    typeof limitOrOpts === 'number' ? { limit: limitOrOpts } : limitOrOpts;
+  let query = getSupabase()
     .from('menciones')
     .select(SELECT_MENCION_EXPORT)
-    .eq('exportado_sheets', false)
-    .order('created_at', { ascending: true })
-    .limit(limit);
+    .eq('exportado_sheets', false);
+
+  if (opts.clients && opts.clients.length > 0) {
+    query = query.in('cliente_id', opts.clients);
+  }
+  if (opts.since) {
+    query = query.gte('created_at', opts.since);
+  }
+  query = query
+    .order('created_at', { ascending: opts.recentFirst ? false : true })
+    .limit(opts.limit);
+
+  const { data, error } = await query;
   if (error) throw new Error(`No se pudieron leer menciones a exportar: ${error.message}`);
   return (data ?? []).map(mapMencionExport);
 }
