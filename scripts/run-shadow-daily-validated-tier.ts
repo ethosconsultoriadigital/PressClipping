@@ -15,8 +15,8 @@
  *
  * Dedupe estructural: usa `mediosDailyNetNew(shard)`, que para el shard A
  * excluye cualquier medio ya cubierto por otro cron. Shard default: A
- * (backward compatible). `--shard=B` corre el segundo shard. Shard inválido:
- * exit 2, sin writes.
+ * (backward compatible). `--shard=B` corre el segundo shard. `--shard=C` corre
+ * el tercer shard (C1, manual). Shard inválido: exit 2, sin writes.
  *
  * Uso:
  *   npm run shadow-daily-validated-tier -- --window-hours=48 --max-notas=30 \
@@ -223,20 +223,33 @@ function labelsDelShard(shard: DailyValidatedShard): {
   ultimoLote: string;
   modo: string;
 } {
-  if (shard === 'B') {
-    return {
-      workflowLabel: 'shadow-daily-validated-tier-b',
-      tierLabel: 'daily_validated',
-      ultimoLote: 'daily-validated-b',
-      modo: 'shadow_daily_validated_b',
-    };
+  switch (shard) {
+    case 'A':
+      return {
+        workflowLabel: 'shadow-daily-validated-tier',
+        tierLabel: 'daily_validated',
+        ultimoLote: 'daily-validated',
+        modo: 'shadow_daily_validated',
+      };
+    case 'B':
+      return {
+        workflowLabel: 'shadow-daily-validated-tier-b',
+        tierLabel: 'daily_validated',
+        ultimoLote: 'daily-validated-b',
+        modo: 'shadow_daily_validated_b',
+      };
+    case 'C':
+      return {
+        workflowLabel: 'shadow-daily-validated-tier-c',
+        tierLabel: 'daily_validated',
+        ultimoLote: 'daily-validated-c',
+        modo: 'shadow_daily_validated_c',
+      };
+    default: {
+      const _exhaustivo: never = shard;
+      throw new Error(`Shard daily-validated no soportado: ${String(_exhaustivo)}`);
+    }
   }
-  return {
-    workflowLabel: 'shadow-daily-validated-tier',
-    tierLabel: 'daily_validated',
-    ultimoLote: 'daily-validated',
-    modo: 'shadow_daily_validated',
-  };
 }
 
 /** Actualiza 08 con la decisión del ciclo para los medios net-new (sin romper filas). */
@@ -288,7 +301,7 @@ async function main(): Promise<void> {
   if (!shardParse.ok) {
     logger.error(
       { shard: args.shardRaw },
-      `Shard daily-validated inválido: "${args.shardRaw}". Usa --shard=A o --shard=B. Abortando sin escribir.`,
+      `Shard daily-validated inválido: "${args.shardRaw}". Usa --shard=A, --shard=B o --shard=C. Abortando sin escribir.`,
     );
     process.exit(2);
   }

@@ -238,7 +238,7 @@ export function mediosCrisisActivos(): ShadowMedioCrisis[] {
 // (MED-0066) — ambos net-new, EXCELENTE, detección CLI-0003 laboral limpia.
 // ============================================================================
 
-export const DAILY_VALIDATED_SHARDS = ['A', 'B'] as const;
+export const DAILY_VALIDATED_SHARDS = ['A', 'B', 'C'] as const;
 export type DailyValidatedShard = (typeof DAILY_VALIDATED_SHARDS)[number];
 
 export type FuenteDaily = 'auto' | 'rss' | 'sitemap';
@@ -520,18 +520,61 @@ export const IDS_DAILY_VALIDATED_B: readonly string[] = SHADOW_MEDIOS_DAILY_VALI
   (m) => m.medio_id,
 );
 
-/** Parsea `--shard`. Ausente → A. Vacío u otro valor → inválido. */
+// ============================================================================
+// TIER DAILY VALIDATED — SHARD C (C1, 2026-09-23). MANUAL ONLY.
+// ----------------------------------------------------------------------------
+// Bloque SEPARADO de A (47) y B (24). 12 PASS estrictos Wave06 Rescue + Wave07.
+// MED-0043 ZonaDocs queda DUPLICATE_HOLD (canónico MED-0192 ya está en A).
+// MED-0036 Chilango y MED-0101 Diario El Independiente BCS quedan RESERVADOS.
+// fuente=rss (PASS validado sobre RSS oficial). max_notas_shadow=15.
+// ============================================================================
+
+export const SHADOW_MEDIOS_DAILY_VALIDATED_C: readonly ShadowMedioDaily[] = [
+  { medio_id: 'MED-0106', nombre: 'El Informante BCS', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0124', nombre: 'Vallarta Independiente', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0072', nombre: 'San Luis Hoy', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0080', nombre: 'Astrolabio Diario Digital', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0093', nombre: 'Periodismo Negro', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0122', nombre: 'Tribuna de la Bahia', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0018', nombre: 'Reporte18', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0022', nombre: 'Potosi Noticias', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0009', nombre: 'Alcance Diario', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0116', nombre: 'Trafico ZMG', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0091', nombre: 'Punto Norte', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0138', nombre: 'TV4 Lagos / Altos', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+] as const;
+
+export const IDS_DAILY_VALIDATED_C: readonly string[] = SHADOW_MEDIOS_DAILY_VALIDATED_C.map(
+  (m) => m.medio_id,
+);
+
+/** Parsea `--shard`. Ausente → A. Vacío u otro valor (incl. D) → inválido. */
 export function parseDailyValidatedShard(
   raw: string | undefined,
 ): { ok: true; shard: DailyValidatedShard } | { ok: false; raw: string } {
   if (raw === undefined) return { ok: true, shard: 'A' };
   const v = raw.trim().toUpperCase();
-  if (v === 'A' || v === 'B') return { ok: true, shard: v };
+  if (v === 'A' || v === 'B' || v === 'C') return { ok: true, shard: v };
   return { ok: false, raw };
 }
 
+/**
+ * Config del shard. Switch EXHAUSTIVO: C NUNCA cae en A.
+ * Un shard nuevo sin case debe fallar en compile (`never`).
+ */
 export function configDailyValidated(shard: DailyValidatedShard = 'A'): readonly ShadowMedioDaily[] {
-  return shard === 'B' ? SHADOW_MEDIOS_DAILY_VALIDATED_B : SHADOW_MEDIOS_DAILY_VALIDATED;
+  switch (shard) {
+    case 'A':
+      return SHADOW_MEDIOS_DAILY_VALIDATED;
+    case 'B':
+      return SHADOW_MEDIOS_DAILY_VALIDATED_B;
+    case 'C':
+      return SHADOW_MEDIOS_DAILY_VALIDATED_C;
+    default: {
+      const _exhaustivo: never = shard;
+      throw new Error(`Shard daily-validated no soportado: ${String(_exhaustivo)}`);
+    }
+  }
 }
 
 /**
@@ -589,7 +632,7 @@ export function solapesDailyVsOtrosCrons(shard: DailyValidatedShard): string[] {
 /**
  * Guarda dura de aislamiento. No filtra: si hay overlap, el llamador DEBE
  * abortar. Shard A conserva el filtro silencioso histórico vs otros crons en
- * `mediosDailyNetNew('A')`; esta función cubre A↔B y B vs base/nacional/crisis.
+ * `mediosDailyNetNew('A')`; esta función cubre A↔B↔C y B/C vs base/nacional/crisis.
  */
 export function describirSolapeDailyShard(shard: DailyValidatedShard): string | null {
   const intra = solapesEntreDailyShards();
@@ -612,7 +655,7 @@ export function describirSolapeDailyShard(shard: DailyValidatedShard): string | 
  * Medios NET-NEW de un shard daily-validated. Default: A (47 históricos).
  *
  * Shard A: filtra en silencio contra base/nacional B/crisis (semántica histórica).
- * Shard B: NO filtra en silencio; el runner aborta si `describirSolapeDailyShard`
+ * Shard B/C: NO filtran en silencio; el runner aborta si `describirSolapeDailyShard`
  * reporta overlap. Aquí se devuelven los activos del shard.
  */
 export function mediosDailyNetNew(shard: DailyValidatedShard = 'A'): ShadowMedioDaily[] {
@@ -626,9 +669,9 @@ export function mediosDailyNetNew(shard: DailyValidatedShard = 'A'): ShadowMedio
 
 /**
  * medio_id cubiertos por CUALQUIER tier de cron shadow activo (base + nacional
- * B + crisis + daily-validated A + daily-validated B). Fuente de verdad única
- * para "¿este medio corre en algún cron?" — usada por auditorías read-only
- * fuera del pipeline.
+ * B + crisis + daily-validated A + B + C). Fuente de verdad única para
+ * "¿este medio corre en algún cron?" — usada por auditorías read-only fuera
+ * del pipeline. C cuenta aquí aunque su workflow aún no tenga schedule.
  */
 export function mediosEnCualquierCron(): Set<string> {
   const s = mediosYaCubiertosPorCron();

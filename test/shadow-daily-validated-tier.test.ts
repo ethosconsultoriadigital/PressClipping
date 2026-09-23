@@ -14,7 +14,10 @@ import {
   SHADOW_MEDIOS_CRISIS,
   SHADOW_MEDIOS_DAILY_VALIDATED,
   SHADOW_MEDIOS_DAILY_VALIDATED_B,
+  SHADOW_MEDIOS_DAILY_VALIDATED_C,
   IDS_DAILY_VALIDATED_B,
+  IDS_DAILY_VALIDATED_C,
+  configDailyValidated,
   mediosDailyValidatedActivos,
   mediosDailyValidatedTodosActivos,
   mediosDailyNetNew,
@@ -198,6 +201,12 @@ const IDS_B = [
   'MED-0081', 'MED-0063', 'MED-0105',
 ] as const;
 
+const IDS_C = [
+  'MED-0106', 'MED-0124', 'MED-0072', 'MED-0080',
+  'MED-0093', 'MED-0122', 'MED-0018', 'MED-0022',
+  'MED-0009', 'MED-0116', 'MED-0091', 'MED-0138',
+] as const;
+
 describe('DailyValidatedShard — A default y B acotado', () => {
   it('sin argumento el shard es A y conserva los 47 net-new', () => {
     expect(parseDailyValidatedShard(undefined)).toEqual({ ok: true, shard: 'A' });
@@ -225,9 +234,18 @@ describe('DailyValidatedShard — A default y B acotado', () => {
     expect(IDS_DAILY_VALIDATED_B).not.toContain('MED-0106');
   });
 
+  it('--shard=C resuelve exactamente los 12 IDs C1', () => {
+    expect(parseDailyValidatedShard('C')).toEqual({ ok: true, shard: 'C' });
+    expect(parseDailyValidatedShard('c')).toEqual({ ok: true, shard: 'C' });
+    expect(mediosDailyNetNew('C').map((m) => m.medio_id).sort()).toEqual([...IDS_C].sort());
+    expect(SHADOW_MEDIOS_DAILY_VALIDATED_C).toHaveLength(12);
+    expect(IDS_DAILY_VALIDATED_C).toHaveLength(12);
+    expect(new Set(IDS_DAILY_VALIDATED_C).size).toBe(12);
+  });
+
   it('shard inválido falla de forma segura (sin default silencioso a A)', () => {
     expect(parseDailyValidatedShard('')).toEqual({ ok: false, raw: '' });
-    expect(parseDailyValidatedShard('C')).toMatchObject({ ok: false });
+    expect(parseDailyValidatedShard('D')).toMatchObject({ ok: false });
     expect(parseDailyValidatedShard('daily')).toMatchObject({ ok: false });
   });
 
@@ -235,6 +253,7 @@ describe('DailyValidatedShard — A default y B acotado', () => {
     expect(solapesEntreDailyShards()).toEqual([]);
     expect(describirSolapeDailyShard('A')).toBeNull();
     expect(describirSolapeDailyShard('B')).toBeNull();
+    expect(describirSolapeDailyShard('C')).toBeNull();
   });
 
   it('B vs base/nacional/crisis overlap = 0', () => {
@@ -243,10 +262,10 @@ describe('DailyValidatedShard — A default y B acotado', () => {
     for (const id of IDS_B) expect(cubiertos.has(id)).toBe(false);
   });
 
-  it('mediosEnCualquierCron incluye B y el unique global es 104', () => {
+  it('mediosEnCualquierCron incluye B y C; unique global es 116', () => {
     const cron = mediosEnCualquierCron();
     for (const id of IDS_B) expect(cron.has(id)).toBe(true);
-    expect(cron.size).toBe(104);
+    expect(cron.size).toBe(116);
   });
 
   it('ningún medio de B está en el shard A', () => {
@@ -273,9 +292,53 @@ describe('DailyValidatedShard — A default y B acotado', () => {
     expect(b.has('MED-0106')).toBe(false);
   });
 
-  it('todos los shards respetan max_notas<=30', () => {
+  it('todos los shards respetan max_notas<=30; C usa 15', () => {
     for (const m of mediosDailyValidatedTodosActivos()) {
       expect(m.max_notas_shadow).toBeLessThanOrEqual(30);
+    }
+    for (const m of SHADOW_MEDIOS_DAILY_VALIDATED_C) {
+      expect(m.max_notas_shadow).toBe(15);
+      expect(m.fuente).toBe('rss');
+      expect(m.activo_shadow).toBe(true);
+    }
+  });
+});
+
+describe('DailyValidatedShard — C C1 acotado', () => {
+  it('configDailyValidated(C) retorna SOLO C', () => {
+    const ids = configDailyValidated('C').map((m) => m.medio_id);
+    expect(ids).toEqual([...IDS_DAILY_VALIDATED_C]);
+    expect(new Set(ids).size).toBe(12);
+    const a = new Set(configDailyValidated('A').map((m) => m.medio_id));
+    const b = new Set(configDailyValidated('B').map((m) => m.medio_id));
+    for (const id of ids) {
+      expect(a.has(id)).toBe(false);
+      expect(b.has(id)).toBe(false);
+    }
+    expect(ids).not.toContain('MED-0083');
+    expect(ids).not.toContain('MED-0019');
+  });
+
+  it('C no contiene ZonaDocs (0043 duplicate hold ni 0192 canónico) ni reservas', () => {
+    const c = new Set(IDS_DAILY_VALIDATED_C);
+    expect(c.has('MED-0043')).toBe(false);
+    expect(c.has('MED-0192')).toBe(false);
+    expect(c.has('MED-0036')).toBe(false);
+    expect(c.has('MED-0101')).toBe(false);
+  });
+
+  it('C vs base/nacional/crisis overlap = 0', () => {
+    expect(solapesDailyVsOtrosCrons('C')).toEqual([]);
+    const cubiertos = mediosYaCubiertosPorCron();
+    for (const id of IDS_C) expect(cubiertos.has(id)).toBe(false);
+  });
+
+  it('mediosDailyValidatedTodosActivos e EnCualquierCron incluyen C', () => {
+    const todos = new Set(mediosDailyValidatedTodosActivos().map((m) => m.medio_id));
+    const cron = mediosEnCualquierCron();
+    for (const id of IDS_C) {
+      expect(todos.has(id)).toBe(true);
+      expect(cron.has(id)).toBe(true);
     }
   });
 });
@@ -331,6 +394,46 @@ describe('workflow daily-validated shard B', () => {
   });
 });
 
+describe('workflow daily-validated shard C', () => {
+  const wfC = readFileSync(
+    join(process.cwd(), '.github/workflows/live-comparison-shadow-daily-validated-c.yml'),
+    'utf-8',
+  );
+
+  it('SOLO workflow_dispatch: sin schedule', () => {
+    expect(wfC).toContain('workflow_dispatch:');
+    expect(wfC).not.toMatch(/^\s*schedule:/m);
+    expect(wfC).not.toMatch(/cron:/);
+  });
+
+  it('mismo concurrency group, timeout 25, drain ON', () => {
+    expect(wfC).toMatch(/group:\s*live-comparison-shadow\b/);
+    expect(wfC).toMatch(/cancel-in-progress:\s*false/);
+    expect(wfC).toContain('timeout-minutes: 25');
+    expect(wfC).toContain("JOB_TIMEOUT_MINUTES: '25'");
+    expect(wfC).toContain("ENRICH_DRAIN_V1: '1'");
+  });
+
+  it('invoca el runner común con --shard=C, max 15, detect 500', () => {
+    expect(wfC).toContain('npm run shadow-daily-validated-tier');
+    expect(wfC).toContain('--shard=C');
+    expect(wfC).toContain('--max-notas=15');
+    expect(wfC).toContain('--enrich-limit=500');
+    expect(wfC).toContain('--detect-limit=500');
+  });
+
+  it('flags de seguridad y sin export a 02_Menciones', () => {
+    const cmd = wfC.slice(wfC.indexOf('npm run shadow-daily-validated-tier'));
+    expect(cmd).toContain('--no-export-results');
+    expect(cmd).toContain('--no-generate-xml');
+    expect(cmd).toContain('--no-send');
+    expect(cmd).toContain('--no-whatsapp');
+    expect(cmd).toContain('--no-email');
+    expect(cmd).not.toMatch(/--send\b/);
+    expect(cmd).not.toMatch(/twilio|smtp|gmail/i);
+  });
+});
+
 describe('runner daily-validated — shard wiring', () => {
   const src = readFileSync(
     join(process.cwd(), 'scripts/run-shadow-daily-validated-tier.ts'),
@@ -350,6 +453,13 @@ describe('runner daily-validated — shard wiring', () => {
   it('B se distingue por workflow-label y ultimo_lote, no por tier-label', () => {
     expect(src).toContain("workflowLabel: 'shadow-daily-validated-tier-b'");
     expect(src).toContain("ultimoLote: 'daily-validated-b'");
+  });
+
+  it('C se distingue por workflow-label y ultimo_lote, no por tier-label', () => {
+    expect(src).toContain("workflowLabel: 'shadow-daily-validated-tier-c'");
+    expect(src).toContain("ultimoLote: 'daily-validated-c'");
+    expect(src).toContain("modo: 'shadow_daily_validated_c'");
+    expect(src).toContain('--shard=A, --shard=B o --shard=C');
   });
 
   it('MED-0029 y MED-0196 siguen en A; MED-0204 ausente', () => {
