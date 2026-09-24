@@ -13,17 +13,26 @@
  *   npm run detect-mentions -- --limit=50 --only-with-text          # solo noticias con texto_cuerpo_nota
  *   npm run detect-mentions -- --limit=50 --only-with-text --dry-run
  *   npm run detect-mentions -- --medio-ids=MED-0030,MED-0008 --only-with-text --dry-run  # aislado por medio
+ *   npm run detect-mentions -- --limit=500 --only-with-text --fresh-lane --dry-run
+ *   npm run detect-mentions -- --limit=500 --only-with-text --fresh-lane --fresh-hours=48 --fresh-share=0.70
+ *
+ * Sin --fresh-lane la cola sigue oldest-first ASC (legacy).
  */
 import {
   getConfigMap,
   getKeywordsActivas,
-  getNoticiasPendientes,
+  getNoticiasPendientesConCola,
   insertMenciones,
   markNoticiasProcesadas,
   type KeywordActivaRow,
   type NoticiaScanRow,
   type MencionInsert,
 } from '../src/supabase/repositories.js';
+import {
+  MENTION_QUEUE_DEFAULTS,
+  MentionQueueError,
+  validateMentionQueueParams,
+} from '../src/matching/mentionQueue.js';
 import {
   matchKeyword,
   splitTerminos,
@@ -57,6 +66,10 @@ interface DetectArgs {
   clientId?: string;
   /** Límite máximo de menciones a insertar en modo real (safety cap por cliente). */
   maxInserts?: number;
+  /** Opt-in cola justa fresh+backlog. Ausente = legacy ASC. */
+  freshLane?: boolean;
+  freshHours?: number;
+  freshShare?: number;
 }
 
 function splitList(v: string): string[] {
@@ -78,6 +91,9 @@ function parseArgs(argv: string[]): DetectArgs {
     if (key === 'medio-ids') out.medioIds = splitList(value);
     if (key === 'client' && value) out.clientId = value;
     if (key === 'max-inserts') out.maxInserts = parseIntOrNull(value) ?? undefined;
+    if (key === 'fresh-lane') out.freshLane = true;
+    if (key === 'fresh-hours') out.freshHours = Number(value);
+    if (key === 'fresh-share') out.freshShare = Number(value);
   }
   return out;
 }
@@ -137,8 +153,33 @@ async function main() {
   const configLimit = parseIntOrNull(config['max_noticias_por_deteccion']) ?? 500;
   const limit = args.limit ?? configLimit;
 
+  if (args.freshLane) {
+    const freshHours = args.freshHours ?? MENTION_QUEUE_DEFAULTS.freshHours;
+    const freshShare = args.freshShare ?? MENTION_QUEUE_DEFAULTS.freshShare;
+    try {
+      validateMentionQueueParams({ limit, freshHours, freshShare });
+    } catch (err) {
+      const msg = err instanceof MentionQueueError ? err.message : String(err);
+      logger.error({ freshLane: true, limit, freshHours, freshShare, err: msg }, 'Fresh Lane: parámetros inválidos');
+      process.exit(1);
+    }
+  }
+
+  const runAnchor = new Date();
+
   logger.info(
-    { dryRun: args.dryRun, limit, onlyWithText: args.onlyWithText ?? false, includeDiagnostic: args.includeDiagnostic ?? false, medioIds: args.medioIds ?? null, clientId: args.clientId ?? null, maxInserts: args.maxInserts ?? null },
+    {
+      dryRun: args.dryRun,
+      limit,
+      onlyWithText: args.onlyWithText ?? false,
+      includeDiagnostic: args.includeDiagnostic ?? false,
+      medioIds: args.medioIds ?? null,
+      clientId: args.clientId ?? null,
+      maxInserts: args.maxInserts ?? null,
+      freshLane: args.freshLane ?? false,
+      freshHours: args.freshLane ? (args.freshHours ?? MENTION_QUEUE_DEFAULTS.freshHours) : null,
+      freshShare: args.freshLane ? (args.freshShare ?? MENTION_QUEUE_DEFAULTS.freshShare) : null,
+    },
     'Iniciando detección de menciones',
   );
 
@@ -154,12 +195,18 @@ async function main() {
   const reglas = keywordRows.map(toRule);
   const alertaPorKeyword = new Map(keywordRows.map((k) => [k.keyword_id, k.alerta]));
 
-  const noticias = await getNoticiasPendientes({
+  const cola = await getNoticiasPendientesConCola({
     limit,
     onlyWithText: args.onlyWithText,
     excludeDiagnostic: !args.includeDiagnostic,
     medioIds: args.medioIds,
+    freshLane: args.freshLane,
+    freshHours: args.freshLane ? (args.freshHours ?? MENTION_QUEUE_DEFAULTS.freshHours) : undefined,
+    freshShare: args.freshLane ? (args.freshShare ?? MENTION_QUEUE_DEFAULTS.freshShare) : undefined,
+    anchor: runAnchor,
   });
+  const noticias = cola.rows;
+  logger.info(cola.telemetry, 'Cola de detección seleccionada');
   logger.info(
     { keywords: reglas.length, noticias: noticias.length },
     'Noticias pendientes cargadas',

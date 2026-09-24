@@ -6,6 +6,15 @@
  */
 import { getSupabase } from './client.js';
 import {
+  cutoffFromAnchor,
+  extremaCreatedAt,
+  planMentionQueue,
+  validateMentionQueueParams,
+  MENTION_QUEUE_DEFAULTS,
+  MENTION_QUEUE_SCHEMA_VERSION,
+  type MentionQueueTelemetry,
+} from '../matching/mentionQueue.js';
+import {
   retryPostgrest,
   describeSupabaseError,
   hintForSupabaseError,
@@ -419,6 +428,7 @@ export async function getKeywordsActivas(): Promise<KeywordActivaRow[]> {
 export interface NoticiaScanRow {
   noticia_id: string;
   medio_id: string | null;
+  created_at?: string | null;
   titulo: string | null;
   subtitulo: string | null;
   resumen: string | null;
@@ -448,43 +458,26 @@ export interface NoticiasPendientesOpts {
   excludeDiagnostic?: boolean;
   /** Aísla a estos medio_id (detección dirigida; no mezcla backlog global). */
   medioIds?: string[];
+  /**
+   * Opt-in: cola justa fresh DESC + backlog ASC. Sin este flag, oldest-first
+   * ASC (legacy). No cambia la semántica de --client.
+   */
+  freshLane?: boolean;
+  freshHours?: number;
+  freshShare?: number;
+  /** Reloj congelado del run. Si falta, se toma una sola vez al entrar. */
+  anchor?: Date;
 }
 
-/** Lee noticias aún no analizadas para menciones (las pendientes). */
-export async function getNoticiasPendientes(
-  limitOrOpts: number | NoticiasPendientesOpts,
-): Promise<NoticiaScanRow[]> {
-  const opts: NoticiasPendientesOpts =
-    typeof limitOrOpts === 'number' ? { limit: limitOrOpts } : limitOrOpts;
+const SELECT_NOTICIAS_PENDIENTES =
+  'noticia_id, medio_id, created_at, titulo, subtitulo, resumen, texto_extraido,' +
+  ' texto_nota_limpia, texto_cuerpo_nota, seccion, medios(nombre_medio)';
 
-  let query = getSupabase()
-    .from('noticias')
-    .select(
-      'noticia_id, medio_id, titulo, subtitulo, resumen, texto_extraido,' +
-      ' texto_nota_limpia, texto_cuerpo_nota, seccion, medios(nombre_medio)',
-    )
-    .eq('menciones_procesado', false)
-    .order('created_at', { ascending: true })
-    .limit(opts.limit);
-
-  if (opts.medioIds && opts.medioIds.length > 0) {
-    query = query.in('medio_id', opts.medioIds);
-  }
-
-  if (opts.onlyWithText) {
-    query = query.not('texto_cuerpo_nota', 'is', null);
-  }
-
-  if (opts.excludeDiagnostic) {
-    query = query.neq('origen_cobertura', 'pressclipping_diagnostico');
-  }
-
-  const { data, error } = await query;
-  if (error) throw new Error(`No se pudieron leer noticias pendientes: ${error.message}`);
-
-  return (data ?? []).map((row: any) => ({
+function mapNoticiaScanRow(row: any): NoticiaScanRow {
+  return {
     noticia_id: row.noticia_id,
     medio_id: row.medio_id,
+    created_at: row.created_at ?? null,
     titulo: row.titulo,
     subtitulo: row.subtitulo,
     resumen: row.resumen,
@@ -493,7 +486,145 @@ export async function getNoticiasPendientes(
     texto_cuerpo_nota: row.texto_cuerpo_nota ?? null,
     seccion: row.seccion,
     medio_nombre: row.medios?.nombre_medio ?? null,
-  }));
+  };
+}
+
+function aplicarFiltrosPendientes(query: any, opts: NoticiasPendientesOpts): any {
+  let q = query;
+  if (opts.medioIds && opts.medioIds.length > 0) {
+    q = q.in('medio_id', opts.medioIds);
+  }
+  if (opts.onlyWithText) {
+    q = q.not('texto_cuerpo_nota', 'is', null);
+  }
+  if (opts.excludeDiagnostic) {
+    q = q.neq('origen_cobertura', 'pressclipping_diagnostico');
+  }
+  return q;
+}
+
+export interface NoticiasPendientesCola {
+  rows: NoticiaScanRow[];
+  telemetry: MentionQueueTelemetry;
+}
+
+/** Lee noticias aún no analizadas para menciones (las pendientes). */
+export async function getNoticiasPendientes(
+  limitOrOpts: number | NoticiasPendientesOpts,
+): Promise<NoticiaScanRow[]> {
+  const cola = await getNoticiasPendientesConCola(limitOrOpts);
+  return cola.rows;
+}
+
+/**
+ * Misma selección que `getNoticiasPendientes`, con telemetría de cola.
+ * Sin `freshLane`: oldest-first ASC (legacy). Con `freshLane`: cuota justa.
+ */
+export async function getNoticiasPendientesConCola(
+  limitOrOpts: number | NoticiasPendientesOpts,
+): Promise<NoticiasPendientesCola> {
+  const opts: NoticiasPendientesOpts =
+    typeof limitOrOpts === 'number' ? { limit: limitOrOpts } : limitOrOpts;
+
+  if (!opts.freshLane) {
+    let query = getSupabase()
+      .from('noticias')
+      .select(SELECT_NOTICIAS_PENDIENTES)
+      .eq('menciones_procesado', false)
+      .order('created_at', { ascending: true })
+      .limit(opts.limit);
+    query = aplicarFiltrosPendientes(query, opts);
+    const { data, error } = await query;
+    if (error) throw new Error(`No se pudieron leer noticias pendientes: ${error.message}`);
+    const rows = (data ?? []).map(mapNoticiaScanRow);
+    const extrema = extremaCreatedAt(rows);
+    return {
+      rows,
+      telemetry: {
+        event: 'mention_queue_selection',
+        schema_version: MENTION_QUEUE_SCHEMA_VERSION,
+        fresh_lane: false,
+        anchor: null,
+        cutoff: null,
+        limit: opts.limit,
+        fresh_hours: null,
+        fresh_share: null,
+        fresh_target: 0,
+        backlog_target: opts.limit,
+        fresh_pool: 0,
+        backlog_pool: rows.length,
+        selected_total: rows.length,
+        fresh_selected: 0,
+        backlog_selected: rows.length,
+        duplicate_filtered: 0,
+        oldest_selected: extrema.oldest_selected,
+        newest_selected: extrema.newest_selected,
+      },
+    };
+  }
+
+  const freshHours = opts.freshHours ?? MENTION_QUEUE_DEFAULTS.freshHours;
+  const freshShare = opts.freshShare ?? MENTION_QUEUE_DEFAULTS.freshShare;
+  validateMentionQueueParams({ limit: opts.limit, freshHours, freshShare });
+
+  const anchor = opts.anchor ?? new Date();
+  const cutoff = cutoffFromAnchor(anchor, freshHours);
+  const cutoffIso = cutoff.toISOString();
+
+  let freshQuery = getSupabase()
+    .from('noticias')
+    .select(SELECT_NOTICIAS_PENDIENTES)
+    .eq('menciones_procesado', false)
+    .gte('created_at', cutoffIso)
+    .order('created_at', { ascending: false })
+    .limit(opts.limit);
+  freshQuery = aplicarFiltrosPendientes(freshQuery, opts);
+
+  let backlogQuery = getSupabase()
+    .from('noticias')
+    .select(SELECT_NOTICIAS_PENDIENTES)
+    .eq('menciones_procesado', false)
+    .lt('created_at', cutoffIso)
+    .order('created_at', { ascending: true })
+    .limit(opts.limit);
+  backlogQuery = aplicarFiltrosPendientes(backlogQuery, opts);
+
+  const [freshRes, backlogRes] = await Promise.all([freshQuery, backlogQuery]);
+  if (freshRes.error) {
+    throw new Error(`No se pudieron leer noticias fresh: ${freshRes.error.message}`);
+  }
+  if (backlogRes.error) {
+    throw new Error(`No se pudieron leer noticias backlog: ${backlogRes.error.message}`);
+  }
+
+  const fresh = (freshRes.data ?? []).map(mapNoticiaScanRow);
+  const backlog = (backlogRes.data ?? []).map(mapNoticiaScanRow);
+  const plan = planMentionQueue({ fresh, backlog, limit: opts.limit, freshShare });
+  const extrema = extremaCreatedAt(plan.selected);
+
+  return {
+    rows: plan.selected,
+    telemetry: {
+      event: 'mention_queue_selection',
+      schema_version: MENTION_QUEUE_SCHEMA_VERSION,
+      fresh_lane: true,
+      anchor: anchor.toISOString(),
+      cutoff: cutoffIso,
+      limit: opts.limit,
+      fresh_hours: freshHours,
+      fresh_share: freshShare,
+      fresh_target: plan.fresh_target,
+      backlog_target: plan.backlog_target,
+      fresh_pool: fresh.length,
+      backlog_pool: backlog.length,
+      selected_total: plan.selected.length,
+      fresh_selected: plan.fresh_selected,
+      backlog_selected: plan.backlog_selected,
+      duplicate_filtered: plan.duplicate_filtered,
+      oldest_selected: extrema.oldest_selected,
+      newest_selected: extrema.newest_selected,
+    },
+  };
 }
 
 export interface MencionInsert {

@@ -3,6 +3,8 @@
  *   - getNoticiasPendientes acepta objeto de opciones (retrocompatible con número).
  *   - onlyWithText filtra correctamente.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import type { NoticiasPendientesOpts } from '../src/supabase/repositories.js';
 
@@ -123,5 +125,69 @@ describe('clasificarNoticias (lógica del resumen dry-run)', () => {
     // Simula que el filtro ya eliminó las noticias sin cuerpo
     const soloConCuerpo = muestra.filter((n) => n.texto_cuerpo_nota !== null);
     expect(clasificarNoticias(soloConCuerpo).sinTexto).toBe(0);
+  });
+});
+
+// ─── Fresh Lane: parseo opt-in y retrocompatibilidad ─────────────────────────
+
+function parseFreshLane(argv: string[]): boolean {
+  return argv.some((a) => a === '--fresh-lane' || a.startsWith('--fresh-lane='));
+}
+
+describe('parseArgs --fresh-lane', () => {
+  it('ausente → legacy (false)', () => {
+    expect(parseFreshLane(['--limit=500', '--only-with-text', '--dry-run'])).toBe(false);
+  });
+
+  it('presente → opt-in', () => {
+    expect(parseFreshLane(['--limit=500', '--fresh-lane', '--fresh-hours=48'])).toBe(true);
+  });
+});
+
+describe('legacy y Fresh Lane — invariantes de código', () => {
+  const repo = readFileSync(join(process.cwd(), 'src/supabase/repositories.ts'), 'utf-8');
+  const detect = readFileSync(join(process.cwd(), 'scripts/detect-mentions.ts'), 'utf-8');
+
+  it('getNoticiasPendientes(number) sigue exportada (retrocompatible)', () => {
+    expect(repo).toMatch(/export async function getNoticiasPendientes\(/);
+    expect(repo).toMatch(/limitOrOpts: number \| NoticiasPendientesOpts/);
+  });
+
+  it('sin freshLane la consulta legacy sigue oldest-first ASC', () => {
+    expect(repo).toMatch(/if \(!opts\.freshLane\)/);
+    expect(repo).toMatch(/\.order\('created_at', \{ ascending: true \}\)/);
+  });
+
+  it('fresh lane: fresh >= cutoff DESC y backlog < cutoff ASC; filtros idénticos', () => {
+    expect(repo).toMatch(/\.gte\('created_at', cutoffIso\)/);
+    expect(repo).toMatch(/\.lt\('created_at', cutoffIso\)/);
+    expect(repo).toMatch(/ascending: false/);
+    const usosFiltro = repo.split('aplicarFiltrosPendientes(').length - 1;
+    expect(usosFiltro).toBeGreaterThanOrEqual(3);
+  });
+
+  it('--only-with-text se aplica en aplicarFiltrosPendientes (ambas lanes)', () => {
+    expect(repo).toMatch(/if \(opts\.onlyWithText\)/);
+    expect(repo).toMatch(/texto_cuerpo_nota/);
+  });
+
+  it('Fresh Lane + --client sigue SIN marcar procesadas', () => {
+    expect(detect).toMatch(/if \(!args\.clientId\)/);
+    expect(detect).toMatch(/markNoticiasProcesadas\(noticias\.map/);
+    expect(detect).not.toMatch(/if \(!args\.clientId && !args\.freshLane\)/);
+  });
+
+  it('marca solo las noticias seleccionadas (cola.rows), no pools crudos', () => {
+    expect(detect).toMatch(/const noticias = cola\.rows/);
+    expect(detect).toMatch(/markNoticiasProcesadas\(noticias\.map\(\(n\) => n\.noticia_id\)\)/);
+  });
+
+  it('workflows shadow no activan Fresh Lane todavía', () => {
+    const a = readFileSync(join(process.cwd(), '.github/workflows/live-comparison-shadow-daily-validated.yml'), 'utf-8');
+    const b = readFileSync(join(process.cwd(), '.github/workflows/live-comparison-shadow-daily-validated-b.yml'), 'utf-8');
+    const c = readFileSync(join(process.cwd(), '.github/workflows/live-comparison-shadow-daily-validated-c.yml'), 'utf-8');
+    expect(a).not.toContain('--fresh-lane');
+    expect(b).not.toContain('--fresh-lane');
+    expect(c).not.toContain('--fresh-lane');
   });
 });
