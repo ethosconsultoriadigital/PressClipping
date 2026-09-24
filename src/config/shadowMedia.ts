@@ -521,12 +521,11 @@ export const IDS_DAILY_VALIDATED_B: readonly string[] = SHADOW_MEDIOS_DAILY_VALI
 );
 
 // ============================================================================
-// TIER DAILY VALIDATED — SHARD C (C16, 2026-09-24). Schedule 13:55 UTC.
+// TIER DAILY VALIDATED — SHARD C (C17, 2026-09-24). Schedule 13:55 UTC.
 // ----------------------------------------------------------------------------
-// Bloque SEPARADO de A (47) y B (24). C1 (12) + 4 reservas strict C16:
-// MED-0036 Chilango, MED-0101 Diario El Independiente BCS, MED-0052 Hora Cero,
-// MED-0062 Café Negro Portal. MED-0043 ZonaDocs queda DUPLICATE_HOLD (canónico
-// MED-0192 ya está en A). MED-0118 El Respetable queda CONTENT_HOLD.
+// Bloque SEPARADO de A (47) y B (24). C16 (16) + MED-0095 Cadena Noticias.
+// MED-0043 ZonaDocs queda DUPLICATE_HOLD (canónico MED-0192 ya está en A).
+// MED-0118 El Respetable queda CONTENT_HOLD.
 // fuente=rss (PASS validado sobre RSS oficial). max_notas_shadow=15.
 // ============================================================================
 
@@ -547,6 +546,7 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED_C: readonly ShadowMedioDaily[] = [
   { medio_id: 'MED-0101', nombre: 'Diario El Independiente BCS', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0052', nombre: 'Hora Cero', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0062', nombre: 'Cafe Negro Portal', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0095', nombre: 'Cadena Noticias', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
 ] as const;
 
 export const IDS_DAILY_VALIDATED_C: readonly string[] = SHADOW_MEDIOS_DAILY_VALIDATED_C.map(
