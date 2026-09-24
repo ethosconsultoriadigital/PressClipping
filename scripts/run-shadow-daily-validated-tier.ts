@@ -16,7 +16,7 @@
  * Dedupe estructural: usa `mediosDailyNetNew(shard)`, que para el shard A
  * excluye cualquier medio ya cubierto por otro cron. Shard default: A
  * (backward compatible). `--shard=B` corre el segundo shard. `--shard=C` corre
- * el tercer shard (C1, manual). Shard inválido: exit 2, sin writes.
+ * el tercer shard (C16). Shard inválido: exit 2, sin writes.
  *
  * Uso:
  *   npm run shadow-daily-validated-tier -- --window-hours=48 --max-notas=30 \
