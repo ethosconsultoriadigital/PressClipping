@@ -521,12 +521,14 @@ export const IDS_DAILY_VALIDATED_B: readonly string[] = SHADOW_MEDIOS_DAILY_VALI
 );
 
 // ============================================================================
-// TIER DAILY VALIDATED — SHARD C (C40, 2026-09-24). Schedule 13:55 UTC.
+// TIER DAILY VALIDATED — SHARD C (C59, 2026-09-24). Schedule 13:55 UTC.
 // ----------------------------------------------------------------------------
-// Bloque SEPARADO de A (47) y B (24). C23 (23) + 17 READY STRICT de Batch02.
+// Bloque SEPARADO de A (47) y B (24). C40 (40) + 19 READY STRICT de Batch03.
 // MED-0224 Cúspide México se EXCLUYE (403 LIVE en predeploy; no se sustituye).
 // MED-0225/0232 REVIEW_THRESHOLD no entran. MED-0213 CONTENT_HOLD no entra.
+// Batch03 holds NO entran: 0235/0238/0239 CONTENT/REVIEW, 0243/0249/0254 REVIEW.
 // MED-0043 ZonaDocs DUPLICATE_HOLD. MED-0118 El Respetable CONTENT_HOLD.
+// Colima Digital es alias de MED-0242 Colima Noticias (un solo ID).
 // fuente=rss. max_notas_shadow=15.
 // ============================================================================
 
@@ -571,6 +573,25 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED_C: readonly ShadowMedioDaily[] = [
   { medio_id: 'MED-0231', nombre: 'Es Noticia Veracruz', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0233', nombre: 'Periodismo Y Ambiente', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0234', nombre: 'Expreso.press', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0236', nombre: 'LA JORNADA BAJA CALIFORNIA', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0237', nombre: 'Juárez Noticias', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0240', nombre: 'Reto Diario', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0241', nombre: 'Notiver', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0242', nombre: 'Colima Noticias', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0244', nombre: 'Tus Buenas Noticias', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0245', nombre: 'Eldespertadorqr.com', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0246', nombre: 'El Momento Quintana Roo', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0247', nombre: 'Mayacomunicacion.com.mx', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0248', nombre: 'Noticiero Altavoz', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0250', nombre: 'Candelero', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0251', nombre: 'Cco Noticias Corporación Comunicativa Ojeda', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0252', nombre: 'La Gazzetta DF', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0253', nombre: 'Tribuna del Yaqui', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0255', nombre: 'Plaza de Armas', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0256', nombre: 'Segundo a Segundo', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0257', nombre: 'Dominiopublico', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0258', nombre: 'La Región Tula', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0259', nombre: 'Arsenal Diario Digital', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
 ] as const;
 
 export const IDS_DAILY_VALIDATED_C: readonly string[] = SHADOW_MEDIOS_DAILY_VALIDATED_C.map(
