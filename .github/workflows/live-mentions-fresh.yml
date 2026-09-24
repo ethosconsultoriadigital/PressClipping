@@ -1,0 +1,81 @@
+# ============================================================================
+# LIVE MENTIONS FRESH — canary manual (sin horario)
+# ----------------------------------------------------------------------------
+# Detecta menciones en Fresh Lane y exporta solo 02_Menciones para
+# CLI-MERY-TEST, CLI-0001 y CLI-0002.
+#
+# NO hace crawl, enrich, alertas, email, WhatsApp, Twilio ni SMTP.
+# NO escribe Sheets finales de cliente (Patrón, Jumex, NOTAS ENVIADAS MERYPOZOS).
+#
+# workflow_dispatch únicamente. dry_run=true por defecto hasta autorizar el canary.
+# Concurrency compartida con los writers principales: no cancela corridas ajenas.
+# ============================================================================
+name: live-mentions-fresh
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'true = no escribe menciones ni 02_Menciones'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+
+concurrency:
+  group: live-comparison-shadow
+  cancel-in-progress: false
+
+jobs:
+  live-mentions:
+    name: Detect fresh lane + export 02_Menciones
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+      GOOGLE_OUTPUT_SHEET_ID: ${{ secrets.GOOGLE_OUTPUT_SHEET_ID }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      LOG_FORMAT: json
+      RUN_BY: github-actions-live-mentions-fresh
+      NO_SEND: 'true'
+      NO_EMAIL: 'true'
+      NO_WHATSAPP: 'true'
+      NO_TWILIO: 'true'
+      NO_SMTP: 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Detect mentions (fresh lane, sin crawl ni enrich)
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+          INPUT_DRY_RUN: ${{ inputs.dry_run || 'true' }}
+        run: |
+          set -euo pipefail
+          ARGS="--limit=500 --only-with-text --fresh-lane --fresh-hours=48 --fresh-share=0.70"
+          if [ "$INPUT_DRY_RUN" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          npm run detect-mentions -- $ARGS
+
+      - name: Export 02_Menciones (ventana editorial 48h)
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+          INPUT_DRY_RUN: ${{ inputs.dry_run || 'true' }}
+        run: |
+          set -euo pipefail
+          ARGS="--mentions-only --clients=CLI-MERY-TEST,CLI-0001,CLI-0002 --window-hours=48 --news-window-hours=48 --recent-first --limit=500"
+          if [ "$INPUT_DRY_RUN" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          npm run export-results -- $ARGS

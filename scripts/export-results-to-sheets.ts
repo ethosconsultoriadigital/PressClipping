@@ -12,6 +12,12 @@
  * Uso LIVE 48h (3 clientes):
  *   npm run export-results -- --mentions-only --clients=CLI-MERY-TEST,CLI-0001,CLI-0002 \
  *     --window-hours=48 --recent-first --limit=500 --dry-run
+ *
+ * Ventana editorial opt-in (no cambia el legado si se omite):
+ *   --news-window-hours=48
+ * Filtra menciones.created_at con --window-hours y, además, exige que la
+ * noticia sea reciente por fecha_publicacion (o fecha_captura solo si
+ * fecha_publicacion es NULL).
  */
 import { OUTPUT_TABS } from '../src/sheets/client.js';
 import {
@@ -37,6 +43,7 @@ export interface ExportResultsArgs {
   mentionsOnly: boolean;
   clients: string[] | null;
   windowHours: number | null;
+  newsWindowHours: number | null;
   recentFirst: boolean;
   limit: number | null;
   dryRun: boolean;
@@ -47,6 +54,7 @@ export function parseExportResultsArgs(argv: string[]): ExportResultsArgs {
     mentionsOnly: false,
     clients: null,
     windowHours: null,
+    newsWindowHours: null,
     recentFirst: false,
     limit: null,
     dryRun: false,
@@ -66,6 +74,9 @@ export function parseExportResultsArgs(argv: string[]): ExportResultsArgs {
         break;
       case 'window-hours':
         out.windowHours = Number(val) || null;
+        break;
+      case 'news-window-hours':
+        out.newsWindowHours = Number(val) || null;
         break;
       case 'recent-first':
         out.recentFirst = true;
@@ -89,10 +100,15 @@ async function exportarMenciones(
     args.windowHours != null
       ? new Date(Date.now() - args.windowHours * 3600e3).toISOString()
       : undefined;
+  const newsSince =
+    args.newsWindowHours != null
+      ? new Date(Date.now() - args.newsWindowHours * 3600e3).toISOString()
+      : undefined;
   const menciones = await getMencionesPendientesExport({
     limit,
     clients: args.clients ?? undefined,
     since,
+    newsSince,
     recentFirst: args.recentFirst,
   });
   if (menciones.length === 0) {
@@ -127,6 +143,7 @@ async function exportarMenciones(
       newest: created[created.length - 1] ?? null,
       sheet_rows: peek.filas,
       sheet_blank_ids: peek.blank,
+      news_window_hours: args.newsWindowHours,
       dry_run: args.dryRun,
     },
     args.dryRun ? '[dry-run] Plan export 02_Menciones' : 'Plan export 02_Menciones',
