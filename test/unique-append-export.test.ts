@@ -106,6 +106,7 @@ describe('parseExportResultsArgs', () => {
       mentionsOnly: false,
       clients: null,
       windowHours: null,
+      newsWindowHours: null,
       recentFirst: false,
       limit: null,
       dryRun: false,

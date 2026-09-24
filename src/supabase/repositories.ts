@@ -42,6 +42,11 @@ import {
   mapMencionExport,
 } from '../types/mencion.js';
 import {
+  consultasVentanaEditorial,
+  fusionarMencionesExport,
+  type ClausulaEditorial,
+} from '../exporters/liveNewsWindow.js';
+import {
   type NoticiaRawRow,
   SELECT_NOTICIA_RAW,
   mapNoticiaRaw,
@@ -688,8 +693,21 @@ export async function markNoticiasProcesadas(ids: string[]): Promise<void> {
 export interface MencionesPendientesExportOpts {
   limit: number;
   clients?: string[];
+  /** Corte sobre menciones.created_at (procesamiento / export incremental). */
   since?: string;
   recentFirst?: boolean;
+  /**
+   * Corte editorial opt-in. Sin este campo la consulta legacy no cambia.
+   * fecha_publicacion >= corte, o publicación NULL y fecha_captura >= corte.
+   */
+  newsSince?: string;
+}
+
+type FilaMencionExport = { mencion_id: string; created_at?: string | null };
+
+function aplicarClausulaEditorial(query: any, clausula: ClausulaEditorial): any {
+  if (clausula.op === 'is') return query.is(clausula.columna, null);
+  return query.gte(clausula.columna, clausula.valor);
 }
 
 export async function getMencionesPendientesExport(
@@ -697,24 +715,41 @@ export async function getMencionesPendientesExport(
 ): Promise<MencionExportRow[]> {
   const opts: MencionesPendientesExportOpts =
     typeof limitOrOpts === 'number' ? { limit: limitOrOpts } : limitOrOpts;
-  let query = getSupabase()
-    .from('menciones')
-    .select(SELECT_MENCION_EXPORT)
-    .eq('exportado_sheets', false);
 
-  if (opts.clients && opts.clients.length > 0) {
-    query = query.in('cliente_id', opts.clients);
-  }
-  if (opts.since) {
-    query = query.gte('created_at', opts.since);
-  }
-  query = query
-    .order('created_at', { ascending: opts.recentFirst ? false : true })
-    .limit(opts.limit);
+  const leer = async (clausulas: ClausulaEditorial[] = []): Promise<FilaMencionExport[]> => {
+    const select = opts.newsSince ? `created_at, ${SELECT_MENCION_EXPORT}` : SELECT_MENCION_EXPORT;
+    let query = (getSupabase() as any).from('menciones').select(select).eq('exportado_sheets', false);
 
-  const { data, error } = await query;
-  if (error) throw new Error(`No se pudieron leer menciones a exportar: ${error.message}`);
-  return (data ?? []).map(mapMencionExport);
+    if (opts.clients && opts.clients.length > 0) {
+      query = query.in('cliente_id', opts.clients);
+    }
+    if (opts.since) {
+      query = query.gte('created_at', opts.since);
+    }
+    for (const clausula of clausulas) {
+      query = aplicarClausulaEditorial(query, clausula);
+    }
+    query = query
+      .order('created_at', { ascending: opts.recentFirst ? false : true })
+      .limit(opts.limit);
+
+    const { data, error } = await query;
+    if (error) throw new Error(`No se pudieron leer menciones a exportar: ${error.message}`);
+    return (data ?? []) as FilaMencionExport[];
+  };
+
+  if (!opts.newsSince) {
+    return (await leer()).map(mapMencionExport);
+  }
+
+  const partes = [];
+  for (const consulta of consultasVentanaEditorial(opts.newsSince)) {
+    partes.push(await leer(consulta));
+  }
+  return fusionarMencionesExport(partes, {
+    limit: opts.limit,
+    recentFirst: opts.recentFirst ?? false,
+  }).map(mapMencionExport);
 }
 
 /** Marca menciones como ya exportadas a la pestaña de resultados (en lotes). */
