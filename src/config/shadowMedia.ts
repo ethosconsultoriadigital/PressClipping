@@ -521,13 +521,13 @@ export const IDS_DAILY_VALIDATED_B: readonly string[] = SHADOW_MEDIOS_DAILY_VALI
 );
 
 // ============================================================================
-// TIER DAILY VALIDATED — SHARD C (C23, 2026-09-24). Schedule 13:55 UTC.
+// TIER DAILY VALIDATED — SHARD C (C40, 2026-09-24). Schedule 13:55 UTC.
 // ----------------------------------------------------------------------------
-// Bloque SEPARADO de A (47) y B (24). C17 (17) + 6 READY STRICT de Batch01.
-// MED-0043 ZonaDocs queda DUPLICATE_HOLD (canónico MED-0192 ya está en A).
-// MED-0118 El Respetable queda CONTENT_HOLD.
-// MED-0207/0208/0209 REVIEW_THRESHOLD y MED-0213 CONTENT_HOLD no entran.
-// fuente=rss (PASS validado sobre RSS oficial). max_notas_shadow=15.
+// Bloque SEPARADO de A (47) y B (24). C23 (23) + 17 READY STRICT de Batch02.
+// MED-0224 Cúspide México se EXCLUYE (403 LIVE en predeploy; no se sustituye).
+// MED-0225/0232 REVIEW_THRESHOLD no entran. MED-0213 CONTENT_HOLD no entra.
+// MED-0043 ZonaDocs DUPLICATE_HOLD. MED-0118 El Respetable CONTENT_HOLD.
+// fuente=rss. max_notas_shadow=15.
 // ============================================================================
 
 export const SHADOW_MEDIOS_DAILY_VALIDATED_C: readonly ShadowMedioDaily[] = [
@@ -554,6 +554,23 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED_C: readonly ShadowMedioDaily[] = [
   { medio_id: 'MED-0211', nombre: 'Cadena Política', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0212', nombre: 'Punto por Punto', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0214', nombre: 'Jlanoticias', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0215', nombre: 'El Tiempo de Monclova', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0216', nombre: 'AlMomento.mx', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0217', nombre: 'La Jornada Aguascalientes', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0218', nombre: 'Nuevolaredo.tv', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0219', nombre: 'Marcrix Noticias', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0220', nombre: 'Ovaciones', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0221', nombre: 'El Liberal Metropolitano', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0222', nombre: 'La Prensa De Monclova', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0223', nombre: 'Talajalisco noticias', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0226', nombre: 'Mass Informacion', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0227', nombre: 'Tigmx', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0228', nombre: 'La Jornada Estado de México', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0229', nombre: 'La Jornada de Oriente', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0230', nombre: 'Libertador', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0231', nombre: 'Es Noticia Veracruz', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0233', nombre: 'Periodismo Y Ambiente', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0234', nombre: 'Expreso.press', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
 ] as const;
 
 export const IDS_DAILY_VALIDATED_C: readonly string[] = SHADOW_MEDIOS_DAILY_VALIDATED_C.map(

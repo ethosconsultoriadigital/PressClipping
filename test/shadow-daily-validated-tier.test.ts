@@ -208,6 +208,9 @@ const IDS_C = [
   'MED-0036', 'MED-0101', 'MED-0052', 'MED-0062',
   'MED-0095',
   'MED-0205', 'MED-0206', 'MED-0210', 'MED-0211', 'MED-0212', 'MED-0214',
+  'MED-0215', 'MED-0216', 'MED-0217', 'MED-0218', 'MED-0219', 'MED-0220',
+  'MED-0221', 'MED-0222', 'MED-0223', 'MED-0226', 'MED-0227', 'MED-0228',
+  'MED-0229', 'MED-0230', 'MED-0231', 'MED-0233', 'MED-0234',
 ] as const;
 
 describe('DailyValidatedShard — A default y B acotado', () => {
@@ -237,13 +240,13 @@ describe('DailyValidatedShard — A default y B acotado', () => {
     expect(IDS_DAILY_VALIDATED_B).not.toContain('MED-0106');
   });
 
-  it('--shard=C resuelve exactamente los 23 IDs C23', () => {
+  it('--shard=C resuelve exactamente los 40 IDs C40', () => {
     expect(parseDailyValidatedShard('C')).toEqual({ ok: true, shard: 'C' });
     expect(parseDailyValidatedShard('c')).toEqual({ ok: true, shard: 'C' });
     expect(mediosDailyNetNew('C').map((m) => m.medio_id).sort()).toEqual([...IDS_C].sort());
-    expect(SHADOW_MEDIOS_DAILY_VALIDATED_C).toHaveLength(23);
-    expect(IDS_DAILY_VALIDATED_C).toHaveLength(23);
-    expect(new Set(IDS_DAILY_VALIDATED_C).size).toBe(23);
+    expect(SHADOW_MEDIOS_DAILY_VALIDATED_C).toHaveLength(40);
+    expect(IDS_DAILY_VALIDATED_C).toHaveLength(40);
+    expect(new Set(IDS_DAILY_VALIDATED_C).size).toBe(40);
   });
 
   it('shard inválido falla de forma segura (sin default silencioso a A)', () => {
@@ -265,10 +268,10 @@ describe('DailyValidatedShard — A default y B acotado', () => {
     for (const id of IDS_B) expect(cubiertos.has(id)).toBe(false);
   });
 
-  it('mediosEnCualquierCron incluye B y C; unique global es 127', () => {
+  it('mediosEnCualquierCron incluye B y C; unique global es 144', () => {
     const cron = mediosEnCualquierCron();
     for (const id of IDS_B) expect(cron.has(id)).toBe(true);
-    expect(cron.size).toBe(127);
+    expect(cron.size).toBe(144);
   });
 
   it('ningún medio de B está en el shard A', () => {
@@ -307,11 +310,11 @@ describe('DailyValidatedShard — A default y B acotado', () => {
   });
 });
 
-describe('DailyValidatedShard — C C23 acotado', () => {
+describe('DailyValidatedShard — C C40 acotado', () => {
   it('configDailyValidated(C) retorna SOLO C', () => {
     const ids = configDailyValidated('C').map((m) => m.medio_id);
     expect(ids).toEqual([...IDS_DAILY_VALIDATED_C]);
-    expect(new Set(ids).size).toBe(23);
+    expect(new Set(ids).size).toBe(40);
     const a = new Set(configDailyValidated('A').map((m) => m.medio_id));
     const b = new Set(configDailyValidated('B').map((m) => m.medio_id));
     for (const id of ids) {
@@ -322,7 +325,7 @@ describe('DailyValidatedShard — C C23 acotado', () => {
     expect(ids).not.toContain('MED-0019');
   });
 
-  it('C no contiene ZonaDocs ni El Respetable; incluye C17 y Batch01 READY', () => {
+  it('C no contiene ZonaDocs ni holds; incluye C23 y Batch02 READY menos Cúspide', () => {
     const c = new Set(IDS_DAILY_VALIDATED_C);
     expect(c.has('MED-0043')).toBe(false);
     expect(c.has('MED-0192')).toBe(false);
@@ -331,17 +334,17 @@ describe('DailyValidatedShard — C C23 acotado', () => {
     expect(c.has('MED-0208')).toBe(false);
     expect(c.has('MED-0209')).toBe(false);
     expect(c.has('MED-0213')).toBe(false);
-    expect(c.has('MED-0036')).toBe(true);
-    expect(c.has('MED-0101')).toBe(true);
-    expect(c.has('MED-0052')).toBe(true);
-    expect(c.has('MED-0062')).toBe(true);
+    expect(c.has('MED-0224')).toBe(false);
+    expect(c.has('MED-0225')).toBe(false);
+    expect(c.has('MED-0232')).toBe(false);
     expect(c.has('MED-0095')).toBe(true);
     expect(c.has('MED-0205')).toBe(true);
-    expect(c.has('MED-0206')).toBe(true);
-    expect(c.has('MED-0210')).toBe(true);
-    expect(c.has('MED-0211')).toBe(true);
-    expect(c.has('MED-0212')).toBe(true);
     expect(c.has('MED-0214')).toBe(true);
+    expect(c.has('MED-0215')).toBe(true);
+    expect(c.has('MED-0217')).toBe(true);
+    expect(c.has('MED-0228')).toBe(true);
+    expect(c.has('MED-0229')).toBe(true);
+    expect(c.has('MED-0234')).toBe(true);
   });
 
   it('C vs base/nacional/crisis overlap = 0', () => {
