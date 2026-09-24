@@ -521,7 +521,7 @@ export const IDS_DAILY_VALIDATED_B: readonly string[] = SHADOW_MEDIOS_DAILY_VALI
 );
 
 // ============================================================================
-// TIER DAILY VALIDATED — SHARD C (C1, 2026-09-23). MANUAL ONLY.
+// TIER DAILY VALIDATED — SHARD C (C1, 2026-09-23). Schedule 13:55 UTC.
 // ----------------------------------------------------------------------------
 // Bloque SEPARADO de A (47) y B (24). 12 PASS estrictos Wave06 Rescue + Wave07.
 // MED-0043 ZonaDocs queda DUPLICATE_HOLD (canónico MED-0192 ya está en A).
@@ -671,7 +671,7 @@ export function mediosDailyNetNew(shard: DailyValidatedShard = 'A'): ShadowMedio
  * medio_id cubiertos por CUALQUIER tier de cron shadow activo (base + nacional
  * B + crisis + daily-validated A + B + C). Fuente de verdad única para
  * "¿este medio corre en algún cron?" — usada por auditorías read-only fuera
- * del pipeline. C cuenta aquí aunque su workflow aún no tenga schedule.
+ * del pipeline. C entra al conteo de cron (schedule 13:55 UTC).
  */
 export function mediosEnCualquierCron(): Set<string> {
   const s = mediosYaCubiertosPorCron();

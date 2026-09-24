@@ -1,5 +1,5 @@
 # ============================================================================
-# LIVE COMPARISON — TIER DAILY VALIDATED SHARD C (shadow, C1, MANUAL ONLY)
+# LIVE COMPARISON — TIER DAILY VALIDATED SHARD C (shadow, C1, diario)
 # ----------------------------------------------------------------------------
 # WORKFLOW ACTIVO EN MODO SOMBRA (NO producción). Mismo motor que A/B
 # (`scripts/run-shadow-daily-validated-tier.ts --shard=C`). NO duplica el
@@ -7,19 +7,23 @@
 # crisis / shard A / shard B. MED-0043 ZonaDocs NO entra (DUPLICATE_HOLD de
 # MED-0192 en A).
 #
-# SIN SCHEDULE: solo workflow_dispatch hasta validar health real.
+# Schedule 13:55 UTC para desfasarse de A (12:45) y B (13:20). GitHub puede
+# retrasar el cron; eso es aceptable. workflow_dispatch se conserva.
 #
 # CONCURRENCY: MISMO grupo `live-comparison-shadow` que base/nacional B/crisis
 # y daily A/B. cancel-in-progress=false → si otro writer corre, este se ENCOLA.
+# NO modificar el grupo.
 #
-# ENRICH DRAIN V1: ON en esta corrida manual (única vía de disparo).
+# ENRICH DRAIN V1: ON. C NO autoexporta 02_Menciones.
 #
 # Por código impide: export-results · generate-xml · classify-ia · export-raw-news
-# · WhatsApp/correos/Twilio/Gmail/SMTP. NO toca 02_Menciones.
+# · WhatsApp/correos/Twilio/Gmail/SMTP.
 # ============================================================================
 name: live-comparison-shadow-daily-validated-c
 
 on:
+  schedule:
+    - cron: '55 13 * * *'   # diario, 13:55 UTC, desfasado de A (12:45) y B (13:20)
   workflow_dispatch:
     inputs:
       window_hours:

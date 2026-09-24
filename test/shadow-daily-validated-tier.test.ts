@@ -400,10 +400,9 @@ describe('workflow daily-validated shard C', () => {
     'utf-8',
   );
 
-  it('SOLO workflow_dispatch: sin schedule', () => {
+  it('schedule 13:55 UTC y conserva workflow_dispatch', () => {
     expect(wfC).toContain('workflow_dispatch:');
-    expect(wfC).not.toMatch(/^\s*schedule:/m);
-    expect(wfC).not.toMatch(/cron:/);
+    expect(wfC).toContain("cron: '55 13 * * *'");
   });
 
   it('mismo concurrency group, timeout 25, drain ON', () => {
