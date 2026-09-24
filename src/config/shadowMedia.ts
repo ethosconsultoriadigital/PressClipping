@@ -521,11 +521,12 @@ export const IDS_DAILY_VALIDATED_B: readonly string[] = SHADOW_MEDIOS_DAILY_VALI
 );
 
 // ============================================================================
-// TIER DAILY VALIDATED — SHARD C (C17, 2026-09-24). Schedule 13:55 UTC.
+// TIER DAILY VALIDATED — SHARD C (C23, 2026-09-24). Schedule 13:55 UTC.
 // ----------------------------------------------------------------------------
-// Bloque SEPARADO de A (47) y B (24). C16 (16) + MED-0095 Cadena Noticias.
+// Bloque SEPARADO de A (47) y B (24). C17 (17) + 6 READY STRICT de Batch01.
 // MED-0043 ZonaDocs queda DUPLICATE_HOLD (canónico MED-0192 ya está en A).
 // MED-0118 El Respetable queda CONTENT_HOLD.
+// MED-0207/0208/0209 REVIEW_THRESHOLD y MED-0213 CONTENT_HOLD no entran.
 // fuente=rss (PASS validado sobre RSS oficial). max_notas_shadow=15.
 // ============================================================================
 
@@ -547,6 +548,12 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED_C: readonly ShadowMedioDaily[] = [
   { medio_id: 'MED-0052', nombre: 'Hora Cero', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0062', nombre: 'Cafe Negro Portal', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0095', nombre: 'Cadena Noticias', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0205', nombre: 'Hoy En Perspectiva', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0206', nombre: 'Jalisco Hoy', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0210', nombre: 'Hoja De Ruta Digital', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0211', nombre: 'Cadena Política', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0212', nombre: 'Punto por Punto', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0214', nombre: 'Jlanoticias', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
 ] as const;
 
 export const IDS_DAILY_VALIDATED_C: readonly string[] = SHADOW_MEDIOS_DAILY_VALIDATED_C.map(
