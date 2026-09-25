@@ -632,6 +632,73 @@ export async function getNoticiasPendientesConCola(
   };
 }
 
+export interface NoticiaTitleOnlyRow {
+  noticia_id: string;
+  medio_id: string | null;
+  titulo: string | null;
+  subtitulo: string | null;
+  resumen: string | null;
+  fecha_publicacion: string | null;
+  fecha_captura: string | null;
+  created_at: string | null;
+}
+
+/**
+ * Pendientes sin cuerpo, dentro de la ventana editorial, solo campos de título.
+ * No marca menciones_procesado. Dos consultas para no usar COALESCE en PostgREST.
+ */
+export async function getNoticiasTitleOnly(opts: {
+  limit: number;
+  cutoffIso: string;
+}): Promise<NoticiaTitleOnlyRow[]> {
+  const select =
+    'noticia_id, medio_id, titulo, subtitulo, resumen, fecha_publicacion, fecha_captura, created_at';
+  const base = () =>
+    (getSupabase() as any)
+      .from('noticias')
+      .select(select)
+      .eq('menciones_procesado', false)
+      .is('texto_cuerpo_nota', null)
+      .is('texto_nota_limpia', null)
+      .is('texto_extraido', null)
+      .neq('origen_cobertura', 'pressclipping_diagnostico')
+      .or('titulo.not.is.null,subtitulo.not.is.null,resumen.not.is.null');
+
+  const publicadas = await base()
+    .gte('fecha_publicacion', opts.cutoffIso)
+    .order('fecha_publicacion', { ascending: false })
+    .limit(opts.limit);
+  if (publicadas.error) {
+    throw new Error(`No se pudieron leer title-only con publicación: ${publicadas.error.message}`);
+  }
+  const sinPublicacion = await base()
+    .is('fecha_publicacion', null)
+    .gte('fecha_captura', opts.cutoffIso)
+    .order('fecha_captura', { ascending: false })
+    .limit(opts.limit);
+  if (sinPublicacion.error) {
+    throw new Error(`No se pudieron leer title-only sin publicación: ${sinPublicacion.error.message}`);
+  }
+
+  const vistas = new Set<string>();
+  const filas: NoticiaTitleOnlyRow[] = [];
+  for (const row of [...(publicadas.data ?? []), ...(sinPublicacion.data ?? [])]) {
+    if (!row.noticia_id || vistas.has(row.noticia_id)) continue;
+    const util = [row.titulo, row.subtitulo, row.resumen].some(
+      (v: string | null) => typeof v === 'string' && v.trim().length > 0,
+    );
+    if (!util) continue;
+    vistas.add(row.noticia_id);
+    filas.push(row as NoticiaTitleOnlyRow);
+  }
+  filas.sort((a, b) => {
+    const ia = a.fecha_publicacion ?? a.fecha_captura ?? '';
+    const ib = b.fecha_publicacion ?? b.fecha_captura ?? '';
+    return ia < ib ? 1 : ia > ib ? -1 : 0;
+  });
+  return filas.slice(0, opts.limit);
+}
+
 export interface MencionInsert {
   noticia_id: string;
   cliente_id: string | null;

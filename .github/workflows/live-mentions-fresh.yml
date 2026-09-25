@@ -1,14 +1,16 @@
 # ============================================================================
 # LIVE MENTIONS FRESH — canary manual (sin horario)
 # ----------------------------------------------------------------------------
-# Detecta menciones en Fresh Lane y exporta solo 02_Menciones para
-# CLI-MERY-TEST, CLI-0001 y CLI-0002.
+# 1. Recovery de contenido en medios prioritarios (enrich existente, acotado).
+# 2. Body Fresh Lane global.
+# 3. Title-only lane para Mery, Jumex y Patrón. No marca procesado.
+# 4. Export solo 02_Menciones de esos tres clientes.
 #
-# NO hace crawl, enrich, alertas, email, WhatsApp, Twilio ni SMTP.
-# NO escribe Sheets finales de cliente (Patrón, Jumex, NOTAS ENVIADAS MERYPOZOS).
+# NO hace crawl, alertas, email, WhatsApp, Twilio ni SMTP.
+# NO escribe Sheets finales de cliente.
+# NO modifica extractores ni la infraestructura de enrich.
 #
-# workflow_dispatch únicamente. dry_run=true por defecto hasta autorizar el canary.
-# Concurrency compartida con los writers principales: no cancela corridas ajenas.
+# workflow_dispatch únicamente. dry_run=true por defecto.
 # ============================================================================
 name: live-mentions-fresh
 
@@ -16,11 +18,16 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'true = no escribe menciones ni 02_Menciones'
+        description: 'true = no escribe noticias, menciones ni 02_Menciones'
         required: false
         default: 'true'
         type: choice
         options: ['true', 'false']
+      priority_media_ids:
+        description: 'Medios prioritarios para recovery, separados por coma'
+        required: false
+        default: 'MED-0017'
+        type: string
 
 concurrency:
   group: live-comparison-shadow
@@ -28,9 +35,9 @@ concurrency:
 
 jobs:
   live-mentions:
-    name: Detect fresh lane + export 02_Menciones
+    name: Recovery + body lane + title-only + export
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -40,6 +47,7 @@ jobs:
       GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
       LOG_FORMAT: json
       RUN_BY: github-actions-live-mentions-fresh
+      PRIORITY_MENTION_MEDIA_IDS: ${{ inputs.priority_media_ids || 'MED-0017' }}
       NO_SEND: 'true'
       NO_EMAIL: 'true'
       NO_WHATSAPP: 'true'
@@ -56,7 +64,31 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
 
-      - name: Detect mentions (fresh lane, sin crawl ni enrich)
+      - name: Priority recovery — missing clean text
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+          INPUT_DRY_RUN: ${{ inputs.dry_run || 'true' }}
+        run: |
+          set -euo pipefail
+          ARGS="--medio-ids=${PRIORITY_MENTION_MEDIA_IDS} --window-days=2 --recent-first --only-pending-mentions --only-missing-clean-text --limit=50"
+          if [ "$INPUT_DRY_RUN" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          npm run enrich-news -- $ARGS
+
+      - name: Priority recovery — missing body text
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+          INPUT_DRY_RUN: ${{ inputs.dry_run || 'true' }}
+        run: |
+          set -euo pipefail
+          ARGS="--medio-ids=${PRIORITY_MENTION_MEDIA_IDS} --window-days=2 --recent-first --only-pending-mentions --only-missing-body-text --limit=50"
+          if [ "$INPUT_DRY_RUN" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          npm run enrich-news -- $ARGS
+
+      - name: Detect mentions (fresh body lane)
         env:
           NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
           INPUT_DRY_RUN: ${{ inputs.dry_run || 'true' }}
@@ -67,6 +99,18 @@ jobs:
             ARGS="$ARGS --dry-run"
           fi
           npm run detect-mentions -- $ARGS
+
+      - name: Detect title-only (Mery, Jumex, Patrón; no marca procesado)
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+          INPUT_DRY_RUN: ${{ inputs.dry_run || 'true' }}
+        run: |
+          set -euo pipefail
+          ARGS="--hours=48 --limit=500"
+          if [ "$INPUT_DRY_RUN" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          npm run detect-title-only -- $ARGS
 
       - name: Export 02_Menciones (ventana editorial 48h)
         env:

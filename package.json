@@ -14,6 +14,7 @@
     "sync-sheets": "tsx scripts/sync-sheets.ts",
     "crawl": "tsx scripts/crawl.ts",
     "detect-mentions": "tsx scripts/detect-mentions.ts",
+    "detect-title-only": "tsx scripts/detect-title-only-mentions.ts",
     "export-results": "tsx scripts/export-results-to-sheets.ts",
     "export-raw-news": "tsx scripts/export-raw-news.ts",
     "enrich-news": "tsx scripts/enrich-news.ts",
