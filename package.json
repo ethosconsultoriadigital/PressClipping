@@ -63,6 +63,7 @@
     "catalog-batch04": "tsx scripts/catalog-batch04.ts",
     "catalog-batch05": "tsx scripts/catalog-batch05.ts",
     "catalog-batch06": "tsx scripts/catalog-batch06.ts",
+    "catalog-batch07": "tsx scripts/catalog-batch07.ts",
     "crawl-direct-latinus": "tsx scripts/crawl-direct-latinus.ts",
     "crawl-direct-lasillarota": "tsx scripts/crawl-direct-lasillarota.ts",
     "audit-jumex-keyword-discovery": "tsx scripts/audit-jumex-keyword-discovery.ts",
