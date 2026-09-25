@@ -215,6 +215,10 @@ const IDS_C = [
   'MED-0245', 'MED-0246', 'MED-0247', 'MED-0248', 'MED-0250', 'MED-0251',
   'MED-0252', 'MED-0253', 'MED-0255', 'MED-0256', 'MED-0257', 'MED-0258',
   'MED-0259',
+  'MED-0261', 'MED-0262', 'MED-0263', 'MED-0265', 'MED-0266', 'MED-0267',
+  'MED-0268', 'MED-0269', 'MED-0270', 'MED-0271', 'MED-0273', 'MED-0275',
+  'MED-0277', 'MED-0279', 'MED-0280', 'MED-0281', 'MED-0283', 'MED-0284',
+  'MED-0285', 'MED-0286',
 ] as const;
 
 describe('DailyValidatedShard — A default y B acotado', () => {
@@ -244,13 +248,13 @@ describe('DailyValidatedShard — A default y B acotado', () => {
     expect(IDS_DAILY_VALIDATED_B).not.toContain('MED-0106');
   });
 
-  it('--shard=C resuelve exactamente los 59 IDs C59', () => {
+  it('--shard=C resuelve exactamente los 79 IDs C79', () => {
     expect(parseDailyValidatedShard('C')).toEqual({ ok: true, shard: 'C' });
     expect(parseDailyValidatedShard('c')).toEqual({ ok: true, shard: 'C' });
     expect(mediosDailyNetNew('C').map((m) => m.medio_id).sort()).toEqual([...IDS_C].sort());
-    expect(SHADOW_MEDIOS_DAILY_VALIDATED_C).toHaveLength(59);
-    expect(IDS_DAILY_VALIDATED_C).toHaveLength(59);
-    expect(new Set(IDS_DAILY_VALIDATED_C).size).toBe(59);
+    expect(SHADOW_MEDIOS_DAILY_VALIDATED_C).toHaveLength(79);
+    expect(IDS_DAILY_VALIDATED_C).toHaveLength(79);
+    expect(new Set(IDS_DAILY_VALIDATED_C).size).toBe(79);
   });
 
   it('shard inválido falla de forma segura (sin default silencioso a A)', () => {
@@ -272,10 +276,10 @@ describe('DailyValidatedShard — A default y B acotado', () => {
     for (const id of IDS_B) expect(cubiertos.has(id)).toBe(false);
   });
 
-  it('mediosEnCualquierCron incluye B y C; unique global es 163', () => {
+  it('mediosEnCualquierCron incluye B y C; unique global es 183', () => {
     const cron = mediosEnCualquierCron();
     for (const id of IDS_B) expect(cron.has(id)).toBe(true);
-    expect(cron.size).toBe(163);
+    expect(cron.size).toBe(183);
   });
 
   it('ningún medio de B está en el shard A', () => {
@@ -308,17 +312,17 @@ describe('DailyValidatedShard — A default y B acotado', () => {
     }
     for (const m of SHADOW_MEDIOS_DAILY_VALIDATED_C) {
       expect(m.max_notas_shadow).toBe(15);
-      expect(m.fuente).toBe('rss');
+      expect(['rss', 'sitemap']).toContain(m.fuente);
       expect(m.activo_shadow).toBe(true);
     }
   });
 });
 
-describe('DailyValidatedShard — C C59 acotado', () => {
+describe('DailyValidatedShard — C C79 acotado', () => {
   it('configDailyValidated(C) retorna SOLO C', () => {
     const ids = configDailyValidated('C').map((m) => m.medio_id);
     expect(ids).toEqual([...IDS_DAILY_VALIDATED_C]);
-    expect(new Set(ids).size).toBe(59);
+    expect(new Set(ids).size).toBe(79);
     const a = new Set(configDailyValidated('A').map((m) => m.medio_id));
     const b = new Set(configDailyValidated('B').map((m) => m.medio_id));
     for (const id of ids) {
@@ -329,7 +333,7 @@ describe('DailyValidatedShard — C C59 acotado', () => {
     expect(ids).not.toContain('MED-0019');
   });
 
-  it('C no contiene ZonaDocs ni holds; incluye C40 y Batch03 READY', () => {
+  it('C no contiene ZonaDocs ni holds; incluye C59 y Batch04 READY', () => {
     const c = new Set(IDS_DAILY_VALIDATED_C);
     expect(c.has('MED-0043')).toBe(false);
     expect(c.has('MED-0192')).toBe(false);
@@ -347,6 +351,14 @@ describe('DailyValidatedShard — C C59 acotado', () => {
     expect(c.has('MED-0243')).toBe(false);
     expect(c.has('MED-0249')).toBe(false);
     expect(c.has('MED-0254')).toBe(false);
+    expect(c.has('MED-0260')).toBe(false);
+    expect(c.has('MED-0264')).toBe(false);
+    expect(c.has('MED-0272')).toBe(false);
+    expect(c.has('MED-0274')).toBe(false);
+    expect(c.has('MED-0276')).toBe(false);
+    expect(c.has('MED-0278')).toBe(false);
+    expect(c.has('MED-0282')).toBe(false);
+    expect(c.has('MED-0287')).toBe(false);
     expect(c.has('MED-0095')).toBe(true);
     expect(c.has('MED-0205')).toBe(true);
     expect(c.has('MED-0214')).toBe(true);
@@ -358,6 +370,9 @@ describe('DailyValidatedShard — C C59 acotado', () => {
     expect(c.has('MED-0236')).toBe(true);
     expect(c.has('MED-0242')).toBe(true);
     expect(c.has('MED-0259')).toBe(true);
+    expect(c.has('MED-0261')).toBe(true);
+    expect(c.has('MED-0280')).toBe(true);
+    expect(c.has('MED-0286')).toBe(true);
   });
 
   it('C vs base/nacional/crisis overlap = 0', () => {

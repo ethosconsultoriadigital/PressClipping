@@ -521,15 +521,17 @@ export const IDS_DAILY_VALIDATED_B: readonly string[] = SHADOW_MEDIOS_DAILY_VALI
 );
 
 // ============================================================================
-// TIER DAILY VALIDATED — SHARD C (C59, 2026-09-24). Schedule 13:55 UTC.
+// TIER DAILY VALIDATED — SHARD C (C79, 2026-09-25). Schedule 13:55 UTC.
 // ----------------------------------------------------------------------------
-// Bloque SEPARADO de A (47) y B (24). C40 (40) + 19 READY STRICT de Batch03.
+// Bloque SEPARADO de A (47) y B (24). C59 (59) + 20 READY STRICT de Batch04.
 // MED-0224 Cúspide México se EXCLUYE (403 LIVE en predeploy; no se sustituye).
 // MED-0225/0232 REVIEW_THRESHOLD no entran. MED-0213 CONTENT_HOLD no entra.
 // Batch03 holds NO entran: 0235/0238/0239 CONTENT/REVIEW, 0243/0249/0254 REVIEW.
+// Batch04 holds NO entran: 0260/0264/0272/0274 REVIEW, 0276/0278 SOURCE_HOLD,
+// 0282/0287 CONTENT_HOLD.
 // MED-0043 ZonaDocs DUPLICATE_HOLD. MED-0118 El Respetable CONTENT_HOLD.
 // Colima Digital es alias de MED-0242 Colima Noticias (un solo ID).
-// fuente=rss. max_notas_shadow=15.
+// fuente=rss o sitemap según catálogo. max_notas_shadow=15.
 // ============================================================================
 
 export const SHADOW_MEDIOS_DAILY_VALIDATED_C: readonly ShadowMedioDaily[] = [
@@ -592,6 +594,26 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED_C: readonly ShadowMedioDaily[] = [
   { medio_id: 'MED-0257', nombre: 'Dominiopublico', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0258', nombre: 'La Región Tula', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0259', nombre: 'Arsenal Diario Digital', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0261', nombre: 'Dereporteros', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0262', nombre: 'La Jiribilla', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0263', nombre: 'Sociedad Noticias', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0265', nombre: 'Quintana Roo Hoy', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0266', nombre: 'Al Chile Poblano', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0267', nombre: 'EstamosAquí MX', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0268', nombre: 'El Diario de Delicias', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0269', nombre: 'El Diariodel Noroeste', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0270', nombre: 'El Diario de Parral', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0271', nombre: 'El Diario de Juárez', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0273', nombre: 'Vox Populi Noticias', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0275', nombre: 'Luces del Siglo Diario', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0277', nombre: 'Hoy Tamaulipas', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0279', nombre: 'Tutucuman', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0280', nombre: 'TV Azteca Jalisco', fuente: 'sitemap', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0281', nombre: 'Notigram', fuente: 'sitemap', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0283', nombre: 'Mimorelia', fuente: 'sitemap', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0284', nombre: 'Novedades Quintana Roo', fuente: 'sitemap', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0285', nombre: 'Canal 13', fuente: 'sitemap', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0286', nombre: 'Netnoticias', fuente: 'sitemap', max_notas_shadow: 15, activo_shadow: true },
 ] as const;
 
 export const IDS_DAILY_VALIDATED_C: readonly string[] = SHADOW_MEDIOS_DAILY_VALIDATED_C.map(

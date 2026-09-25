@@ -1,9 +1,9 @@
 # ============================================================================
-# LIVE COMPARISON — TIER DAILY VALIDATED SHARD C (shadow, C59, diario)
+# LIVE COMPARISON — TIER DAILY VALIDATED SHARD C (shadow, C79, diario)
 # ----------------------------------------------------------------------------
 # WORKFLOW ACTIVO EN MODO SOMBRA (NO producción). Mismo motor que A/B
 # (`scripts/run-shadow-daily-validated-tier.ts --shard=C`). NO duplica el
-# runner. Procesa los 59 medios C59 PASS, net-new respecto de base / nacional B /
+# runner. Procesa los 79 medios C79 PASS, net-new respecto de base / nacional B /
 # crisis / shard A / shard B. MED-0043 ZonaDocs NO entra (DUPLICATE_HOLD de
 # MED-0192 en A). MED-0118 El Respetable NO entra (CONTENT_HOLD).
 #
@@ -37,7 +37,7 @@ concurrency:
 
 jobs:
   run:
-    name: Shadow daily-validated shard C (C59, net-new, aislado por medio, sin envíos)
+    name: Shadow daily-validated shard C (C79, net-new, aislado por medio, sin envíos)
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
