@@ -219,6 +219,8 @@ const IDS_C = [
   'MED-0268', 'MED-0269', 'MED-0270', 'MED-0271', 'MED-0273', 'MED-0275',
   'MED-0277', 'MED-0279', 'MED-0280', 'MED-0281', 'MED-0283', 'MED-0284',
   'MED-0285', 'MED-0286',
+  'MED-0290', 'MED-0291', 'MED-0292', 'MED-0293', 'MED-0294', 'MED-0295',
+  'MED-0297', 'MED-0298', 'MED-0302', 'MED-0305', 'MED-0306',
 ] as const;
 
 describe('DailyValidatedShard — A default y B acotado', () => {
@@ -248,13 +250,13 @@ describe('DailyValidatedShard — A default y B acotado', () => {
     expect(IDS_DAILY_VALIDATED_B).not.toContain('MED-0106');
   });
 
-  it('--shard=C resuelve exactamente los 79 IDs C79', () => {
+  it('--shard=C resuelve exactamente los 90 IDs C90', () => {
     expect(parseDailyValidatedShard('C')).toEqual({ ok: true, shard: 'C' });
     expect(parseDailyValidatedShard('c')).toEqual({ ok: true, shard: 'C' });
     expect(mediosDailyNetNew('C').map((m) => m.medio_id).sort()).toEqual([...IDS_C].sort());
-    expect(SHADOW_MEDIOS_DAILY_VALIDATED_C).toHaveLength(79);
-    expect(IDS_DAILY_VALIDATED_C).toHaveLength(79);
-    expect(new Set(IDS_DAILY_VALIDATED_C).size).toBe(79);
+    expect(SHADOW_MEDIOS_DAILY_VALIDATED_C).toHaveLength(90);
+    expect(IDS_DAILY_VALIDATED_C).toHaveLength(90);
+    expect(new Set(IDS_DAILY_VALIDATED_C).size).toBe(90);
   });
 
   it('shard inválido falla de forma segura (sin default silencioso a A)', () => {
@@ -276,10 +278,10 @@ describe('DailyValidatedShard — A default y B acotado', () => {
     for (const id of IDS_B) expect(cubiertos.has(id)).toBe(false);
   });
 
-  it('mediosEnCualquierCron incluye B y C; unique global es 183', () => {
+  it('mediosEnCualquierCron incluye B y C; unique global es 194', () => {
     const cron = mediosEnCualquierCron();
     for (const id of IDS_B) expect(cron.has(id)).toBe(true);
-    expect(cron.size).toBe(183);
+    expect(cron.size).toBe(194);
   });
 
   it('ningún medio de B está en el shard A', () => {
@@ -318,11 +320,11 @@ describe('DailyValidatedShard — A default y B acotado', () => {
   });
 });
 
-describe('DailyValidatedShard — C C79 acotado', () => {
+describe('DailyValidatedShard — C C90 acotado', () => {
   it('configDailyValidated(C) retorna SOLO C', () => {
     const ids = configDailyValidated('C').map((m) => m.medio_id);
     expect(ids).toEqual([...IDS_DAILY_VALIDATED_C]);
-    expect(new Set(ids).size).toBe(79);
+    expect(new Set(ids).size).toBe(90);
     const a = new Set(configDailyValidated('A').map((m) => m.medio_id));
     const b = new Set(configDailyValidated('B').map((m) => m.medio_id));
     for (const id of ids) {
@@ -333,7 +335,7 @@ describe('DailyValidatedShard — C C79 acotado', () => {
     expect(ids).not.toContain('MED-0019');
   });
 
-  it('C no contiene ZonaDocs ni holds; incluye C59 y Batch04 READY', () => {
+  it('C no contiene ZonaDocs ni holds; incluye C79 y Batch05 READY', () => {
     const c = new Set(IDS_DAILY_VALIDATED_C);
     expect(c.has('MED-0043')).toBe(false);
     expect(c.has('MED-0192')).toBe(false);
@@ -359,6 +361,15 @@ describe('DailyValidatedShard — C C79 acotado', () => {
     expect(c.has('MED-0278')).toBe(false);
     expect(c.has('MED-0282')).toBe(false);
     expect(c.has('MED-0287')).toBe(false);
+    expect(c.has('MED-0288')).toBe(false);
+    expect(c.has('MED-0289')).toBe(false);
+    expect(c.has('MED-0296')).toBe(false);
+    expect(c.has('MED-0299')).toBe(false);
+    expect(c.has('MED-0300')).toBe(false);
+    expect(c.has('MED-0301')).toBe(false);
+    expect(c.has('MED-0303')).toBe(false);
+    expect(c.has('MED-0304')).toBe(false);
+    expect(c.has('MED-0307')).toBe(false);
     expect(c.has('MED-0095')).toBe(true);
     expect(c.has('MED-0205')).toBe(true);
     expect(c.has('MED-0214')).toBe(true);
@@ -373,6 +384,8 @@ describe('DailyValidatedShard — C C79 acotado', () => {
     expect(c.has('MED-0261')).toBe(true);
     expect(c.has('MED-0280')).toBe(true);
     expect(c.has('MED-0286')).toBe(true);
+    expect(c.has('MED-0290')).toBe(true);
+    expect(c.has('MED-0306')).toBe(true);
   });
 
   it('C vs base/nacional/crisis overlap = 0', () => {

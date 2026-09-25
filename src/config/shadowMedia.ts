@@ -521,14 +521,16 @@ export const IDS_DAILY_VALIDATED_B: readonly string[] = SHADOW_MEDIOS_DAILY_VALI
 );
 
 // ============================================================================
-// TIER DAILY VALIDATED — SHARD C (C79, 2026-09-25). Schedule 13:55 UTC.
+// TIER DAILY VALIDATED — SHARD C (C90, 2026-09-25). Schedule 13:55 UTC.
 // ----------------------------------------------------------------------------
-// Bloque SEPARADO de A (47) y B (24). C59 (59) + 20 READY STRICT de Batch04.
+// Bloque SEPARADO de A (47) y B (24). C79 (79) + 11 READY STRICT de Batch05.
 // MED-0224 Cúspide México se EXCLUYE (403 LIVE en predeploy; no se sustituye).
 // MED-0225/0232 REVIEW_THRESHOLD no entran. MED-0213 CONTENT_HOLD no entra.
 // Batch03 holds NO entran: 0235/0238/0239 CONTENT/REVIEW, 0243/0249/0254 REVIEW.
 // Batch04 holds NO entran: 0260/0264/0272/0274 REVIEW, 0276/0278 SOURCE_HOLD,
 // 0282/0287 CONTENT_HOLD.
+// Batch05 holds NO entran: 0288/0301/0303/0304/0307 CONTENT_HOLD,
+// 0289/0296/0299 REVIEW, 0300 SOURCE_HOLD.
 // MED-0043 ZonaDocs DUPLICATE_HOLD. MED-0118 El Respetable CONTENT_HOLD.
 // Colima Digital es alias de MED-0242 Colima Noticias (un solo ID).
 // fuente=rss o sitemap según catálogo. max_notas_shadow=15.
@@ -614,6 +616,17 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED_C: readonly ShadowMedioDaily[] = [
   { medio_id: 'MED-0284', nombre: 'Novedades Quintana Roo', fuente: 'sitemap', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0285', nombre: 'Canal 13', fuente: 'sitemap', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0286', nombre: 'Netnoticias', fuente: 'sitemap', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0290', nombre: 'La Voz de Michoacán', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0291', nombre: 'La Jornada San Luis', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0292', nombre: 'Diario de Morelos', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0293', nombre: 'Contramuro Noticias de Michoacán', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0294', nombre: 'NotiMx', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0295', nombre: 'Diario de México', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0297', nombre: 'Codigo Qro', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0298', nombre: 'Sobre T', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0302', nombre: 'Noventa Grados', fuente: 'sitemap', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0305', nombre: 'Grupomarmor Informa', fuente: 'sitemap', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0306', nombre: 'El Gráfico', fuente: 'sitemap', max_notas_shadow: 15, activo_shadow: true },
 ] as const;
 
 export const IDS_DAILY_VALIDATED_C: readonly string[] = SHADOW_MEDIOS_DAILY_VALIDATED_C.map(
