@@ -106,7 +106,7 @@ jobs:
           INPUT_DRY_RUN: ${{ inputs.dry_run || 'true' }}
         run: |
           set -euo pipefail
-          ARGS="--hours=48 --limit=500"
+          ARGS="--hours=48 --page-size=500 --max-scan=10000"
           if [ "$INPUT_DRY_RUN" = "true" ]; then
             ARGS="$ARGS --dry-run"
           fi

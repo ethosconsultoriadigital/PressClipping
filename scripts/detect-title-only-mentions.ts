@@ -1,11 +1,13 @@
 /**
  * Lane TITLE_ONLY. No usa cuerpo y nunca marca menciones_procesado.
  *
- *   npm run detect-title-only -- --dry-run --hours=48 --limit=500
+ * Barrido completo de 48h. --limit se acepta y no recorta el universo.
+ *   npm run detect-title-only -- --dry-run --hours=48 --page-size=500 --max-scan=10000
  */
 import { getKeywordsActivas, getNoticiasTitleOnly, insertMenciones } from '../src/supabase/repositories.js';
 import { splitTerminos, type KeywordRule, type TipoKeyword } from '../src/matchers/keyword.js';
 import { evaluarTitleOnly, TITLE_ONLY_CLIENTES, TITLE_ONLY_TIPOS } from '../src/matching/titleOnlyLane.js';
+import { puedeInsertarTitleOnly, TITLE_ONLY_MAX_SCAN, TITLE_ONLY_PAGE_SIZE } from '../src/matching/titleOnlySweep.js';
 import { logger } from '../src/utils/logger.js';
 import { pathToFileURL } from 'node:url';
 
@@ -14,11 +16,20 @@ const TIPOS_VALIDOS: TipoKeyword[] = ['exacta', 'frase_exacta', 'contiene', 'boo
 export interface TitleOnlyArgs {
   dryRun: boolean;
   hours: number;
-  limit: number;
+  pageSize: number;
+  maxScan: number;
+  /** Compatibilidad. No recorta el barrido; el tope es maxScan. */
+  legacyLimit: number | null;
 }
 
 export function parseTitleOnlyArgs(argv: string[]): TitleOnlyArgs {
-  const out: TitleOnlyArgs = { dryRun: false, hours: 48, limit: 500 };
+  const out: TitleOnlyArgs = {
+    dryRun: false,
+    hours: 48,
+    pageSize: TITLE_ONLY_PAGE_SIZE,
+    maxScan: TITLE_ONLY_MAX_SCAN,
+    legacyLimit: null,
+  };
   for (const arg of argv) {
     if (!arg.startsWith('--')) continue;
     const body = arg.slice(2);
@@ -27,7 +38,9 @@ export function parseTitleOnlyArgs(argv: string[]): TitleOnlyArgs {
     const val = eq === -1 ? '' : body.slice(eq + 1);
     if (key === 'dry-run') out.dryRun = true;
     if (key === 'hours') out.hours = Number(val) || 48;
-    if (key === 'limit') out.limit = Number(val) || 500;
+    if (key === 'page-size') out.pageSize = Number(val) || TITLE_ONLY_PAGE_SIZE;
+    if (key === 'max-scan') out.maxScan = Number(val) || TITLE_ONLY_MAX_SCAN;
+    if (key === 'limit') out.legacyLimit = Number(val) || null;
   }
   return out;
 }
@@ -59,6 +72,7 @@ function aRegla(row: {
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   const args = parseTitleOnlyArgs(argv);
+  const started = Date.now();
   const cutoffIso = new Date(Date.now() - args.hours * 3600e3).toISOString();
   const keywords = await getKeywordsActivas();
   const reglas = keywords
@@ -66,7 +80,12 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     .filter((r) => TITLE_ONLY_CLIENTES.includes(r.cliente_id as (typeof TITLE_ONLY_CLIENTES)[number]))
     .filter((r) => TITLE_ONLY_TIPOS.includes(r.tipo));
 
-  const noticias = await getNoticiasTitleOnly({ limit: args.limit, cutoffIso });
+  const barrido = await getNoticiasTitleOnly({
+    cutoffIso,
+    pageSize: args.pageSize,
+    maxScanRows: args.maxScan,
+  });
+  const noticias = barrido.rows;
   const menciones = noticias.flatMap((n) => evaluarTitleOnly(n, reglas));
   const porCliente: Record<string, number> = {};
   const porKeyword: Record<string, number> = {};
@@ -81,6 +100,15 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   logger.info(
     {
       source_lane: 'TITLE_ONLY',
+      eligible: barrido.eligible,
+      scanned: barrido.scanned,
+      pages: barrido.pages,
+      page_size: barrido.pageSize,
+      max_scan: barrido.maxScanRows,
+      title_only_truncated: barrido.truncated,
+      eligible_over_cap: barrido.eligibleOverCap,
+      duration_ms: Date.now() - started,
+      legacy_limit_ignored: args.legacyLimit,
       selected: noticias.length,
       keywords: reglas.length,
       menciones_potenciales: menciones.length,
@@ -94,7 +122,14 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     args.dryRun ? '[dry-run] Title-only lane — no se insertó ni se marcó nada' : 'Title-only lane',
   );
 
-  if (!args.dryRun && menciones.length > 0) {
+  if (barrido.truncated) {
+    logger.error(
+      { eligible_over_cap: barrido.eligibleOverCap, scanned: barrido.scanned, max_scan: barrido.maxScanRows },
+      'Title-only truncado: no se insertan menciones.',
+    );
+  }
+
+  if (puedeInsertarTitleOnly({ dryRun: args.dryRun, truncated: barrido.truncated }) && menciones.length > 0) {
     const insertadas = await insertMenciones(
       menciones.map((m) => ({
         noticia_id: m.noticia_id,
