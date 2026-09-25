@@ -521,9 +521,9 @@ export const IDS_DAILY_VALIDATED_B: readonly string[] = SHADOW_MEDIOS_DAILY_VALI
 );
 
 // ============================================================================
-// TIER DAILY VALIDATED — SHARD C (C90, 2026-09-25). Schedule 13:55 UTC.
+// TIER DAILY VALIDATED — SHARD C (C108, 2026-09-25). Schedule 13:55 UTC.
 // ----------------------------------------------------------------------------
-// Bloque SEPARADO de A (47) y B (24). C79 (79) + 11 READY STRICT de Batch05.
+// Bloque SEPARADO de A (47) y B (24). C90 (90) + 18 READY STRICT de Batch06.
 // MED-0224 Cúspide México se EXCLUYE (403 LIVE en predeploy; no se sustituye).
 // MED-0225/0232 REVIEW_THRESHOLD no entran. MED-0213 CONTENT_HOLD no entra.
 // Batch03 holds NO entran: 0235/0238/0239 CONTENT/REVIEW, 0243/0249/0254 REVIEW.
@@ -531,6 +531,8 @@ export const IDS_DAILY_VALIDATED_B: readonly string[] = SHADOW_MEDIOS_DAILY_VALI
 // 0282/0287 CONTENT_HOLD.
 // Batch05 holds NO entran: 0288/0301/0303/0304/0307 CONTENT_HOLD,
 // 0289/0296/0299 REVIEW, 0300 SOURCE_HOLD.
+// Batch06 holds NO entran: 0314/0315/0317/0323/0324/0328 REVIEW,
+// 0332 CONTENT_HOLD.
 // MED-0043 ZonaDocs DUPLICATE_HOLD. MED-0118 El Respetable CONTENT_HOLD.
 // Colima Digital es alias de MED-0242 Colima Noticias (un solo ID).
 // fuente=rss o sitemap según catálogo. max_notas_shadow=15.
@@ -627,6 +629,24 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED_C: readonly ShadowMedioDaily[] = [
   { medio_id: 'MED-0302', nombre: 'Noventa Grados', fuente: 'sitemap', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0305', nombre: 'Grupomarmor Informa', fuente: 'sitemap', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0306', nombre: 'El Gráfico', fuente: 'sitemap', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0308', nombre: 'Elchapucero', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0309', nombre: 'Expreso Sonora', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0310', nombre: 'AlertaQro', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0311', nombre: 'Miradas', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0312', nombre: 'Noti', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0313', nombre: 'Quien', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0316', nombre: 'Meridiano de Nayarit', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0318', nombre: 'Respuesta', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0319', nombre: 'Diario Plaza Juárez', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0320', nombre: 'Periodico Palacio', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0321', nombre: 'El Heraldo De Saltillo', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0322', nombre: 'Noticaribe', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0325', nombre: 'Juárez a Diario', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0326', nombre: 'Políticos Al Desnudo', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0327', nombre: 'Información En Directo', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0329', nombre: 'Macronews', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0330', nombre: 'Periódico Enfoque', fuente: 'sitemap', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0331', nombre: 'Diario Puntual', fuente: 'sitemap', max_notas_shadow: 15, activo_shadow: true },
 ] as const;
 
 export const IDS_DAILY_VALIDATED_C: readonly string[] = SHADOW_MEDIOS_DAILY_VALIDATED_C.map(
