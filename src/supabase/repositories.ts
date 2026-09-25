@@ -47,6 +47,11 @@ import {
   type ClausulaEditorial,
 } from '../exporters/liveNewsWindow.js';
 import {
+  aplicarTopeTitleOnly,
+  fusionarTitleOnly,
+  paginaRange,
+} from '../matching/titleOnlySweep.js';
+import {
   type NoticiaRawRow,
   SELECT_NOTICIA_RAW,
   mapNoticiaRaw,
@@ -643,16 +648,31 @@ export interface NoticiaTitleOnlyRow {
   created_at: string | null;
 }
 
+export interface TitleOnlySweepResult {
+  rows: NoticiaTitleOnlyRow[];
+  pages: number;
+  scanned: number;
+  eligible: number;
+  truncated: boolean;
+  eligibleOverCap: boolean;
+  pageSize: number;
+  maxScanRows: number;
+}
+
 /**
- * Pendientes sin cuerpo, dentro de la ventana editorial, solo campos de título.
- * No marca menciones_procesado. Dos consultas para no usar COALESCE en PostgREST.
+ * Barrido de toda la ventana editorial title-only. Pagina las dos consultas
+ * excluyentes y no recorta a 500. No marca menciones_procesado.
  */
 export async function getNoticiasTitleOnly(opts: {
-  limit: number;
   cutoffIso: string;
-}): Promise<NoticiaTitleOnlyRow[]> {
+  pageSize?: number;
+  maxScanRows?: number;
+}): Promise<TitleOnlySweepResult> {
+  const pageSize = opts.pageSize ?? 500;
+  const maxScanRows = opts.maxScanRows ?? 10000;
   const select =
     'noticia_id, medio_id, titulo, subtitulo, resumen, fecha_publicacion, fecha_captura, created_at';
+
   const base = () =>
     (getSupabase() as any)
       .from('noticias')
@@ -664,39 +684,61 @@ export async function getNoticiasTitleOnly(opts: {
       .neq('origen_cobertura', 'pressclipping_diagnostico')
       .or('titulo.not.is.null,subtitulo.not.is.null,resumen.not.is.null');
 
-  const publicadas = await base()
-    .gte('fecha_publicacion', opts.cutoffIso)
-    .order('fecha_publicacion', { ascending: false })
-    .limit(opts.limit);
-  if (publicadas.error) {
-    throw new Error(`No se pudieron leer title-only con publicación: ${publicadas.error.message}`);
-  }
-  const sinPublicacion = await base()
-    .is('fecha_publicacion', null)
-    .gte('fecha_captura', opts.cutoffIso)
-    .order('fecha_captura', { ascending: false })
-    .limit(opts.limit);
-  if (sinPublicacion.error) {
-    throw new Error(`No se pudieron leer title-only sin publicación: ${sinPublicacion.error.message}`);
-  }
+  const paginar = async (
+    aplicar: (query: any) => any,
+    ordenFecha: 'fecha_publicacion' | 'fecha_captura',
+  ): Promise<{ rows: NoticiaTitleOnlyRow[]; pages: number; exhausted: boolean }> => {
+    const rows: NoticiaTitleOnlyRow[] = [];
+    let pages = 0;
+    let from = 0;
+    while (rows.length < maxScanRows) {
+      const take = Math.min(pageSize, maxScanRows - rows.length);
+      const { from: inicio, to } = paginaRange(from, take);
+      const { data, error } = await aplicar(base())
+        .order(ordenFecha, { ascending: false })
+        .order('noticia_id', { ascending: false })
+        .range(inicio, to);
+      if (error) throw new Error(`No se pudo paginar title-only (${ordenFecha}): ${error.message}`);
+      pages += 1;
+      const page = (data ?? []) as NoticiaTitleOnlyRow[];
+      rows.push(...page);
+      if (page.length < take) return { rows, pages, exhausted: true };
+      from += page.length;
+    }
+    const sonda = await aplicar(base())
+      .order(ordenFecha, { ascending: false })
+      .order('noticia_id', { ascending: false })
+      .range(from, from);
+    if (sonda.error) throw new Error(`No se pudo cerrar title-only (${ordenFecha}): ${sonda.error.message}`);
+    return { rows, pages, exhausted: (sonda.data ?? []).length === 0 };
+  };
 
-  const vistas = new Set<string>();
-  const filas: NoticiaTitleOnlyRow[] = [];
-  for (const row of [...(publicadas.data ?? []), ...(sinPublicacion.data ?? [])]) {
-    if (!row.noticia_id || vistas.has(row.noticia_id)) continue;
-    const util = [row.titulo, row.subtitulo, row.resumen].some(
-      (v: string | null) => typeof v === 'string' && v.trim().length > 0,
-    );
-    if (!util) continue;
-    vistas.add(row.noticia_id);
-    filas.push(row as NoticiaTitleOnlyRow);
-  }
-  filas.sort((a, b) => {
-    const ia = a.fecha_publicacion ?? a.fecha_captura ?? '';
-    const ib = b.fecha_publicacion ?? b.fecha_captura ?? '';
-    return ia < ib ? 1 : ia > ib ? -1 : 0;
-  });
-  return filas.slice(0, opts.limit);
+  const publicadas = await paginar(
+    (query) => query.gte('fecha_publicacion', opts.cutoffIso),
+    'fecha_publicacion',
+  );
+  const sinPublicacion = await paginar(
+    (query) => query.is('fecha_publicacion', null).gte('fecha_captura', opts.cutoffIso),
+    'fecha_captura',
+  );
+
+  const utiles = fusionarTitleOnly(publicadas.rows, sinPublicacion.rows).filter((fila) =>
+    [fila.titulo, fila.subtitulo, fila.resumen].some(
+      (valor) => typeof valor === 'string' && valor.trim().length > 0,
+    ),
+  );
+  const barrido = aplicarTopeTitleOnly(utiles, maxScanRows);
+  const cortoPorPagina = !publicadas.exhausted || !sinPublicacion.exhausted;
+  return {
+    rows: barrido.rows,
+    pages: publicadas.pages + sinPublicacion.pages,
+    scanned: barrido.scanned,
+    eligible: barrido.eligible,
+    truncated: barrido.truncated || cortoPorPagina,
+    eligibleOverCap: barrido.eligibleOverCap || cortoPorPagina,
+    pageSize,
+    maxScanRows,
+  };
 }
 
 export interface MencionInsert {

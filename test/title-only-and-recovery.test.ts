@@ -206,8 +206,18 @@ describe('workflow live-mentions-fresh', () => {
 });
 
 describe('parseTitleOnlyArgs', () => {
-  it('default 48h y 500', () => {
-    expect(parseTitleOnlyArgs([])).toEqual({ dryRun: false, hours: 48, limit: 500 });
-    expect(parseTitleOnlyArgs(['--dry-run', '--hours=48', '--limit=500']).dryRun).toBe(true);
+  it('default barre 48h con página 500 y tope 10000', () => {
+    expect(parseTitleOnlyArgs([])).toEqual({
+      dryRun: false,
+      hours: 48,
+      pageSize: 500,
+      maxScan: 10000,
+      legacyLimit: null,
+    });
+    const live = parseTitleOnlyArgs(['--dry-run', '--hours=48', '--page-size=500', '--max-scan=10000']);
+    expect(live.dryRun).toBe(true);
+    expect(live.maxScan).toBe(10000);
+    expect(parseTitleOnlyArgs(['--limit=500']).legacyLimit).toBe(500);
+    expect(parseTitleOnlyArgs(['--limit=500']).maxScan).toBe(10000);
   });
 });
