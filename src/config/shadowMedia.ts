@@ -521,9 +521,9 @@ export const IDS_DAILY_VALIDATED_B: readonly string[] = SHADOW_MEDIOS_DAILY_VALI
 );
 
 // ============================================================================
-// TIER DAILY VALIDATED — SHARD C (C108, 2026-09-25). Schedule 13:55 UTC.
+// TIER DAILY VALIDATED — SHARD C (C128, 2026-09-28). Schedule 13:55 UTC.
 // ----------------------------------------------------------------------------
-// Bloque SEPARADO de A (47) y B (24). C90 (90) + 18 READY STRICT de Batch06.
+// Bloque SEPARADO de A (47) y B (24). C108 (108) + 20 READY STRICT de Batch07.
 // MED-0224 Cúspide México se EXCLUYE (403 LIVE en predeploy; no se sustituye).
 // MED-0225/0232 REVIEW_THRESHOLD no entran. MED-0213 CONTENT_HOLD no entra.
 // Batch03 holds NO entran: 0235/0238/0239 CONTENT/REVIEW, 0243/0249/0254 REVIEW.
@@ -533,6 +533,7 @@ export const IDS_DAILY_VALIDATED_B: readonly string[] = SHADOW_MEDIOS_DAILY_VALI
 // 0289/0296/0299 REVIEW, 0300 SOURCE_HOLD.
 // Batch06 holds NO entran: 0314/0315/0317/0323/0324/0328 REVIEW,
 // 0332 CONTENT_HOLD.
+// Batch07 holds NO entran: 0334/0345 CONTENT_HOLD, 0339/0340/0356 REVIEW.
 // MED-0043 ZonaDocs DUPLICATE_HOLD. MED-0118 El Respetable CONTENT_HOLD.
 // Colima Digital es alias de MED-0242 Colima Noticias (un solo ID).
 // fuente=rss o sitemap según catálogo. max_notas_shadow=15.
@@ -647,6 +648,26 @@ export const SHADOW_MEDIOS_DAILY_VALIDATED_C: readonly ShadowMedioDaily[] = [
   { medio_id: 'MED-0329', nombre: 'Macronews', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0330', nombre: 'Periódico Enfoque', fuente: 'sitemap', max_notas_shadow: 15, activo_shadow: true },
   { medio_id: 'MED-0331', nombre: 'Diario Puntual', fuente: 'sitemap', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0333', nombre: 'Changoonga', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0335', nombre: 'Sigue tu Ruta', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0336', nombre: 'vocero.com.mx', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0337', nombre: 'Once Noticias', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0338', nombre: 'Apro', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0341', nombre: 'Elpuntero', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0342', nombre: 'Plumas Libres', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0343', nombre: 'Cursor en la Noticia', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0344', nombre: 'Cyber Mexico', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0346', nombre: 'Es Diario Popular', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0347', nombre: 'La Chispa', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0348', nombre: 'Diario 21', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0349', nombre: 'Turquesa NEWS', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0350', nombre: 'Gaceta.mx', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0351', nombre: 'Reporte 32 Mx', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0352', nombre: 'El Momento BCS', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0353', nombre: 'El Momento Campeche', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0354', nombre: 'Elmomento Veracruz', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0355', nombre: 'Pausa Mx', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
+  { medio_id: 'MED-0357', nombre: 'eitmedia', fuente: 'rss', max_notas_shadow: 15, activo_shadow: true },
 ] as const;
 
 export const IDS_DAILY_VALIDATED_C: readonly string[] = SHADOW_MEDIOS_DAILY_VALIDATED_C.map(

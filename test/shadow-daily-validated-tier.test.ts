@@ -224,6 +224,10 @@ const IDS_C = [
   'MED-0308', 'MED-0309', 'MED-0310', 'MED-0311', 'MED-0312', 'MED-0313',
   'MED-0316', 'MED-0318', 'MED-0319', 'MED-0320', 'MED-0321', 'MED-0322',
   'MED-0325', 'MED-0326', 'MED-0327', 'MED-0329', 'MED-0330', 'MED-0331',
+  'MED-0333', 'MED-0335', 'MED-0336', 'MED-0337', 'MED-0338', 'MED-0341',
+  'MED-0342', 'MED-0343', 'MED-0344', 'MED-0346', 'MED-0347', 'MED-0348',
+  'MED-0349', 'MED-0350', 'MED-0351', 'MED-0352', 'MED-0353', 'MED-0354',
+  'MED-0355', 'MED-0357',
 ] as const;
 
 describe('DailyValidatedShard — A default y B acotado', () => {
@@ -253,13 +257,13 @@ describe('DailyValidatedShard — A default y B acotado', () => {
     expect(IDS_DAILY_VALIDATED_B).not.toContain('MED-0106');
   });
 
-  it('--shard=C resuelve exactamente los 108 IDs C108', () => {
+  it('--shard=C resuelve exactamente los 128 IDs C128', () => {
     expect(parseDailyValidatedShard('C')).toEqual({ ok: true, shard: 'C' });
     expect(parseDailyValidatedShard('c')).toEqual({ ok: true, shard: 'C' });
     expect(mediosDailyNetNew('C').map((m) => m.medio_id).sort()).toEqual([...IDS_C].sort());
-    expect(SHADOW_MEDIOS_DAILY_VALIDATED_C).toHaveLength(108);
-    expect(IDS_DAILY_VALIDATED_C).toHaveLength(108);
-    expect(new Set(IDS_DAILY_VALIDATED_C).size).toBe(108);
+    expect(SHADOW_MEDIOS_DAILY_VALIDATED_C).toHaveLength(128);
+    expect(IDS_DAILY_VALIDATED_C).toHaveLength(128);
+    expect(new Set(IDS_DAILY_VALIDATED_C).size).toBe(128);
   });
 
   it('shard inválido falla de forma segura (sin default silencioso a A)', () => {
@@ -281,10 +285,10 @@ describe('DailyValidatedShard — A default y B acotado', () => {
     for (const id of IDS_B) expect(cubiertos.has(id)).toBe(false);
   });
 
-  it('mediosEnCualquierCron incluye B y C; unique global es 212', () => {
+  it('mediosEnCualquierCron incluye B y C; unique global es 232', () => {
     const cron = mediosEnCualquierCron();
     for (const id of IDS_B) expect(cron.has(id)).toBe(true);
-    expect(cron.size).toBe(212);
+    expect(cron.size).toBe(232);
   });
 
   it('ningún medio de B está en el shard A', () => {
@@ -323,11 +327,11 @@ describe('DailyValidatedShard — A default y B acotado', () => {
   });
 });
 
-describe('DailyValidatedShard — C C108 acotado', () => {
+describe('DailyValidatedShard — C C128 acotado', () => {
   it('configDailyValidated(C) retorna SOLO C', () => {
     const ids = configDailyValidated('C').map((m) => m.medio_id);
     expect(ids).toEqual([...IDS_DAILY_VALIDATED_C]);
-    expect(new Set(ids).size).toBe(108);
+    expect(new Set(ids).size).toBe(128);
     const a = new Set(configDailyValidated('A').map((m) => m.medio_id));
     const b = new Set(configDailyValidated('B').map((m) => m.medio_id));
     for (const id of ids) {
@@ -338,7 +342,7 @@ describe('DailyValidatedShard — C C108 acotado', () => {
     expect(ids).not.toContain('MED-0019');
   });
 
-  it('C no contiene ZonaDocs ni holds; incluye C90 y Batch06 READY', () => {
+  it('C no contiene ZonaDocs ni holds; incluye C108 y Batch07 READY', () => {
     const c = new Set(IDS_DAILY_VALIDATED_C);
     expect(c.has('MED-0043')).toBe(false);
     expect(c.has('MED-0192')).toBe(false);
@@ -380,6 +384,11 @@ describe('DailyValidatedShard — C C108 acotado', () => {
     expect(c.has('MED-0324')).toBe(false);
     expect(c.has('MED-0328')).toBe(false);
     expect(c.has('MED-0332')).toBe(false);
+    expect(c.has('MED-0334')).toBe(false);
+    expect(c.has('MED-0339')).toBe(false);
+    expect(c.has('MED-0340')).toBe(false);
+    expect(c.has('MED-0345')).toBe(false);
+    expect(c.has('MED-0356')).toBe(false);
     expect(c.has('MED-0095')).toBe(true);
     expect(c.has('MED-0205')).toBe(true);
     expect(c.has('MED-0214')).toBe(true);
@@ -400,6 +409,11 @@ describe('DailyValidatedShard — C C108 acotado', () => {
     expect(c.has('MED-0312')).toBe(true);
     expect(c.has('MED-0330')).toBe(true);
     expect(c.has('MED-0331')).toBe(true);
+    expect(c.has('MED-0333')).toBe(true);
+    expect(c.has('MED-0335')).toBe(true);
+    expect(c.has('MED-0342')).toBe(true);
+    expect(c.has('MED-0355')).toBe(true);
+    expect(c.has('MED-0357')).toBe(true);
   });
 
   it('C vs base/nacional/crisis overlap = 0', () => {
