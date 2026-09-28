@@ -16,6 +16,7 @@
 import * as cheerio from 'cheerio';
 import { fetchTextWithMeta, HttpRequestError, type HttpFailureKind } from '../utils/http.js';
 import { tituloDesdeUrl } from './titleFromUrl.js';
+import { applyHostOverride, hostOverrideFromUrl } from './hostOverrides.js';
 
 /** Método con el que se obtuvo el título. */
 export type MetodoTitulo =
@@ -720,6 +721,7 @@ export function extractFromHtml(
 ): HtmlExtract {
   const maxChars = opts.maxChars ?? DEFAULT_MAX_CHARS;
   const $ = cheerio.load(html);
+  applyHostOverride($, hostOverrideFromUrl(url));
 
   const { titulo, metodo: metodo_titulo } = extraerTitulo($, url);
   let { texto, metodo: metodo_texto } = extraerTexto($, maxChars);
