@@ -12,6 +12,7 @@ import { fetchSitemap } from '../parsers/sitemap.js';
 import { normalizeNoticia, type NoticiaInsert } from '../normalizers/noticia.js';
 import type { MedioRow } from '../supabase/repositories.js';
 import { childLogger } from '../utils/logger.js';
+import { shouldRejectCrawlUrl } from './urlFilters.js';
 
 export interface CrawlResult {
   medio_id: string;
@@ -177,6 +178,7 @@ export async function crawlMedio(
       const items = raw
         .map((it) => normalizeNoticia(it, { ...ctx, fuente: metodo }))
         .filter((n): n is NoticiaInsert => n !== null)
+        .filter((n) => !shouldRejectCrawlUrl(medio.medio_id, n.url_original))
         .slice(0, limit);
 
       if (items.length > 0) {
