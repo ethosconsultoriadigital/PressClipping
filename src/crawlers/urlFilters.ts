@@ -41,6 +41,15 @@ export function shouldRejectCrawlUrl(medioId: string, url: string): boolean {
         const p = path.replace(/\/+$/, '') || '/';
         return p === '/' || p === '/radio-grupo-marmor';
       }
+    case 'MED-0072': // San Luis Hoy — portada de versión impresa, no nota
+      return /^\/version-impresa\//i.test(path);
+    case 'MED-0316': // Meridiano — PDF/galería de edición impresa
+      return /\/edicion-impresa-/i.test(path);
+    case 'MED-0101': // Independiente BCS — RSS reinyecta archivo 2018; sitemap es homepage
+      {
+        const p = path.replace(/\/+$/, '') || '/';
+        return p === '/' || /\/2018\//i.test(path);
+      }
     default:
       return false;
   }

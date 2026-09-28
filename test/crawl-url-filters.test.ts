@@ -119,3 +119,48 @@ describe('crawlMedio aplica filtro medio-específico sin tumbar artículos', () 
     expect(result.items).toHaveLength(1);
   });
 });
+
+describe('Wave 2 URL filters — print/archive, medio-scoped', () => {
+  it('San Luis Hoy version-impresa rejected; city article kept', () => {
+    expect(
+      shouldRejectCrawlUrl('MED-0072', 'https://sanluishoy.com.mx/version-impresa/22-de-septiembre-3/133777/'),
+    ).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0072',
+        'https://sanluishoy.com.mx/ciudad/en-slp-esperan-90-pacientes-una-cornea-y-75-un-rinon/135059/',
+      ),
+    ).toBe(false);
+    expect(
+      shouldRejectCrawlUrl('MED-0008', 'https://sanluishoy.com.mx/version-impresa/22-de-septiembre-3/133777/'),
+    ).toBe(false);
+  });
+
+  it('Meridiano edicion-impresa rejected; dated news kept', () => {
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0316',
+        'https://meridiano.mx/2026/09/28/edicion-impresa-28-de-septiembre-de-2026/',
+      ),
+    ).toBe(true);
+    expect(
+      shouldRejectCrawlUrl('MED-0316', 'https://meridiano.mx/2026/09/28/alguna-nota-de-nayarit/'),
+    ).toBe(false);
+  });
+
+  it('Independiente BCS 2018 archive rejected; other years not this rule', () => {
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0101',
+        'https://www.diarioelindependiente.mx/2018/09/investigan-a-empresa-de-ramos-arizpe-por-posible-huachicol',
+      ),
+    ).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0101',
+        'https://www.diarioelindependiente.mx/2026/09/nota-actual',
+      ),
+    ).toBe(false);
+    expect(shouldRejectCrawlUrl('MED-0101', 'https://www.diarioelindependiente.mx/')).toBe(true);
+  });
+});
