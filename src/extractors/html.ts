@@ -16,7 +16,7 @@
 import * as cheerio from 'cheerio';
 import { fetchTextWithMeta, HttpRequestError, type HttpFailureKind } from '../utils/http.js';
 import { tituloDesdeUrl } from './titleFromUrl.js';
-import { applyHostOverride, hostOverrideFromUrl } from './hostOverrides.js';
+import { applyHostOverride, hostOverrideFromUrl, type HostExtractionOverride } from './hostOverrides.js';
 
 /** Método con el que se obtuvo el título. */
 export type MetodoTitulo =
@@ -589,8 +589,15 @@ function esParrafoSoloEnlace($: cheerio.CheerioAPI, el: any): boolean {
 }
 
 /** Junta el texto de los <p> de un contenedor, filtrando ruido y vacíos. */
-function textoDeContenedor($: cheerio.CheerioAPI, $cont: cheerio.Cheerio<any>): string {
+function textoDeContenedor(
+  $: cheerio.CheerioAPI,
+  $cont: cheerio.Cheerio<any>,
+  preferPlainText = false,
+): string {
   $cont.find(RUIDO).remove();
+  if (preferPlainText) {
+    return limpiarTexto($cont.text());
+  }
   const parrafos: string[] = [];
   $cont.find('p').each((_i, el) => {
     if (esParrafoSoloEnlace($, el)) return; // teaser de relacionados / navegación
@@ -660,7 +667,21 @@ export function extraerStorylineOem(html: string): string | null {
 function extraerTexto(
   $: cheerio.CheerioAPI,
   maxChars: number,
+  override: HostExtractionOverride | null = null,
 ): { texto: string | null; metodo: MetodoTexto } {
+  for (const sel of override?.preferSelectors ?? []) {
+    const $cont = $(sel).first();
+    if ($cont.length === 0) continue;
+    const texto = textoDeContenedor(
+      $,
+      $cont.clone() as cheerio.Cheerio<any>,
+      override?.preferPlainText === true,
+    );
+    if (texto.length >= 200) {
+      return { texto: recortar(texto, maxChars), metodo: 'html_container' };
+    }
+  }
+
   const intentos: { sel: string; metodo: MetodoTexto }[] = [
     { sel: 'article', metodo: 'html_article' },
     { sel: 'main', metodo: 'html_main' },
@@ -721,10 +742,11 @@ export function extractFromHtml(
 ): HtmlExtract {
   const maxChars = opts.maxChars ?? DEFAULT_MAX_CHARS;
   const $ = cheerio.load(html);
-  applyHostOverride($, hostOverrideFromUrl(url));
+  const override = hostOverrideFromUrl(url);
+  applyHostOverride($, override);
 
   const { titulo, metodo: metodo_titulo } = extraerTitulo($, url);
-  let { texto, metodo: metodo_texto } = extraerTexto($, maxChars);
+  let { texto, metodo: metodo_texto } = extraerTexto($, maxChars, override);
 
   // Preferir el cuerpo estructurado de OEM/El Sol (RSC storyline) cuando exista
   // y sea claramente más completo que lo obtenido del DOM renderizado (que en

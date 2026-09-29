@@ -37,3 +37,70 @@ describe('host-scoped POSTA override', () => {
     );
   });
 });
+
+const CHIH_BODY =
+  'Las exportaciones mexicanas aumentaron 40.4% en agosto respecto al mismo mes del año pasado, de acuerdo con el INEGI. Las de equipos eléctricos y electrónicos lideraron el avance en la balanza comercial del país según el reporte oficial del instituto. ';
+
+function htmlChihuahua(): string {
+  return `<html><body>
+    <article class="article article--news">
+      <div>Publicidad Publicidad Publicidad Publicidad</div>
+      <div class="article-snippet">Teaser de otra nota</div>
+      <div class="article-body"><p>${CHIH_BODY}${CHIH_BODY}</p></div>
+    </article>
+  </body></html>`;
+}
+
+describe('host-scoped Diario de Chihuahua article-body', () => {
+  it('BEFORE: wrapping <article> mixes ads; AFTER: .article-body is the body', () => {
+    const r = extractFromHtml(
+      htmlChihuahua(),
+      'https://eldiariodechihuahua.mx/economia/2026/sep/28/mexico-exporta-mas-842130.html',
+    );
+    expect(r.texto_cuerpo_nota ?? '').toContain('Las exportaciones mexicanas aumentaron');
+    expect(r.texto_cuerpo_nota ?? '').not.toMatch(/Publicidad Publicidad Publicidad Publicidad/);
+    expect((r.cuerpo_nota_chars ?? 0) >= 200).toBe(true);
+    expect(r.metodo_texto).toBe('html_container');
+  });
+
+  it('control: same HTML on another host does not use Chihuahua preferSelectors', () => {
+    const r = extractFromHtml(htmlChihuahua(), 'https://www.eluniversal.com.mx/nota.html');
+    expect(r.metodo_texto).toBe('html_article');
+  });
+});
+
+const CONTRA_BODY =
+  'La presidenta Claudia Sheinbaum Pardo alertó a la población de Sonora ante la llegada del huracán Polo, que se prevé toque tierra entre las 8:00 y 9:00 horas de este lunes, probablemente como categoría 1, en las inmediaciones de Guaymas. ';
+
+function htmlContra(): string {
+  return `<html><body>
+    <p>Nación martes 29 de septiembre de 2026 - © Copyright 2026 ContraReplica.mx © | Ediciones S</p>
+    <div class="inicionota topContent">
+      <div class="row">
+        <div class="col-sm-9 contrareplica-9">
+          <ins class="adsbygoogle"></ins>
+          <h1>Sheinbaum alerta a población de Sonora</h1>
+          ${CONTRA_BODY}${CONTRA_BODY}${CONTRA_BODY}
+        </div>
+      </div>
+    </div>
+  </body></html>`;
+}
+
+describe('host-scoped ContraRéplica inicionota plain text', () => {
+  it('BEFORE: only copyright <p> tags; AFTER: inicionota body without ads', () => {
+    const r = extractFromHtml(
+      htmlContra(),
+      'https://www.contrareplica.mx/nota-Sheinbaum-alerta-huracan-Polo-202629947',
+    );
+    expect(r.texto_cuerpo_nota ?? '').toContain('Claudia Sheinbaum Pardo alertó');
+    expect(r.texto_cuerpo_nota ?? '').not.toMatch(/Copyright 2026 ContraReplica/);
+    expect((r.cuerpo_nota_chars ?? 0) >= 200).toBe(true);
+  });
+
+  it('control: same HTML on another host stays on copyright paragraphs', () => {
+    const r = extractFromHtml(htmlContra(), 'https://www.eluniversal.com.mx/nota.html');
+    const t = r.texto_cuerpo_nota ?? r.texto_nota_limpia ?? '';
+    expect(t).toMatch(/Copyright 2026 ContraReplica/);
+  });
+});
