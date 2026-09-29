@@ -1,125 +1,97 @@
 /**
- * Fase 2 — Sincronización Google Sheets → Supabase.
+ * Control Plane Sync V2 — CLI delgado.
  *
- * Lee 01_Medios, 02_Keywords, 03_Clientes y 04_Configuracion, valida cada fila
- * con zod, e inserta/actualiza (upsert) en Supabase. Reporta filas inválidas
- * sin abortar el resto, y registra un resumen en consola y en logs_ingesta.
+ * Default: DRY-RUN de 03_Clientes + 02_Keywords. Cero writes.
  *
- * Uso:  npm run sync-sheets
+ *   npm run sync-sheets
+ *   npm run sync-sheets -- --apply --expected-hash=<CONTROL_PLANE_HASH>
+ *
+ * No sincroniza 01_Medios ni 04_Configuracion.
+ * Ausente en Sheet no borra filas de Supabase.
  */
 import { SHEET_TABS } from '../src/sheets/client.js';
-import { readTabRows, type RawRow } from '../src/sheets/read.js';
+import { readTabRows } from '../src/sheets/read.js';
 import {
-  mapMedioRow,
-  mapClienteRow,
-  mapKeywordRow,
-  mapConfigRow,
-} from '../src/types/schemas.js';
-import {
-  upsertMedios,
+  getAllClientes,
+  getAllKeywords,
   upsertClientes,
   upsertKeywords,
-  upsertConfiguracion,
 } from '../src/supabase/repositories.js';
-import { writeIngestaLog } from '../src/logs/ingestaLogger.js';
+import {
+  formatControlPlaneReport,
+  parseControlPlaneArgs,
+  runControlPlaneSync,
+  type ControlPlaneResult,
+} from '../src/sync/controlPlaneSync.js';
 import { logger } from '../src/utils/logger.js';
 
-interface SyncOutcome {
-  entidad: string;
-  leidas: number;
-  validas: number;
-  invalidas: number;
-  escritas: number;
-}
-
-/** Mapea+valida un conjunto de filas, separando válidas de errores. */
-function validar<T>(
-  rows: RawRow[],
-  mapper: (r: RawRow) => { success: boolean; data?: T; error?: { issues: { path: (string | number)[]; message: string }[] } },
-  entidad: string,
-): { validas: T[]; invalidas: number } {
-  const validas: T[] = [];
-  let invalidas = 0;
-  rows.forEach((r, idx) => {
-    const res = mapper(r) as ReturnType<typeof mapper>;
-    if (res.success && res.data !== undefined) {
-      validas.push(res.data);
-    } else {
-      invalidas += 1;
-      const detalle = res.error?.issues
-        .map((i) => `${i.path.join('.')}: ${i.message}`)
-        .join('; ');
-      logger.warn({ entidad, fila: idx + 2 }, `Fila inválida descartada (${detalle})`);
-    }
-  });
-  return { validas, invalidas };
-}
-
-async function syncEntidad<T extends Record<string, unknown>>(
-  entidad: string,
-  tab: string,
-  mapper: (r: RawRow) => any,
-  upsert: (rows: T[]) => Promise<number>,
-): Promise<SyncOutcome> {
-  const started = Date.now();
-  const rows = await readTabRows(tab);
-  const { validas, invalidas } = validar<T>(rows, mapper, entidad);
-  const escritas = await upsert(validas);
-
-  const outcome: SyncOutcome = {
-    entidad,
-    leidas: rows.length,
-    validas: validas.length,
-    invalidas,
-    escritas,
-  };
-
-  logger.info(outcome, `Sincronizado ${entidad}`);
-  await writeIngestaLog({
-    accion: `sync_${entidad}`,
-    nivel: invalidas > 0 ? 'warn' : 'info',
-    mensaje: `${escritas} escritas, ${invalidas} inválidas de ${rows.length} leídas`,
-    urls_detectadas: rows.length,
-    notas_nuevas: escritas,
-    errores: invalidas,
-    duracion_ms: Date.now() - started,
-  });
-
-  return outcome;
-}
-
 async function main() {
-  logger.info('Iniciando sincronización Sheets → Supabase…');
-
-  // Orden: clientes antes que keywords (FK lógica), config al final.
-  const resultados: SyncOutcome[] = [];
-  resultados.push(
-    await syncEntidad('clientes', SHEET_TABS.CLIENTES, mapClienteRow, upsertClientes),
-  );
-  resultados.push(
-    await syncEntidad('medios', SHEET_TABS.MEDIOS, mapMedioRow, upsertMedios),
-  );
-  resultados.push(
-    await syncEntidad('keywords', SHEET_TABS.KEYWORDS, mapKeywordRow, upsertKeywords),
-  );
-  resultados.push(
-    await syncEntidad(
-      'configuracion',
-      SHEET_TABS.CONFIGURACION,
-      mapConfigRow,
-      upsertConfiguracion,
-    ),
-  );
-
-  const totalInvalidas = resultados.reduce((a, r) => a + r.invalidas, 0);
-  logger.info({ resultados }, 'Sincronización completada.');
-
-  if (totalInvalidas > 0) {
-    logger.warn(`Se descartaron ${totalInvalidas} fila(s) inválida(s). Revisa los avisos arriba.`);
+  const parsed = parseControlPlaneArgs(process.argv.slice(2));
+  if ('error' in parsed) {
+    const result: ControlPlaneResult = {
+      ok: false,
+      verdict:
+        parsed.error === 'UNSUPPORTED_IN_CONTROL_PLANE_V2'
+          ? 'UNSUPPORTED_IN_CONTROL_PLANE_V2'
+          : 'PLAN_ABORTED',
+      plan: {
+        aborted: true,
+        abort_reason: parsed.error,
+        mode: 'DRY_RUN',
+        invalid_rows: [],
+        duplicate_client_ids: [],
+        duplicate_keyword_ids: [],
+        orphan_keywords: [],
+        clientes: {
+          sheet: 0,
+          db: 0,
+          create: [],
+          update: [],
+          unchanged: [],
+          db_only_preserved: [],
+          semantic_conflicts: [],
+        },
+        keywords: {
+          sheet: 0,
+          db: 0,
+          create: [],
+          update: [],
+          unchanged: [],
+          db_only_preserved: [],
+          semantic_conflicts: [],
+        },
+        client_writes: [],
+        keyword_writes: [],
+        control_plane_hash: '',
+        plan_hash: '',
+      },
+      writes: 0,
+      panel_target_drift: [],
+      db_only_preserved_count: 0,
+    };
+    console.log(formatControlPlaneReport(result));
+    process.exit(1);
   }
+
+  logger.info(
+    { mode: parsed.apply ? 'APPLY' : 'DRY_RUN', entities: parsed.entities },
+    'Control Plane Sync V2',
+  );
+
+  const result = await runControlPlaneSync(parsed, {
+    readClientesSheet: () => readTabRows(SHEET_TABS.CLIENTES),
+    readKeywordsSheet: () => readTabRows(SHEET_TABS.KEYWORDS),
+    loadDbClientes: getAllClientes,
+    loadDbKeywords: getAllKeywords,
+    writeClientes: upsertClientes,
+    writeKeywords: upsertKeywords,
+  });
+
+  console.log(formatControlPlaneReport(result));
+  if (!result.ok) process.exit(1);
 }
 
 main().catch((err) => {
-  logger.error(err, 'Error fatal en sync-sheets.');
+  logger.error(err, 'Error fatal en sync-sheets (control plane V2).');
   process.exit(1);
 });

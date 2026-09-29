@@ -15,7 +15,7 @@ import {
 
 type Raw = Record<string, string | undefined>;
 
-const TIPO_KEYWORD = [
+export const TIPO_KEYWORD = [
   'exacta',
   'frase_exacta',
   'contiene',
@@ -123,12 +123,8 @@ export const keywordSchema = z.object({
 });
 export type Keyword = z.infer<typeof keywordSchema>;
 
-export function mapKeywordRow(r: Raw) {
-  const tipoRaw = (parseTextOrNull(r['tipo_keyword']) ?? 'contiene').toLowerCase();
-  const tipo = (TIPO_KEYWORD as readonly string[]).includes(tipoRaw)
-    ? tipoRaw
-    : 'contiene';
-  return keywordSchema.safeParse({
+function parseKeywordFields(r: Raw, tipo: string) {
+  return {
     keyword_id: parseTextOrNull(r['keyword_id']) ?? '',
     cliente_id: parseTextOrNull(r['cliente_id']),
     cliente: parseTextOrNull(r['cliente']),
@@ -142,7 +138,26 @@ export function mapKeywordRow(r: Raw) {
     contexto_incluir: parseTextOrNull(r['contexto_incluir']),
     contexto_excluir: parseTextOrNull(r['contexto_excluir']),
     notas: parseTextOrNull(r['notas']),
-  });
+  };
+}
+
+/** Mapper legacy: tipo desconocido se fuerza a "contiene". No usar en Control Plane V2. */
+export function mapKeywordRow(r: Raw) {
+  const tipoRaw = (parseTextOrNull(r['tipo_keyword']) ?? 'contiene').toLowerCase();
+  const tipo = (TIPO_KEYWORD as readonly string[]).includes(tipoRaw)
+    ? tipoRaw
+    : 'contiene';
+  return keywordSchema.safeParse(parseKeywordFields(r, tipo));
+}
+
+/**
+ * Mapper estricto del Control Plane V2: tipo vacío o desconocido falla.
+ * No hay coerción a "contiene".
+ */
+export function mapKeywordRowStrict(r: Raw) {
+  const tipoRaw = parseTextOrNull(r['tipo_keyword']);
+  const tipo = tipoRaw === null ? '' : tipoRaw.toLowerCase();
+  return keywordSchema.safeParse(parseKeywordFields(r, tipo));
 }
 
 // --- configuracion (llave/valor) -------------------------------------------

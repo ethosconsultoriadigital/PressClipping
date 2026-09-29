@@ -99,6 +99,49 @@ export const upsertKeywords = (rows: Keyword[]) =>
 export const upsertConfiguracion = (rows: ConfigRow[]) =>
   upsertChunked('configuracion', rows, 'clave');
 
+const CLIENTE_CONTROL_SELECT =
+  'cliente_id, nombre_cliente, industria, marcas, competidores, voceros, temas_sensibles, activo, prioridad_ia, alertas_activas, notas';
+
+const KEYWORD_CONTROL_SELECT =
+  'keyword_id, cliente_id, cliente, keyword, alias_o_variantes, tipo_keyword, regla, activa, prioridad, alerta, contexto_incluir, contexto_excluir, notas';
+
+async function selectAllOrdered<T>(
+  table: string,
+  select: string,
+  orderCol: string,
+): Promise<T[]> {
+  const filas: T[] = [];
+  const paso = CHUNK;
+  for (let desde = 0; ; desde += paso) {
+    const { data, error } = await retryPostgrest(`selectAll:${table}`, () =>
+      getSupabase()
+        .from(table)
+        .select(select)
+        .order(orderCol, { ascending: true })
+        .range(desde, desde + paso - 1),
+    );
+    if (error) {
+      throw new Error(
+        `No se pudo leer ${table}: ${describeSupabaseError(error)}. ${hintForSupabaseError(error)}`,
+      );
+    }
+    const lote = (data ?? []) as T[];
+    filas.push(...lote);
+    if (lote.length < paso) break;
+  }
+  return filas;
+}
+
+/** Lectura completa de clientes del control plane, ordenada por cliente_id. */
+export function getAllClientes(): Promise<Cliente[]> {
+  return selectAllOrdered<Cliente>('clientes', CLIENTE_CONTROL_SELECT, 'cliente_id');
+}
+
+/** Lectura completa de keywords del control plane, ordenada por keyword_id. */
+export function getAllKeywords(): Promise<Keyword[]> {
+  return selectAllOrdered<Keyword>('keywords', KEYWORD_CONTROL_SELECT, 'keyword_id');
+}
+
 // --- Lectura ----------------------------------------------------------------
 
 /** Lee toda la configuración como un mapa clave→valor. */

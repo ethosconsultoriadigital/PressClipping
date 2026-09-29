@@ -55,7 +55,7 @@ errores, duración y quién ejecutó.
 
 ```bash
 npm run test:connection     # valida Supabase + Sheets
-npm run sync-sheets         # Fase 2
+npm run sync-sheets         # Control plane V2 dry-run (clientes+keywords, 0 writes)
 npm run crawl               # Fase 3
 npm run detect-mentions     # Fase 4
 npm run export-results      # Fase 5

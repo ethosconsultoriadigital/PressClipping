@@ -219,8 +219,11 @@ Con filas: `usar_ia` / `false`, `modo_mvp` / `true`, `max_notas_por_medio_por_co
 ## Paso 10 — Sincronizar panel y primer crawl
 
 ```bash
-# Sincroniza Sheets → Supabase (medios, keywords, clientes, config)
+# Dry-run del control plane (clientes + keywords). 0 writes.
 npm run sync-sheets
+
+# Apply solo con hash del dry-run (nunca borra filas ausentes en el Panel)
+npm run sync-sheets -- --apply --expected-hash=<CONTROL_PLANE_HASH>
 
 # Valida los medios cargados (prueba feeds sin guardar noticias)
 npm run validate:media -- --limit=5
@@ -264,7 +267,7 @@ npm run validate:sheets
 npm run validate:media -- --limit=5
 
 # Pipeline completo
-npm run sync-sheets        # Sheets → Supabase
+npm run sync-sheets        # Control plane V2 dry-run (clientes+keywords)
 npm run crawl              # ingesta RSS/sitemap
 npm run detect-mentions    # detección de keywords
 npm run classify-ia -- --dry-run  # previsualiza IA sin gastar

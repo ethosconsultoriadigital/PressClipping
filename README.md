@@ -120,7 +120,7 @@ el diagnóstico en **`08_Validacion_Medios`** y los especiales en
 ## Uso del pipeline
 
 ```bash
-npm run sync-sheets       # Fase 2: Sheets → Supabase (medios, keywords, clientes, config)
+npm run sync-sheets       # Control plane V2 DRY-RUN: 03_Clientes + 02_Keywords (0 writes)
 npm run crawl             # Fase 3: ingesta RSS/sitemap de los medios activos
 npm run detect-mentions   # Fase 4: detecta menciones de keywords en noticias nuevas
 npm run export-results    # Fase 5: vuelca menciones a 06_Resultados y logs a 05_Logs
@@ -130,9 +130,17 @@ npm test                  # tests unitarios (parsers, normalización, hashing, m
 npm run typecheck         # verificación de tipos
 ```
 
-**Sincronización (Fase 2):** lee `01_Medios`, `02_Keywords`, `03_Clientes` y
-`04_Configuracion`, valida cada fila con `zod` (mapeo por nombre de cabecera,
-no por posición), descarta filas inválidas con aviso y hace upsert en Supabase.
+**Sincronización (control plane V2):** `npm run sync-sheets` es **DRY-RUN por
+defecto** y solo cubre `03_Clientes` + `02_Keywords`. No escribe medios ni
+configuración. No borra filas de Supabase si faltan en el Panel. Para aplicar:
+
+```bash
+npm run sync-sheets -- --apply --expected-hash=<CONTROL_PLANE_HASH>
+```
+
+El hash sale del dry-run. Sin `--apply` y hash coincidente: **0 writes**.
+Una fila inválida aborta el plan (0 writes). Tipo de keyword desconocido
+no se convierte a `contiene`.
 
 **Ingesta (Fase 3):** recorre los medios activos aplicando la cascada
 **RSS → sitemap**, normaliza (URL canónica, fechas a UTC, limpieza de HTML),

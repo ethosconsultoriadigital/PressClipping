@@ -22,7 +22,7 @@ GOOGLE SHEETS (panel)
         ▲ lee config            ▲ escribe resultados/logs
         │                       │
 MOTOR Node.js / TypeScript
-  sync-sheets ─► crawl (RSS→sitemap→secciones) ─► normalize
+  sync-sheets (dry-run clientes/keywords) ─► crawl ─► normalize
        └─► dedupe ─► detect-mentions ─► (IA opcional) ─► export ─► Sheets / XML
         │ SQL (service role)
         ▼
@@ -54,7 +54,7 @@ TypeScript + Node 20 · Supabase (`@supabase/supabase-js`) ·
 |---|---|---|
 | 0 Diseño | Documento de diseño | Aprobado |
 | **1 Setup** | Estructura, `.env.example`, README, migraciones SQL, clientes, test de conexión | Conecta a ambos y existen las tablas |
-| 2 Sync | `sync-sheets.ts` con validación zod y upsert | Editar Sheets se refleja en Supabase |
+| 2 Sync | Control plane V2: dry-run clientes+keywords; apply con `--expected-hash` | Panel validado se refleja en Supabase sin borrar filas ausentes |
 | 3 Ingesta | `crawl.ts`, parsers RSS+sitemap, normalizador, dedupe | Noticias nuevas en DB sin duplicados |
 | 4 Menciones | `detect-mentions.ts` (exacta/frase/contiene/booleana) | Match crea mención sin duplicar |
 | 5 Export | `export-results-to-sheets.ts`, logs a Sheets | Menciones visibles en el panel |
