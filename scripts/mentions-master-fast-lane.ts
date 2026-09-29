@@ -41,6 +41,8 @@ const DEFAULT_TAB = 'MENCIONES_MASTER';
 export const OVERLAP_MINUTES = 60;
 /** Snippet operacional. El cuerpo completo vive en News Lake. */
 export const MASTER_SNIPPET_CHARS = 3_000;
+/** Tope del sweep global. 48h LIVE supera 8k elegibles. */
+export const GLOBAL_FETCH_CAP = 25_000;
 const APPEND_CHUNK = 100;
 
 interface Args {
@@ -254,8 +256,7 @@ export async function fetchEligibleNews(sinceIso: string, medioIds?: string[]): 
 
   const out: MasterNewsRow[] = [];
   const page = 1000;
-  const cap = 8000;
-  for (let from = 0; from < cap; from += page) {
+  for (let from = 0; from < GLOBAL_FETCH_CAP; from += page) {
     const data = await runPage(from, from + page - 1);
     out.push(...data.map(mapRow).filter(eligible));
     if (data.length < page) break;

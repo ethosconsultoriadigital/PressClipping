@@ -92,6 +92,7 @@ describe('Fast Lane overlap = 60', () => {
   it('script default 60 y no clampa 60 a 15', () => {
     const script = readFileSync(join(ROOT, 'scripts/mentions-master-fast-lane.ts'), 'utf8');
     expect(script).toContain('export const OVERLAP_MINUTES = 60');
+    expect(script).toContain('export const GLOBAL_FETCH_CAP = 25_000');
     expect(script).toContain('Math.max(1, parseIntOrNull(val)');
     expect(script).not.toContain('Math.max(15,');
     expect(script).toContain('Global News Lake sweep');
