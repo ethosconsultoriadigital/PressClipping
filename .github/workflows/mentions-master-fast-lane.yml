@@ -5,13 +5,13 @@ name: mentions-master-fast-lane
 # finales de clientes. El destino maestro ya está compartido con la cuenta de
 # servicio de PressClipping.
 #
-# Cadencia: cada 30 minutos. El script procesa chunks con concurrencia acotada
+# Cadencia: cada 30 minutos, desplazada a :17/:47 para evitar la carga alta de GitHub Actions al inicio de cada hora. El script procesa chunks con concurrencia acotada
 # y exporta a MENCIONES_MASTER inmediatamente después de cada chunk exitoso,
 # sin esperar al siguiente ciclo.
 
 on:
   schedule:
-    - cron: '0,30 * * * *'
+    - cron: '17,47 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:
