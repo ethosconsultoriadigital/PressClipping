@@ -16,6 +16,7 @@
  *   npm run enrich-news -- --medio-ids=MED-0030,MED-0008 --limit=500 --only-pending-mentions --only-missing-clean-text  # aislado por medio
  *   npm run enrich-news -- --medio-ids=MED-0171 --limit=500 --force-refresh-clean-text   # re-extrae y sobrescribe texto tras fix del extractor
  *   npm run enrich-news -- --medio-ids=MED-0017 --window-days=7 --recent-first --only-missing-clean-text --limit=100  # recientes primero (prioriza ventana 7d en vez de backlog viejo)
+ *   npm run enrich-news -- --medio-ids=MED-0017 --window-created-days=7 --recent-first --only-missing-clean-text --limit=3000  # misma ventana que certificación (created_at), paginado
  *   npm run enrich-news -- --url=https://medio.mx/nota/x          # diagnóstico 1 URL
  *   npm run enrich-news -- --url=https://medio.mx/nota/x --dry-run
  *
@@ -87,6 +88,9 @@ function parseArgs(argv: string[]): EnrichArgs {
         break;
       case 'window-days':
         out.windowDays = parseIntOrNull(value) ?? undefined;
+        break;
+      case 'window-created-days':
+        out.windowCreatedDays = parseIntOrNull(value) ?? undefined;
         break;
       case 'limit':
         out.limit = parseIntOrNull(value) ?? undefined;
@@ -186,6 +190,7 @@ async function main() {
       forceRefreshCleanText: args.forceRefreshCleanText,
       recentFirst: args.recentFirst ?? false,
       windowDays: args.windowDays ?? null,
+      windowCreatedDays: args.windowCreatedDays ?? null,
       medioIds: args.medioIds ?? null,
     },
     'Iniciando enrich-news',

@@ -248,6 +248,13 @@ describe('enrichNews — recentFirst / windowDays (prioriza recientes sobre back
     expect(fetchNoticias).toHaveBeenCalledWith(expect.objectContaining({ windowDays: 7 }));
   });
 
+  it('--window-created-days=N se reenvía a fetchNoticias tal cual', async () => {
+    const fetchNoticias = vi.fn(async () => [noticia()]);
+    const { d } = deps({ fetchNoticias: fetchNoticias as unknown as EnrichDeps['fetchNoticias'] });
+    await enrichNews(d, { dryRun: true, windowCreatedDays: 7 });
+    expect(fetchNoticias).toHaveBeenCalledWith(expect.objectContaining({ windowCreatedDays: 7 }));
+  });
+
   it('respeta --limit junto con recentFirst/windowDays (no cambia el tope)', async () => {
     const fetchNoticias = vi.fn(async () => [noticia()]);
     const { d } = deps({ fetchNoticias: fetchNoticias as unknown as EnrichDeps['fetchNoticias'] });
@@ -294,6 +301,12 @@ describe('enrich-news CLI parseArgs — --recent-first / --window-days', () => {
 
   it('--window-days=7 parsea a windowDays=7', () => {
     expect(parseArgs(['--window-days=7']).windowDays).toBe(7);
+  });
+
+  it('--window-created-days=7 parsea a windowCreatedDays=7 y no pisa windowDays', () => {
+    const args = parseArgs(['--window-created-days=7', '--window-days=7']);
+    expect(args.windowCreatedDays).toBe(7);
+    expect(args.windowDays).toBe(7);
   });
 
   it('--medio-ids=MED-0017 --window-days=7 --recent-first --only-missing-clean-text --limit=100 (comando real de la fase)', () => {

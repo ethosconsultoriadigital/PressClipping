@@ -125,11 +125,11 @@ const NUEVOS_MEDIOS: Medio[] = [
     medio_id: 'MED-0183', nombre_medio: 'Contralínea', grupo_medio: null,
     url_base: 'https://contralinea.com.mx', pais: 'MX', estado: 'Nacional', municipio: null,
     region: 'Nacional', categoria: 'Noticias / Investigación', prioridad: 'Media', activo: true,
-    metodo_extraccion: 'SITEMAP', rss_url: null,
+    metodo_extraccion: 'RSS', rss_url: 'https://contralinea.com.mx/feed/',
     sitemap_url: 'https://contralinea.com.mx/sitemap_index.xml',
     secciones_urls: null, buscador_url: null, requiere_javascript: false, requiere_proxy: false,
     frecuencia_minutos: 240,
-    notas_tecnicas: 'Alta 2026-07-20. sitemap_index.xml verificado en vivo.',
+    notas_tecnicas: 'Alta 2026-07-20. 2026-09-29: RSS /feed/ — sitemap_index lista archivos viejos primero y el crawl no llega a posts recientes.',
   },
   {
     medio_id: 'MED-0184', nombre_medio: 'Merca2.0', grupo_medio: null,

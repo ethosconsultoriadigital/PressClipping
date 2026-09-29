@@ -30,8 +30,8 @@ export function shouldRejectCrawlUrl(medioId: string, url: string): boolean {
   switch (medioId) {
     case 'MED-0031': // Proceso — hubs de tema, no artículos
       return /^\/temas\//i.test(path);
-    case 'MED-0181': // MVS Noticias — mismos hubs /temas/
-      return /^\/temas\//i.test(path);
+    case 'MED-0181': // MVS Noticias — hubs /temas/ y fichas de autor, no artículos
+      return /^\/(temas|autor)\//i.test(path);
     case 'MED-0113': // Jalisco TV / Jalisco Noticias — archives WP
       return /^\/(tag|category)\//i.test(path);
     case 'MED-0017': // El Informador — tira cómica Cartucho, no artículo
@@ -54,6 +54,8 @@ export function shouldRejectCrawlUrl(medioId: string, url: string): boolean {
       return /\/cartones\//i.test(path);
     case 'MED-0166': // Hidrocálido Digital — portadas de edición impresa / paywall login
       return /\/hidrocalido-\d/i.test(path);
+    case 'MED-0182': // Diario de Yucatán — /juegos/ es pasatiempo/paywall, no nota
+      return /^\/juegos\//i.test(path);
     case 'MED-0012': // Paralelo 19 — Yoast mezcla listados (/blog, /tag, secciones) con notas
       {
         const p = path.replace(/\/+$/, '') || '/';

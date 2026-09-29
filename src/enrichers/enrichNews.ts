@@ -88,6 +88,11 @@ export interface EnrichOpts {
   recentFirst?: boolean;
   /** Acota a noticias con fecha_publicacion dentro de los últimos N días. */
   windowDays?: number;
+  /**
+   * Acota a noticias con created_at dentro de los últimos N días (misma
+   * semántica que certificación n7). No reemplaza windowDays.
+   */
+  windowCreatedDays?: number;
   dryRun: boolean;
   maxChars?: number;
 }
@@ -104,6 +109,7 @@ export interface EnrichDeps {
     forceRefreshCleanText?: boolean;
     recentFirst?: boolean;
     windowDays?: number;
+    windowCreatedDays?: number;
   }) => Promise<NoticiaEnriquecibleRow[]>;
   extract: (url: string) => Promise<FetchExtractResult>;
   updateNoticia: (id: string, fields: NoticiaEnriquecidaUpdate) => Promise<void>;
@@ -354,6 +360,7 @@ export async function enrichNews(
     forceRefreshCleanText: opts.forceRefreshCleanText,
     recentFirst: opts.recentFirst,
     windowDays: opts.windowDays,
+    windowCreatedDays: opts.windowCreatedDays,
   });
 
   const detalle: EnrichItemResult[] = [];
