@@ -1,0 +1,112 @@
+name: mentions-master-fast-lane
+
+# Carril operacional: captura general -> enrich -> menciones consolidadas ->
+# ETHOS_MENCIONES_MASTER. No envía WhatsApp/email/Twilio y no toca las hojas
+# finales de clientes. El destino maestro ya está compartido con la cuenta de
+# servicio de PressClipping.
+#
+# Cadencia: cada 30 minutos. El script procesa chunks con concurrencia acotada
+# y exporta a MENCIONES_MASTER inmediatamente después de cada chunk exitoso,
+# sin esperar al siguiente ciclo.
+
+on:
+  schedule:
+    - cron: '0,30 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Solo plan; no captura ni escribe'
+        required: false
+        default: false
+        type: boolean
+      max_medios:
+        description: '0 = todos los medios activos/seguros'
+        required: false
+        default: '0'
+        type: string
+      chunk_size:
+        description: 'Medios por chunk'
+        required: false
+        default: '5'
+        type: string
+      chunk_concurrency:
+        description: 'Chunks simultáneos (1-5)'
+        required: false
+        default: '3'
+        type: string
+      max_notas:
+        description: 'Máximo de notas por medio en crawl'
+        required: false
+        default: '10'
+        type: string
+      enrich_limit:
+        description: 'Tope de enrich por chunk'
+        required: false
+        default: '60'
+        type: string
+      overlap_minutes:
+        description: 'Ventana de seguridad para lectura fresca'
+        required: false
+        default: '90'
+        type: string
+
+concurrency:
+  group: mentions-master-fast-lane
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: News Lake -> MENCIONES_MASTER (30m)
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      GOOGLE_MENTIONS_MASTER_SHEET_ID: '1T4-RLnBrK0lp3p-r23hRjrJAmI03QLzBavWM3ZpcmOA'
+      GOOGLE_MENTIONS_MASTER_TAB: 'MENCIONES_MASTER'
+      LOG_FORMAT: json
+      RUN_BY: github-actions-mentions-master-fast-lane
+      NO_SEND: 'true'
+      NO_EMAIL: 'true'
+      NO_WHATSAPP: 'true'
+      NO_TWILIO: 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Fast Lane
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+          INPUT_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+          INPUT_MAX_MEDIOS: ${{ github.event_name == 'workflow_dispatch' && inputs.max_medios || '0' }}
+          INPUT_CHUNK_SIZE: ${{ github.event_name == 'workflow_dispatch' && inputs.chunk_size || '5' }}
+          INPUT_CHUNK_CONCURRENCY: ${{ github.event_name == 'workflow_dispatch' && inputs.chunk_concurrency || '3' }}
+          INPUT_MAX_NOTAS: ${{ github.event_name == 'workflow_dispatch' && inputs.max_notas || '10' }}
+          INPUT_ENRICH_LIMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.enrich_limit || '60' }}
+          INPUT_OVERLAP_MINUTES: ${{ github.event_name == 'workflow_dispatch' && inputs.overlap_minutes || '90' }}
+        run: |
+          ARGS=(
+            "--max-medios=${INPUT_MAX_MEDIOS}"
+            "--chunk-size=${INPUT_CHUNK_SIZE}"
+            "--chunk-concurrency=${INPUT_CHUNK_CONCURRENCY}"
+            "--max-notas=${INPUT_MAX_NOTAS}"
+            "--enrich-limit=${INPUT_ENRICH_LIMIT}"
+            "--overlap-minutes=${INPUT_OVERLAP_MINUTES}"
+          )
+          if [ "${INPUT_DRY_RUN}" = "true" ]; then
+            ARGS+=( "--dry-run" )
+          else
+            ARGS+=( "--no-dry-run" )
+          fi
+          npm run mentions-master:fast-lane -- "${ARGS[@]}"
