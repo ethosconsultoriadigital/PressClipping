@@ -8,6 +8,11 @@ name: mentions-master-fast-lane
 # Cadencia: cada 30 minutos, desplazada a :17/:47 para evitar la carga alta de GitHub Actions al inicio de cada hora. El script procesa chunks con concurrencia acotada
 # y exporta a MENCIONES_MASTER inmediatamente después de cada chunk exitoso,
 # sin esperar al siguiente ciclo.
+#
+# Guardrail operacional: no ejecutar canary/write local a MENCIONES_MASTER
+# mientras un Fast Lane GHA (concurrency group mentions-master-fast-lane) esté
+# activo. cancel-in-progress=false encola, no cancela. No se cambia el diseño
+# Supabase/Sheets por carreras locales.
 
 on:
   schedule:
