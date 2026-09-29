@@ -36,9 +36,16 @@ describe('catalog-national-expansion-lote1 — NUEVOS_MEDIOS', () => {
     expect(bloomberg.sitemap_url).toBeNull();
   });
 
-  it('los demás 11 medios usan SITEMAP con sitemap_url https absoluto', () => {
+  it('Contralínea (MED-0183) usa RSS /feed/ — el sitemap_index no entrega posts recientes', () => {
+    const c = NUEVOS_MEDIOS.find((m) => m.medio_id === 'MED-0183')!;
+    expect(c.metodo_extraccion).toBe('RSS');
+    expect(c.rss_url).toBe('https://contralinea.com.mx/feed/');
+    expect(c.sitemap_url).toBe('https://contralinea.com.mx/sitemap_index.xml');
+  });
+
+  it('los demás 10 medios usan SITEMAP con sitemap_url https absoluto', () => {
     for (const m of NUEVOS_MEDIOS) {
-      if (m.medio_id === 'MED-0176') continue;
+      if (m.medio_id === 'MED-0176' || m.medio_id === 'MED-0183') continue;
       expect(m.metodo_extraccion).toBe('SITEMAP');
       expect(m.sitemap_url).toMatch(/^https:\/\//);
     }

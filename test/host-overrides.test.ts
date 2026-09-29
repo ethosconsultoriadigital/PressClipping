@@ -104,3 +104,35 @@ describe('host-scoped ContraRéplica inicionota plain text', () => {
     expect(t).toMatch(/Copyright 2026 ContraReplica/);
   });
 });
+
+const XATAKA_BODY =
+  'México está listo para uno de los cambios laborales más importantes en más de un siglo. La reducción de la jornada de 48 a 40 horas semanales comenzará de forma gradual en 2027 y se aplicará por sectores según el acuerdo publicado. ';
+const XATAKA_BIO =
+  'Valeria Romero Guevara es periodista y creadora de contenido especializada en tecnología, negocios y cultura digital. Egresada de la UNAM, con más de seis años de experiencia analizando cómo los avances tecnológicos impactan la vida cotidiana, desde la inteligencia artificial hasta los pagos móviles. ';
+
+function htmlXataka(): string {
+  return `<html><body>
+    <article>
+      <div class="p-a-card js-author-info"><p>${XATAKA_BIO}${XATAKA_BIO}</p></div>
+      <div class="article-content"><p>${XATAKA_BODY}${XATAKA_BODY}</p></div>
+    </article>
+  </body></html>`;
+}
+
+describe('host-scoped Xataka article-content (no author-bio clone)', () => {
+  it('BEFORE: wrapping article starts with author bio; AFTER: .article-content is the body', () => {
+    const r = extractFromHtml(
+      htmlXataka(),
+      'https://www.xataka.com.mx/empresas-y-economia/jornada-laboral-40-horas-traera-dos-dias-descanso',
+    );
+    expect(r.texto_cuerpo_nota ?? '').toContain('México está listo para uno de los cambios laborales');
+    expect(r.texto_cuerpo_nota ?? '').not.toMatch(/Valeria Romero Guevara es periodista/i);
+    expect((r.cuerpo_nota_chars ?? 0) >= 200).toBe(true);
+    expect(r.metodo_texto).toBe('html_container');
+  });
+
+  it('control: same HTML on another host keeps the author bio prefix', () => {
+    const r = extractFromHtml(htmlXataka(), 'https://www.eluniversal.com.mx/nota.html');
+    expect(r.texto_cuerpo_nota ?? r.texto_nota_limpia ?? '').toMatch(/Valeria Romero Guevara es periodista/i);
+  });
+});

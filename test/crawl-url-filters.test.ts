@@ -210,4 +210,30 @@ describe('Wave 2 URL filters — print/archive, medio-scoped', () => {
       false,
     );
   });
+
+  it('MVS /autor/ profile rejected; dated article kept', () => {
+    expect(shouldRejectCrawlUrl('MED-0181', 'https://mvsnoticias.com/autor/felipe-larios.html')).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0181',
+        'https://mvsnoticias.com/nacional/estados/2026/9/29/huracan-polo-toca-tierra-al-sur-de-sonora-747905.html',
+      ),
+    ).toBe(false);
+    expect(shouldRejectCrawlUrl('MED-0008', 'https://mvsnoticias.com/autor/felipe-larios.html')).toBe(false);
+  });
+
+  it('Yucatán /juegos/ crossword rejected; news article kept', () => {
+    expect(
+      shouldRejectCrawlUrl('MED-0182', 'https://www.yucatan.com.mx/juegos/2026/09/29/jugar-sudoku-29-de-septiembre-2026.html'),
+    ).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0182',
+        'https://www.yucatan.com.mx/mexico/2026/09/29/sigue-la-violencia-en-culiacan-tres-asesinatos.html',
+      ),
+    ).toBe(false);
+    expect(
+      shouldRejectCrawlUrl('MED-0008', 'https://www.yucatan.com.mx/juegos/2026/09/29/jugar-sudoku-29-de-septiembre-2026.html'),
+    ).toBe(false);
+  });
 });

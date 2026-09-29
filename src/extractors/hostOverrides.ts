@@ -64,6 +64,19 @@ export function hostOverrideFromUrl(url: string): HostExtractionOverride | null 
       preferPlainText: true,
     };
   }
+  if (host === 'xataka.com.mx') {
+    return {
+      extraRemoveSelectors: [
+        '.p-a-card',
+        '.js-author-info',
+        '.js-authors-container',
+        '.author-avatar',
+      ],
+      preferSelectors: ['.article-content'],
+      removeIfTextMatches:
+        /En Xataka Selección publicamos ofertas y descuentos/i,
+    };
+  }
   return null;
 }
 
