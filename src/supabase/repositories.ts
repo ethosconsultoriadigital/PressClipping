@@ -26,6 +26,7 @@ import {
   type DrainPageQueryPlan,
   type DrainPageRequest,
 } from '../enrichers/enrichDrainQuery.js';
+import { nextEnrichCandidatePage } from '../enrichers/enrichCandidatePages.js';
 import type { Medio, Cliente, Keyword, ConfigRow } from '../types/schemas.js';
 import type { NoticiaInsert } from '../normalizers/noticia.js';
 import {
@@ -1046,28 +1047,38 @@ export interface EnriquecerOpts {
    * Filtra a noticias con fecha_publicacion dentro de los últimos N días.
    * Se combina con recentFirst para acotar el re-enrich a la ventana que
    * realmente reporta la auditoría de readiness. Default: sin filtro.
+   * Semántica histórica: NO usar para alinear con certificación (esa usa
+   * created_at). Ver windowCreatedDays.
    */
   windowDays?: number;
+  /**
+   * Filtra a noticias con created_at dentro de los últimos N días.
+   * Misma semántica temporal que la certificación operativa (n7).
+   * Independiente de windowDays: se pueden combinar (AND) o usar solos.
+   * Con recentFirst, ordena por created_at DESC (no fecha_publicacion).
+   */
+  windowCreatedDays?: number;
 }
 
-/**
- * Lee noticias candidatas a enriquecer (visitar su URL y completar campos).
- * Por defecto trae todas; con los flags filtra por campo faltante.
- */
-export async function getNoticiasParaEnriquecer(
-  opts: EnriquecerOpts = {},
-): Promise<NoticiaEnriquecibleRow[]> {
-  let query = getSupabase()
-    .from('noticias')
-    .select(
-      'noticia_id, medio_id, url_original, titulo, resumen, texto_extraido, autor, seccion, imagen_principal,' +
-      ' texto_nota_limpia, extracto_nota_1300, calidad_extraccion, texto_limpio_chars,' +
-      ' texto_cuerpo_nota, extracto_cuerpo_1300, cuerpo_nota_chars, tipo_nota',
-    );
+const ENRICH_CANDIDATE_SELECT =
+  'noticia_id, medio_id, url_original, titulo, resumen, texto_extraido, autor, seccion, imagen_principal,' +
+  ' texto_nota_limpia, extracto_nota_1300, calidad_extraccion, texto_limpio_chars,' +
+  ' texto_cuerpo_nota, extracto_cuerpo_1300, cuerpo_nota_chars, tipo_nota';
 
-  query = opts.recentFirst
-    ? query.order('fecha_publicacion', { ascending: false })
-    : query.order('created_at', { ascending: true });
+function buildEnrichCandidateQuery(opts: EnriquecerOpts) {
+  let query = getSupabase().from('noticias').select(ENRICH_CANDIDATE_SELECT);
+
+  // Orden: ventana de certificación (created_at) gana sobre fecha_publicacion
+  // para que recentFirst recorra el mismo universo que evalúa el validator.
+  if (opts.windowCreatedDays && opts.windowCreatedDays > 0) {
+    query = opts.recentFirst
+      ? query.order('created_at', { ascending: false })
+      : query.order('created_at', { ascending: true });
+  } else if (opts.recentFirst) {
+    query = query.order('fecha_publicacion', { ascending: false });
+  } else {
+    query = query.order('created_at', { ascending: true });
+  }
 
   if (opts.medioIds && opts.medioIds.length > 0) {
     query = query.in('medio_id', opts.medioIds);
@@ -1075,6 +1086,10 @@ export async function getNoticiasParaEnriquecer(
   if (opts.windowDays && opts.windowDays > 0) {
     const desde = new Date(Date.now() - opts.windowDays * 24 * 60 * 60 * 1000).toISOString();
     query = query.gte('fecha_publicacion', desde);
+  }
+  if (opts.windowCreatedDays && opts.windowCreatedDays > 0) {
+    const desde = new Date(Date.now() - opts.windowCreatedDays * 24 * 60 * 60 * 1000).toISOString();
+    query = query.gte('created_at', desde);
   }
   if (opts.onlyMissingTitle) query = query.is('titulo', null);
   if (opts.onlyMissingText) query = query.is('texto_extraido', null);
@@ -1091,21 +1106,45 @@ export async function getNoticiasParaEnriquecer(
   if (opts.forceRefreshCleanText) {
     query = query.not('texto_nota_limpia', 'is', null);
   }
-  if (opts.limit && opts.limit > 0) query = query.limit(opts.limit);
+  return query;
+}
 
-  const { data, error } = await query;
-  if (error) throw new Error(`No se pudieron leer noticias para enriquecer: ${error.message}`);
-  return (data ?? []) as unknown as NoticiaEnriquecibleRow[];
+/**
+ * Lee noticias candidatas a enriquecer (visitar su URL y completar campos).
+ * Por defecto trae todas; con los flags filtra por campo faltante.
+ *
+ * Paginación: PostgREST/Supabase trunca en silencio ~1000 filas por request.
+ * Un `.limit(N)` con N>1000 o un SELECT sin limit devolvía la primera página
+ * y el resto desaparecía. Aquí se recorre con `.range()` de 1000 hasta
+ * agotar o alcanzar `opts.limit` (tope TOTAL, no tamaño de página).
+ */
+export async function getNoticiasParaEnriquecer(
+  opts: EnriquecerOpts = {},
+): Promise<NoticiaEnriquecibleRow[]> {
+  const acc: NoticiaEnriquecibleRow[] = [];
+  let offset = 0;
+  for (;;) {
+    const remaining = opts.limit && opts.limit > 0 ? opts.limit - acc.length : null;
+    const page = nextEnrichCandidatePage(offset, remaining);
+    if (!page) break;
+
+    const { data, error } = await buildEnrichCandidateQuery(opts).range(page.from, page.to);
+    if (error) throw new Error(`No se pudieron leer noticias para enriquecer: ${error.message}`);
+    const lote = (data ?? []) as unknown as NoticiaEnriquecibleRow[];
+    acc.push(...lote);
+    if (lote.length < page.take) break;
+    offset += lote.length;
+  }
+  return acc;
 }
 
 // =============================================================================
 // ENRICH DRAIN V1 — lectura keyset y escritura confirmada
 // =============================================================================
 //
-// Ruta NUEVA y separada de `getNoticiasParaEnriquecer` (que sigue sirviendo al
-// enrich legacy sin cambios). La elegibilidad y el keyset viven en
-// `src/enrichers/enrichDrainQuery.ts` (puro); aquí solo se traduce el plan a
-// PostgREST.
+// Ruta NUEVA y separada de `getNoticiasParaEnriquecer` (legacy ahora pagina
+// con `.range()` + windowCreatedDays opcional). El drain V1 pagina por keyset
+// created_at; la elegibilidad vive en `src/enrichers/enrichDrainQuery.ts`.
 
 /** Fila del drain: lo que necesita el enrich + cursor + metadata de reintento. */
 export interface NoticiaDrainCandidateRow extends NoticiaEnriquecibleRow {

@@ -78,11 +78,25 @@ describe('getNoticiasParaEnriquecer — contrato legacy intacto', () => {
     expect(metodosCon('eq')).toContainEqual(['menciones_procesado', false]);
   });
 
-  it('medioIds, windowDays y limit se aplican igual que antes', async () => {
+  it('medioIds, windowDays y tope 500 se aplican (range 0..499, no .limit silencioso)', async () => {
     await getNoticiasParaEnriquecer({ medioIds: ['MED-0039'], windowDays: 7, limit: 500 });
     expect(metodosCon('in')).toContainEqual(['medio_id', ['MED-0039']]);
     expect(metodosCon('gte')[0]?.[0]).toBe('fecha_publicacion');
-    expect(metodosCon('limit')).toEqual([[500]]);
+    expect(metodosCon('range')).toEqual([[0, 499]]);
+    expect(metodosCon('limit')).toEqual([]);
+  });
+
+  it('windowCreatedDays filtra created_at y, con recentFirst, ordena created_at DESC', async () => {
+    await getNoticiasParaEnriquecer({ windowCreatedDays: 7, recentFirst: true, limit: 100 });
+    expect(metodosCon('order')).toEqual([['created_at', { ascending: false }]]);
+    expect(metodosCon('gte')[0]?.[0]).toBe('created_at');
+    expect(metodosCon('range')).toEqual([[0, 99]]);
+  });
+
+  it('windowDays histórico sigue filtrando fecha_publicacion (no se sustituye)', async () => {
+    await getNoticiasParaEnriquecer({ windowDays: 7, recentFirst: true, limit: 10 });
+    expect(metodosCon('order')).toEqual([['fecha_publicacion', { ascending: false }]]);
+    expect(metodosCon('gte')[0]?.[0]).toBe('fecha_publicacion');
   });
 
   it('el query legacy NO conoce la metadata nueva del drain', async () => {
