@@ -8,7 +8,13 @@
  *      frescas con mínimo TÍTULO + DESCRIPCIÓN/RESUMEN + URL. Si el enrich ya
  *      produjo cuerpo limpio se aprovecha; si no, la descripción es suficiente.
  *      Aplica TODAS las keywords activas y consolida 1 fila por noticia + cliente
- *   4) append-only a MENCIONES_MASTER con dedupe cliente_id//noticia_id
+ *   4) Global News Lake sweep (sin crawl): matching sobre noticias recientes
+ *      ya existentes, aunque el medio no esté en el capture plan
+ *   5) append-only a MENCIONES_MASTER con dedupe cliente_id//noticia_id
+ *
+ * CAPTURE ELIGIBILITY ≠ MATCHING ELIGIBILITY.
+ * Capture: solo medios seguros/crawleables.
+ * Matching: cualquier noticia reciente elegible del News Lake.
  *
  * Guardrails:
  *   - NO inserta en menciones
@@ -32,8 +38,9 @@ import { logger } from '../src/utils/logger.js';
 
 const DEFAULT_SHEET_ID = '1T4-RLnBrK0lp3p-r23hRjrJAmI03QLzBavWM3ZpcmOA';
 const DEFAULT_TAB = 'MENCIONES_MASTER';
-export const OVERLAP_MINUTES = 10;
-const MAX_CELL_CHARS = 49_000;
+export const OVERLAP_MINUTES = 60;
+/** Snippet operacional. El cuerpo completo vive en News Lake. */
+export const MASTER_SNIPPET_CHARS = 3_000;
 const APPEND_CHUNK = 100;
 
 interface Args {
@@ -148,18 +155,31 @@ export function groupKeywordsByActiveClient(
   return { clientNames, keywordsByClient };
 }
 
-function effectiveText(n: MasterNewsRow): string {
-  return n.texto_cuerpo_nota ?? n.texto_nota_limpia ?? n.texto_extraido ?? n.resumen ?? '';
+export function windowSinceIso(startedAt: Date, overlapMinutes: number): string {
+  return new Date(startedAt.getTime() - overlapMinutes * 60_000).toISOString();
 }
 
-function searchableFields(n: MasterNewsRow): CampoBuscable[] {
+export function newsInOverlapWindow(fechaCaptura: string | null, sinceIso: string): boolean {
+  return Boolean(fechaCaptura && fechaCaptura >= sinceIso);
+}
+
+function displayText(n: MasterNewsRow): string {
+  const body = (n.texto_cuerpo_nota ?? n.texto_nota_limpia ?? n.texto_extraido ?? '').trim();
+  if (body.length > 0) return body;
+  return n.resumen ?? '';
+}
+
+/**
+ * Matching Fast Lane MASTER: título/subtítulo/resumen/sección.
+ * El body no dispara menciones: calidad_extraccion no distingue cuerpo
+ * concatenado/relacionados (alta = longitud/ratio, no trust editorial).
+ */
+export function matchingFields(n: MasterNewsRow): CampoBuscable[] {
   return [
     { nombre: 'titulo', texto: n.titulo ?? '', peso: PESOS_CAMPO.titulo! },
     { nombre: 'subtitulo', texto: n.subtitulo ?? '', peso: PESOS_CAMPO.subtitulo! },
     { nombre: 'resumen', texto: n.resumen ?? '', peso: PESOS_CAMPO.resumen! },
     { nombre: 'seccion', texto: n.seccion ?? '', peso: PESOS_CAMPO.seccion! },
-    { nombre: 'texto_extraido', texto: effectiveText(n), peso: PESOS_CAMPO.texto_extraido! },
-    { nombre: 'medio', texto: n.medio_nombre ?? '', peso: PESOS_CAMPO.medio! },
   ];
 }
 
@@ -179,9 +199,9 @@ function latencyMinutes(publicada: string | null, matchedAt: string): number | n
 }
 
 function truncateForSheet(text: string): string {
-  if (text.length <= MAX_CELL_CHARS) return text;
-  const suffix = '\n\n[TRUNCADO POR LIMITE DE CELDA DE GOOGLE SHEETS]';
-  return text.slice(0, MAX_CELL_CHARS - suffix.length) + suffix;
+  if (text.length <= MASTER_SNIPPET_CHARS) return text;
+  const suffix = '\n\n[SNIPPET OPERACIONAL; CUERPO COMPLETO EN NEWS LAKE]';
+  return text.slice(0, MASTER_SNIPPET_CHARS - suffix.length) + suffix;
 }
 
 export async function fetchEligibleNews(sinceIso: string, medioIds?: string[]): Promise<MasterNewsRow[]> {
@@ -250,7 +270,7 @@ export function buildRows(
 ): OutRow[] {
   const rows: OutRow[] = [];
   for (const n of news) {
-    const campos = searchableFields(n);
+    const campos = matchingFields(n);
     for (const [clientId, kws] of keywordsByClient.entries()) {
       const matches: MatchBundle[] = [];
       for (const kw of kws) {
@@ -276,7 +296,7 @@ export function buildRows(
         'horaPublicacion': localHour(n.fecha_publicacion),
         'HoraCaptura': localHour(n.fecha_captura),
         'titulo / titular': n.titulo ?? '',
-        'nota completa': truncateForSheet(effectiveText(n)),
+        'nota completa': truncateForSheet(displayText(n)),
         'url': n.url_original ?? '',
         'sentimiento': '',
         'tema': '',
@@ -328,7 +348,7 @@ export async function appendRows(
   rows: OutRow[],
   existing: Set<string>,
   dryRun: boolean,
-): Promise<{ appended: number; skipped: number }> {
+): Promise<{ appended: number; skipped: number; would_append: number }> {
   const unique: OutRow[] = [];
   for (const row of rows) {
     const key = String(row['dedupe_key'] ?? '').trim().toLowerCase();
@@ -337,7 +357,7 @@ export async function appendRows(
     unique.push(row);
   }
   if (dryRun || unique.length === 0) {
-    return { appended: dryRun ? 0 : unique.length, skipped: rows.length - unique.length };
+    return { appended: 0, skipped: rows.length - unique.length, would_append: unique.length };
   }
 
   await withSheetsRetry(() => sheet.loadHeaderRow(), 'master reloadHeaderRow');
@@ -358,13 +378,13 @@ export async function appendRows(
     await withSheetsRetry(() => sheet.addRows(chunk as any[]), 'master addRows');
     appended += chunk.length;
   }
-  return { appended, skipped: rows.length - unique.length };
+  return { appended, skipped: rows.length - unique.length, would_append: unique.length };
 }
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const startedAt = new Date();
-  let sinceIso = new Date(startedAt.getTime() - args.overlapMinutes * 60_000).toISOString();
+  let sinceIso = windowSinceIso(startedAt, args.overlapMinutes);
 
   const captureArgs: NewsLakeCaptureArgs = {
     dryRun: args.dryRun,
@@ -384,21 +404,19 @@ async function main(): Promise<void> {
 
   let sheet: GoogleSpreadsheetWorksheet | null = null;
   let existingKeys = new Set<string>();
-  if (!args.dryRun) {
-    const doc = await getSpreadsheetById(args.sheetId);
-    sheet = doc.sheetsByTitle[args.tab] ?? null;
-    if (!sheet) throw new Error(`No existe pestaña ${args.tab} en ${args.sheetId}`);
-    existingKeys = await loadExistingKeys(sheet);
-    // Bootstrap inicial: si la Master todavía no tiene filas, sembrar desde la
-    // misma ventana operativa (default 2 días) para que la primera corrida no
-    // dependa exclusivamente de encontrar una mención nacida en el overlap de 10 min.
-    if (existingKeys.size === 0) {
-      sinceIso = new Date(startedAt.getTime() - args.windowDays * 24 * 60 * 60_000).toISOString();
-      logger.info(
-        { bootstrap_since_iso: sinceIso, bootstrap_window_days: args.windowDays },
-        'MENCIONES_MASTER vacía: bootstrap inicial de menciones recientes',
-      );
-    }
+  const doc = await getSpreadsheetById(args.sheetId);
+  sheet = doc.sheetsByTitle[args.tab] ?? null;
+  if (!sheet) throw new Error(`No existe pestaña ${args.tab} en ${args.sheetId}`);
+  existingKeys = await loadExistingKeys(sheet);
+  // Bootstrap inicial: si la Master todavía no tiene filas, sembrar desde la
+  // misma ventana operativa (default 2 días) para que la primera corrida no
+  // dependa exclusivamente del overlap.
+  if (existingKeys.size === 0 && !args.dryRun) {
+    sinceIso = new Date(startedAt.getTime() - args.windowDays * 24 * 60 * 60_000).toISOString();
+    logger.info(
+      { bootstrap_since_iso: sinceIso, bootstrap_window_days: args.windowDays },
+      'MENCIONES_MASTER vacía: bootstrap inicial de menciones recientes',
+    );
   }
 
   if (args.matchOnly) {
@@ -411,14 +429,15 @@ async function main(): Promise<void> {
       sheet_id: args.sheetId.slice(0, 8) + '...',
       tab: args.tab,
       minimo_export: 'titulo + resumen/descripcion + url',
-      cuerpo_completo: 'best_effort_no_bloqueante',
+      matching_fields: 'titulo,subtitulo,resumen,seccion',
+      body_matching: false,
+      global_sweep: true,
     }, '=== MENTIONS MASTER FAST LANE start (match-only) ===');
 
     const news = await fetchEligibleNews(sinceIso);
     const rows = buildRows(news, keywordsByClient, clientNames);
-    const write = sheet
-      ? await appendRows(sheet, rows, existingKeys, args.dryRun)
-      : { appended: 0, skipped: rows.length };
+    const write = await appendRows(sheet, rows, existingKeys, args.dryRun);
+    const medios = new Set(news.map((n) => n.medio_id).filter(Boolean));
     const latencies = rows
       .map((r) => r['latencia_minutos'])
       .filter((n): n is number => typeof n === 'number')
@@ -426,9 +445,11 @@ async function main(): Promise<void> {
     logger.info({
       duration_ms: Date.now() - startedAt.getTime(),
       noticias_frescas_elegibles: news.length,
+      medios_unique: medios.size,
       menciones_consolidadas: rows.length,
       appended_master: write.appended,
       skipped_dedupe: write.skipped,
+      would_append: write.would_append,
       latency_min: latencies[0] ?? null,
       latency_max: latencies[latencies.length - 1] ?? null,
       latency_median: latencies.length ? latencies[Math.floor(latencies.length / 2)]! : null,
@@ -454,7 +475,9 @@ async function main(): Promise<void> {
     sheet_id: args.sheetId.slice(0, 8) + '...',
     tab: args.tab,
     minimo_export: 'titulo + resumen/descripcion + url',
-    cuerpo_completo: 'best_effort_no_bloqueante',
+    matching_fields: 'titulo,subtitulo,resumen,seccion',
+    body_matching: false,
+    global_sweep: true,
   }, '=== MENTIONS MASTER FAST LANE start ===');
 
   let nextIndex = 0;
@@ -486,11 +509,9 @@ async function main(): Promise<void> {
         );
       }
 
-      if (args.dryRun) continue;
-
       const news = await fetchEligibleNews(sinceIso, chunk);
       const rows = buildRows(news, keywordsByClient, clientNames);
-      const write = await appendRows(sheet!, rows, existingKeys, false);
+      const write = await appendRows(sheet!, rows, existingKeys, args.dryRun);
       totalNews += news.length;
       totalMatches += rows.length;
       totalAppended += write.appended;
@@ -514,6 +535,21 @@ async function main(): Promise<void> {
   );
   await Promise.all(workers);
 
+  const globalNews = await fetchEligibleNews(sinceIso);
+  const globalRows = buildRows(globalNews, keywordsByClient, clientNames);
+  const globalWrite = await appendRows(sheet!, globalRows, existingKeys, args.dryRun);
+  const globalMedios = new Set(globalNews.map((n) => n.medio_id).filter(Boolean));
+  const fueraDePlan = [...globalMedios].filter((id) => !plan.medioIds.includes(id as string)).length;
+  logger.info({
+    noticias_global: globalNews.length,
+    medios_unique: globalMedios.size,
+    medios_fuera_capture_plan: fueraDePlan,
+    menciones_consolidadas: globalRows.length,
+    appended_master: globalWrite.appended,
+    skipped_dedupe: globalWrite.skipped,
+    would_append: globalWrite.would_append,
+  }, 'Global News Lake sweep (sin crawl)');
+
   logger.info({
     duration_ms: Date.now() - startedAt.getTime(),
     medios_plan: plan.medioIds.length,
@@ -521,8 +557,9 @@ async function main(): Promise<void> {
     chunks_fallidos: failedChunks,
     noticias_frescas_elegibles: totalNews,
     menciones_consolidadas: totalMatches,
-    appended_master: totalAppended,
-    skipped_dedupe: totalSkipped,
+    appended_master: totalAppended + globalWrite.appended,
+    skipped_dedupe: totalSkipped + globalWrite.skipped,
+    would_append_global: globalWrite.would_append,
     no_whatsapp: true,
     no_email: true,
     no_twilio: true,
