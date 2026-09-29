@@ -47,7 +47,7 @@ on:
       overlap_minutes:
         description: 'Ventana de seguridad para lectura fresca'
         required: false
-        default: '90'
+        default: '10'
         type: string
 
 concurrency:
@@ -94,7 +94,7 @@ jobs:
           INPUT_CHUNK_CONCURRENCY: ${{ github.event_name == 'workflow_dispatch' && inputs.chunk_concurrency || '3' }}
           INPUT_MAX_NOTAS: ${{ github.event_name == 'workflow_dispatch' && inputs.max_notas || '10' }}
           INPUT_ENRICH_LIMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.enrich_limit || '60' }}
-          INPUT_OVERLAP_MINUTES: ${{ github.event_name == 'workflow_dispatch' && inputs.overlap_minutes || '90' }}
+          INPUT_OVERLAP_MINUTES: ${{ github.event_name == 'workflow_dispatch' && inputs.overlap_minutes || '10' }}
         run: |
           ARGS=(
             "--max-medios=${INPUT_MAX_MEDIOS}"

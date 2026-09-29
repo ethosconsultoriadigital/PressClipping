@@ -24,27 +24,21 @@ import { calcularPlan, procesarChunk, type NewsLakeCaptureArgs } from './news-la
 import { getSupabase } from '../src/supabase/client.js';
 import { getAllClientes, getKeywordsActivas, type KeywordActivaRow } from '../src/supabase/repositories.js';
 import { getSpreadsheetById, withSheetsRetry } from '../src/sheets/client.js';
-import {
-  matchKeyword,
-  splitTerminos,
-  PESOS_CAMPO,
-  type CampoBuscable,
-  type KeywordRule,
-  type MatchResultado,
-  type TipoKeyword,
-} from '../src/matchers/keyword.js';
+import { matchKeyword, PESOS_CAMPO, type CampoBuscable, type MatchResultado } from '../src/matchers/keyword.js';
+import { toKeywordRule } from '../src/matching/detectMentionsCore.js';
+import { buildMentionScope } from '../src/matching/controlPlaneScope.js';
 import { normalizeHeader, parseIntOrNull } from '../src/utils/parse.js';
 import { logger } from '../src/utils/logger.js';
 
 const DEFAULT_SHEET_ID = '1T4-RLnBrK0lp3p-r23hRjrJAmI03QLzBavWM3ZpcmOA';
 const DEFAULT_TAB = 'MENCIONES_MASTER';
-const OVERLAP_MINUTES = 90;
+export const OVERLAP_MINUTES = 10;
 const MAX_CELL_CHARS = 49_000;
 const APPEND_CHUNK = 100;
-const TIPOS_VALIDOS: TipoKeyword[] = ['exacta', 'frase_exacta', 'contiene', 'booleana', 'exacta_contextual'];
 
 interface Args {
   dryRun: boolean;
+  matchOnly: boolean;
   sheetId: string;
   tab: string;
   maxMedios: number;
@@ -56,7 +50,7 @@ interface Args {
   overlapMinutes: number;
 }
 
-interface MasterNewsRow {
+export interface MasterNewsRow {
   noticia_id: string;
   medio_id: string | null;
   medio_nombre: string | null;
@@ -82,9 +76,10 @@ interface MatchBundle {
 
 type OutRow = Record<string, string | number | boolean | null>;
 
-function parseArgs(argv: string[]): Args {
+export function parseArgs(argv: string[]): Args {
   const out: Args = {
     dryRun: false,
+    matchOnly: false,
     sheetId: process.env['GOOGLE_MENTIONS_MASTER_SHEET_ID'] || DEFAULT_SHEET_ID,
     tab: process.env['GOOGLE_MENTIONS_MASTER_TAB'] || DEFAULT_TAB,
     maxMedios: 0,
@@ -98,6 +93,7 @@ function parseArgs(argv: string[]): Args {
   for (const arg of argv) {
     if (arg === '--dry-run') { out.dryRun = true; continue; }
     if (arg === '--no-dry-run') { out.dryRun = false; continue; }
+    if (arg === '--match-only') { out.matchOnly = true; continue; }
     if (!arg.startsWith('--')) continue;
     const [key, ...rest] = arg.slice(2).split('=');
     const val = rest.join('=');
@@ -111,26 +107,45 @@ function parseArgs(argv: string[]): Args {
       case 'max-notas': out.maxNotas = Math.max(1, parseIntOrNull(val) ?? out.maxNotas); break;
       case 'enrich-limit': out.enrichLimit = Math.max(1, parseIntOrNull(val) ?? out.enrichLimit); break;
       case 'window-days': out.windowDays = Math.max(1, parseIntOrNull(val) ?? out.windowDays); break;
-      case 'overlap-minutes': out.overlapMinutes = Math.max(15, parseIntOrNull(val) ?? out.overlapMinutes); break;
+      case 'overlap-minutes': out.overlapMinutes = Math.max(1, parseIntOrNull(val) ?? out.overlapMinutes); break;
+      case 'match-only': out.matchOnly = val === '' || val === 'true' || val === '1'; break;
     }
   }
   return out;
 }
 
-function toKeywordRule(kw: KeywordActivaRow): KeywordRule {
-  const tipo: TipoKeyword = (TIPOS_VALIDOS as string[]).includes(kw.tipo_keyword)
-    ? kw.tipo_keyword as TipoKeyword
-    : 'contiene';
-  return {
-    keyword_id: kw.keyword_id,
-    cliente_id: kw.cliente_id,
-    keyword: kw.keyword,
-    terminos: splitTerminos(kw.keyword, kw.alias_o_variantes),
-    tipo,
-    regla: kw.regla,
-    contextoIncluir: splitTerminos(kw.contexto_incluir),
-    contextoExcluir: splitTerminos(kw.contexto_excluir),
-  };
+/** Mismo scope que 02_Menciones / detectMentionsCore: cliente.activo + keyword.activa + no huérfanas. */
+export function groupKeywordsByActiveClient(
+  clients: Array<{ cliente_id: string; nombre_cliente: string; activo: boolean }>,
+  keywords: KeywordActivaRow[],
+): {
+  clientNames: Map<string, string>;
+  keywordsByClient: Map<string, KeywordActivaRow[]>;
+} {
+  const scope = buildMentionScope({
+    clientes: clients,
+    keywords: keywords.map((k) => ({
+      keyword_id: k.keyword_id,
+      cliente_id: k.cliente_id,
+      keyword: k.keyword,
+      tipo_keyword: k.tipo_keyword,
+      activa: true,
+    })),
+  });
+  const allowed = new Set(scope.detection_keywords.map((k) => k.keyword_id));
+  const clientNames = new Map(
+    clients
+      .filter((c) => scope.detection_client_ids.includes(c.cliente_id))
+      .map((c) => [c.cliente_id, c.nombre_cliente]),
+  );
+  const keywordsByClient = new Map<string, KeywordActivaRow[]>();
+  for (const kw of keywords) {
+    if (!allowed.has(kw.keyword_id) || !kw.cliente_id) continue;
+    const list = keywordsByClient.get(kw.cliente_id) ?? [];
+    list.push(kw);
+    keywordsByClient.set(kw.cliente_id, list);
+  }
+  return { clientNames, keywordsByClient };
 }
 
 function effectiveText(n: MasterNewsRow): string {
@@ -169,25 +184,12 @@ function truncateForSheet(text: string): string {
   return text.slice(0, MAX_CELL_CHARS - suffix.length) + suffix;
 }
 
-async function fetchFreshNews(medioIds: string[], sinceIso: string): Promise<MasterNewsRow[]> {
-  const { data, error } = await getSupabase()
-    .from('noticias')
-    .select(
-      'noticia_id, medio_id, titulo, subtitulo, resumen, url_original, fecha_publicacion, fecha_captura,' +
-      ' autor, seccion, texto_extraido, texto_nota_limpia, texto_cuerpo_nota, tipo_nota, calidad_extraccion,' +
-      ' medios(nombre_medio)',
-    )
-    .in('medio_id', medioIds)
-    .gte('fecha_captura', sinceIso)
-    .not('titulo', 'is', null)
-    .not('resumen', 'is', null)
-    .not('url_original', 'is', null)
-    .neq('origen_cobertura', 'pressclipping_diagnostico')
-    .order('fecha_captura', { ascending: true })
-    .limit(2000);
-
-  if (error) throw new Error(`No se pudieron leer noticias frescas: ${error.message}`);
-  return (data ?? []).map((n: any) => ({
+export async function fetchEligibleNews(sinceIso: string, medioIds?: string[]): Promise<MasterNewsRow[]> {
+  const select =
+    'noticia_id, medio_id, titulo, subtitulo, resumen, url_original, fecha_publicacion, fecha_captura,' +
+    ' autor, seccion, texto_extraido, texto_nota_limpia, texto_cuerpo_nota, tipo_nota, calidad_extraccion,' +
+    ' medios(nombre_medio)';
+  const mapRow = (n: any): MasterNewsRow => ({
     noticia_id: n.noticia_id,
     medio_id: n.medio_id ?? null,
     medio_nombre: n.medios?.nombre_medio ?? null,
@@ -204,14 +206,44 @@ async function fetchFreshNews(medioIds: string[], sinceIso: string): Promise<Mas
     texto_cuerpo_nota: n.texto_cuerpo_nota ?? null,
     tipo_nota: n.tipo_nota ?? null,
     calidad_extraccion: n.calidad_extraccion ?? null,
-  })).filter((n: MasterNewsRow) =>
-    Boolean(n.titulo?.trim()) &&
-    Boolean(n.resumen?.trim()) &&
-    Boolean(n.url_original?.trim()),
-  );
+  });
+  const eligible = (n: MasterNewsRow) =>
+    Boolean(n.titulo?.trim()) && Boolean(n.resumen?.trim()) && Boolean(n.url_original?.trim());
+
+  const runPage = async (from: number, to: number) => {
+    let q = getSupabase()
+      .from('noticias')
+      .select(select)
+      .gte('fecha_captura', sinceIso)
+      .not('titulo', 'is', null)
+      .not('resumen', 'is', null)
+      .not('url_original', 'is', null)
+      .neq('origen_cobertura', 'pressclipping_diagnostico')
+      .order('fecha_captura', { ascending: true })
+      .range(from, to);
+    if (medioIds && medioIds.length > 0) q = q.in('medio_id', medioIds);
+    const { data, error } = await q;
+    if (error) throw new Error(`No se pudieron leer noticias frescas: ${error.message}`);
+    return data ?? [];
+  };
+
+  if (medioIds && medioIds.length > 0) {
+    const data = await runPage(0, 1999);
+    return data.map(mapRow).filter(eligible);
+  }
+
+  const out: MasterNewsRow[] = [];
+  const page = 1000;
+  const cap = 8000;
+  for (let from = 0; from < cap; from += page) {
+    const data = await runPage(from, from + page - 1);
+    out.push(...data.map(mapRow).filter(eligible));
+    if (data.length < page) break;
+  }
+  return out;
 }
 
-function buildRows(
+export function buildRows(
   news: MasterNewsRow[],
   keywordsByClient: Map<string, KeywordActivaRow[]>,
   clientNames: Map<string, string>,
@@ -291,7 +323,7 @@ async function loadExistingKeys(sheet: GoogleSpreadsheetWorksheet): Promise<Set<
   return set;
 }
 
-async function appendRows(
+export async function appendRows(
   sheet: GoogleSpreadsheetWorksheet,
   rows: OutRow[],
   existing: Set<string>,
@@ -343,22 +375,12 @@ async function main(): Promise<void> {
     chunkSize: args.chunkSize,
   };
 
-  const [clients, keywords, plan] = await Promise.all([
+  const [clients, keywords] = await Promise.all([
     getAllClientes(),
     getKeywordsActivas(),
-    calcularPlan(captureArgs),
   ]);
-
-  const activeClients = new Map(
-    clients.filter((c) => c.activo).map((c) => [c.cliente_id, c.nombre_cliente]),
-  );
-  const keywordsByClient = new Map<string, KeywordActivaRow[]>();
-  for (const kw of keywords) {
-    if (!kw.cliente_id || !activeClients.has(kw.cliente_id)) continue;
-    const list = keywordsByClient.get(kw.cliente_id) ?? [];
-    list.push(kw);
-    keywordsByClient.set(kw.cliente_id, list);
-  }
+  const { clientNames, keywordsByClient } = groupKeywordsByActiveClient(clients, keywords);
+  const keywordCount = [...keywordsByClient.values()].reduce((a, b) => a + b.length, 0);
 
   let sheet: GoogleSpreadsheetWorksheet | null = null;
   let existingKeys = new Set<string>();
@@ -369,7 +391,7 @@ async function main(): Promise<void> {
     existingKeys = await loadExistingKeys(sheet);
     // Bootstrap inicial: si la Master todavía no tiene filas, sembrar desde la
     // misma ventana operativa (default 2 días) para que la primera corrida no
-    // dependa exclusivamente de encontrar una mención nacida en los últimos 90 min.
+    // dependa exclusivamente de encontrar una mención nacida en el overlap de 10 min.
     if (existingKeys.size === 0) {
       sinceIso = new Date(startedAt.getTime() - args.windowDays * 24 * 60 * 60_000).toISOString();
       logger.info(
@@ -379,14 +401,55 @@ async function main(): Promise<void> {
     }
   }
 
+  if (args.matchOnly) {
+    logger.info({
+      dry_run: args.dryRun,
+      match_only: true,
+      clientes_activos: clientNames.size,
+      keywords_activas: keywordCount,
+      since_iso: sinceIso,
+      sheet_id: args.sheetId.slice(0, 8) + '...',
+      tab: args.tab,
+      minimo_export: 'titulo + resumen/descripcion + url',
+      cuerpo_completo: 'best_effort_no_bloqueante',
+    }, '=== MENTIONS MASTER FAST LANE start (match-only) ===');
+
+    const news = await fetchEligibleNews(sinceIso);
+    const rows = buildRows(news, keywordsByClient, clientNames);
+    const write = sheet
+      ? await appendRows(sheet, rows, existingKeys, args.dryRun)
+      : { appended: 0, skipped: rows.length };
+    const latencies = rows
+      .map((r) => r['latencia_minutos'])
+      .filter((n): n is number => typeof n === 'number')
+      .sort((a, b) => a - b);
+    logger.info({
+      duration_ms: Date.now() - startedAt.getTime(),
+      noticias_frescas_elegibles: news.length,
+      menciones_consolidadas: rows.length,
+      appended_master: write.appended,
+      skipped_dedupe: write.skipped,
+      latency_min: latencies[0] ?? null,
+      latency_max: latencies[latencies.length - 1] ?? null,
+      latency_median: latencies.length ? latencies[Math.floor(latencies.length / 2)]! : null,
+      no_whatsapp: true,
+      no_email: true,
+      no_twilio: true,
+      no_menciones_db_write: true,
+    }, '=== MENTIONS MASTER FAST LANE done (match-only) ===');
+    return;
+  }
+
+  const plan = await calcularPlan(captureArgs);
+
   logger.info({
     dry_run: args.dryRun,
     medios: plan.medioIds.length,
     chunks: plan.chunks.length,
     chunk_size: args.chunkSize,
     chunk_concurrency: args.chunkConcurrency,
-    clientes_activos: activeClients.size,
-    keywords_activas: [...keywordsByClient.values()].reduce((a, b) => a + b.length, 0),
+    clientes_activos: clientNames.size,
+    keywords_activas: keywordCount,
     since_iso: sinceIso,
     sheet_id: args.sheetId.slice(0, 8) + '...',
     tab: args.tab,
@@ -425,8 +488,8 @@ async function main(): Promise<void> {
 
       if (args.dryRun) continue;
 
-      const news = await fetchFreshNews(chunk, sinceIso);
-      const rows = buildRows(news, keywordsByClient, activeClients);
+      const news = await fetchEligibleNews(sinceIso, chunk);
+      const rows = buildRows(news, keywordsByClient, clientNames);
       const write = await appendRows(sheet!, rows, existingKeys, false);
       totalNews += news.length;
       totalMatches += rows.length;
