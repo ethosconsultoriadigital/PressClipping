@@ -202,6 +202,8 @@ describe('workflow live-mentions-fresh', () => {
     expect(bloque.match(/--dry-run/g)?.length).toBeGreaterThanOrEqual(2);
     expect(wf).toContain('PRIORITY_MENTION_MEDIA_IDS');
     expect(wf).toContain("default: 'true'");
+    expect(wf).toContain('--from-control-plane');
+    expect(wf).not.toContain('--clients=CLI-MERY-TEST,CLI-0001,CLI-0002');
   });
 });
 
@@ -213,6 +215,7 @@ describe('parseTitleOnlyArgs', () => {
       pageSize: 500,
       maxScan: 10000,
       legacyLimit: null,
+      clientIds: null,
     });
     const live = parseTitleOnlyArgs(['--dry-run', '--hours=48', '--page-size=500', '--max-scan=10000']);
     expect(live.dryRun).toBe(true);

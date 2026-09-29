@@ -9,9 +9,9 @@
  * Uso histórico:
  *   npm run export-results
  *
- * Uso LIVE 48h (3 clientes):
- *   npm run export-results -- --mentions-only --clients=CLI-MERY-TEST,CLI-0001,CLI-0002 \
- *     --window-hours=48 --recent-first --limit=500 --dry-run
+ * Uso LIVE 48h (scope Control Plane, clientes activos):
+ *   npm run export-results -- --mentions-only --from-control-plane \
+ *     --window-hours=48 --news-window-hours=48 --recent-first --limit=500 --dry-run
  *
  * Ventana editorial opt-in (no cambia el legado si se omite):
  *   --news-window-hours=48
@@ -28,11 +28,13 @@ import {
 import { planUniqueAppendByKey } from '../src/sheets/uniqueAppendPlan.js';
 import {
   getConfigMap,
+  getAllClientes,
   getMencionesPendientesExport,
   markMencionesExportadas,
   getLogsPendientesExport,
   markLogsExportados,
 } from '../src/supabase/repositories.js';
+import { buildMentionScope, resolveExportClients } from '../src/matching/controlPlaneScope.js';
 import { mencionToOutputRow, logToOutputRow } from '../src/exporters/sheetRows.js';
 import { writeIngestaLog } from '../src/logs/ingestaLogger.js';
 import { logger } from '../src/utils/logger.js';
@@ -42,6 +44,7 @@ import { pathToFileURL } from 'node:url';
 export interface ExportResultsArgs {
   mentionsOnly: boolean;
   clients: string[] | null;
+  fromControlPlane: boolean;
   windowHours: number | null;
   newsWindowHours: number | null;
   recentFirst: boolean;
@@ -53,6 +56,7 @@ export function parseExportResultsArgs(argv: string[]): ExportResultsArgs {
   const out: ExportResultsArgs = {
     mentionsOnly: false,
     clients: null,
+    fromControlPlane: false,
     windowHours: null,
     newsWindowHours: null,
     recentFirst: false,
@@ -71,6 +75,9 @@ export function parseExportResultsArgs(argv: string[]): ExportResultsArgs {
         break;
       case 'clients':
         out.clients = val.split(',').map((s) => s.trim()).filter(Boolean);
+        break;
+      case 'from-control-plane':
+        out.fromControlPlane = true;
         break;
       case 'window-hours':
         out.windowHours = Number(val) || null;
@@ -96,6 +103,21 @@ async function exportarMenciones(
   limit: number,
   args: ExportResultsArgs,
 ): Promise<{ escritas: number; marcar: string[] }> {
+  let controlPlaneIds: string[] = [];
+  if (args.fromControlPlane) {
+    const clientes = await getAllClientes();
+    controlPlaneIds = buildMentionScope({ clientes, keywords: [] }).export_client_ids;
+  }
+  const clients = resolveExportClients({
+    overrideClients: args.clients,
+    fromControlPlane: args.fromControlPlane,
+    controlPlaneClientIds: controlPlaneIds,
+  });
+  if (args.fromControlPlane && (!clients || clients.length === 0)) {
+    logger.info('Control Plane: 0 clientes activos — no se exporta.');
+    return { escritas: 0, marcar: [] };
+  }
+
   const since =
     args.windowHours != null
       ? new Date(Date.now() - args.windowHours * 3600e3).toISOString()
@@ -106,7 +128,7 @@ async function exportarMenciones(
       : undefined;
   const menciones = await getMencionesPendientesExport({
     limit,
-    clients: args.clients ?? undefined,
+    clients: clients ?? undefined,
     since,
     newsSince,
     recentFirst: args.recentFirst,

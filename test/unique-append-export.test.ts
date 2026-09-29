@@ -105,6 +105,7 @@ describe('parseExportResultsArgs', () => {
     expect(parseExportResultsArgs([])).toEqual({
       mentionsOnly: false,
       clients: null,
+      fromControlPlane: false,
       windowHours: null,
       newsWindowHours: null,
       recentFirst: false,

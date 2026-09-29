@@ -1,154 +1,35 @@
 /**
- * Fase 4 — Detección de menciones.
+ * Fase 4 — Detección de menciones (Control Plane scope V1).
  *
- * Carga las keywords activas y analiza las noticias aún no procesadas. Por cada
- * coincidencia (según la regla de la keyword y sus puertas de contexto) crea una
- * mención. Marca las noticias como procesadas para no reanalizarlas.
+ * Detector GLOBAL: keywords activas de clientes activos del Control Plane.
+ * Una noticia se evalúa una vez y se marca menciones_procesado (salvo --client).
  *
- * Uso:
- *   npm run detect-mentions                        # real, todas las pendientes
- *   npm run detect-mentions -- --limit=70          # real, limitado
- *   npm run detect-mentions -- --dry-run           # no inserta ni marca
- *   npm run detect-mentions -- --limit=70 --dry-run
- *   npm run detect-mentions -- --limit=50 --only-with-text          # solo noticias con texto_cuerpo_nota
- *   npm run detect-mentions -- --limit=50 --only-with-text --dry-run
- *   npm run detect-mentions -- --medio-ids=MED-0030,MED-0008 --only-with-text --dry-run  # aislado por medio
  *   npm run detect-mentions -- --limit=500 --only-with-text --fresh-lane --dry-run
- *   npm run detect-mentions -- --limit=500 --only-with-text --fresh-lane --fresh-hours=48 --fresh-share=0.70
+ *   npm run detect-mentions -- --client=CLI-0001 --dry-run
  *
- * Sin --fresh-lane la cola sigue oldest-first ASC (legacy).
+ * LIVE usa --fresh-lane (70% frescas / 30% backlog). Sin ese flag: oldest-first.
  */
 import {
+  getAllClientes,
   getConfigMap,
   getKeywordsActivas,
   getNoticiasPendientesConCola,
   insertMenciones,
   markNoticiasProcesadas,
-  type KeywordActivaRow,
-  type NoticiaScanRow,
-  type MencionInsert,
 } from '../src/supabase/repositories.js';
+import { MentionQueueError, validateMentionQueueParams } from '../src/matching/mentionQueue.js';
 import {
   MENTION_QUEUE_DEFAULTS,
-  MentionQueueError,
-  validateMentionQueueParams,
-} from '../src/matching/mentionQueue.js';
-import {
-  matchKeyword,
-  splitTerminos,
-  PESOS_CAMPO,
-  type KeywordRule,
-  type CampoBuscable,
-  type TipoKeyword,
-} from '../src/matchers/keyword.js';
+  parseDetectArgs,
+  runDetectMentions,
+} from '../src/matching/detectMentionsCore.js';
 import { writeIngestaLog } from '../src/logs/ingestaLogger.js';
 import { logger } from '../src/utils/logger.js';
 import { parseIntOrNull } from '../src/utils/parse.js';
 
-// ---------------------------------------------------------------------------
-// Argument parsing
-// ---------------------------------------------------------------------------
-
-interface DetectArgs {
-  dryRun: boolean;
-  limit?: number;
-  /** Solo analizar noticias que ya tienen texto_cuerpo_nota (evita marcar noticias sin texto). */
-  onlyWithText?: boolean;
-  /** Incluir notas diagnósticas de PressClipping (por defecto se excluyen, no son cobertura orgánica). */
-  includeDiagnostic?: boolean;
-  /** Aísla la detección a estos medio_id (no mezcla backlog global). */
-  medioIds?: string[];
-  /**
-   * Filtra las keywords al cliente indicado. Cuando se especifica, las noticias NO
-   * se marcan como procesadas (menciones_procesado=true), para preservar que el
-   * próximo detect global las analice con todas las keywords de otros clientes.
-   */
-  clientId?: string;
-  /** Límite máximo de menciones a insertar en modo real (safety cap por cliente). */
-  maxInserts?: number;
-  /** Opt-in cola justa fresh+backlog. Ausente = legacy ASC. */
-  freshLane?: boolean;
-  freshHours?: number;
-  freshShare?: number;
-}
-
-function splitList(v: string): string[] {
-  return v.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
-}
-
-function parseArgs(argv: string[]): DetectArgs {
-  const out: DetectArgs = { dryRun: false };
-  for (const arg of argv) {
-    if (!arg.startsWith('--')) continue;
-    const body = arg.slice(2);
-    const eq = body.indexOf('=');
-    const key = eq === -1 ? body : body.slice(0, eq);
-    const value = eq === -1 ? '' : body.slice(eq + 1);
-    if (key === 'dry-run') out.dryRun = true;
-    if (key === 'only-with-text') out.onlyWithText = true;
-    if (key === 'include-diagnostic') out.includeDiagnostic = true;
-    if (key === 'limit') out.limit = parseIntOrNull(value) ?? undefined;
-    if (key === 'medio-ids') out.medioIds = splitList(value);
-    if (key === 'client' && value) out.clientId = value;
-    if (key === 'max-inserts') out.maxInserts = parseIntOrNull(value) ?? undefined;
-    if (key === 'fresh-lane') out.freshLane = true;
-    if (key === 'fresh-hours') out.freshHours = Number(value);
-    if (key === 'fresh-share') out.freshShare = Number(value);
-  }
-  return out;
-}
-
-const TIPOS_VALIDOS: TipoKeyword[] = [
-  'exacta',
-  'frase_exacta',
-  'contiene',
-  'booleana',
-  'exacta_contextual',
-];
-
-/** Convierte una fila de keyword en la regla que entiende el matcher. */
-function toRule(row: KeywordActivaRow): KeywordRule {
-  const tipo = (TIPOS_VALIDOS as string[]).includes(row.tipo_keyword)
-    ? (row.tipo_keyword as TipoKeyword)
-    : 'contiene';
-  return {
-    keyword_id: row.keyword_id,
-    cliente_id: row.cliente_id,
-    keyword: row.keyword,
-    terminos: splitTerminos(row.keyword, row.alias_o_variantes),
-    tipo,
-    regla: row.regla,
-    contextoIncluir: splitTerminos(row.contexto_incluir),
-    contextoExcluir: splitTerminos(row.contexto_excluir),
-  };
-}
-
-/**
- * Arma los campos buscables de una noticia con sus pesos.
- *
- * Prioridad de texto para el campo principal:
- *   texto_cuerpo_nota > texto_nota_limpia > texto_extraido
- *
- * - `texto_cuerpo_nota`: cuerpo puro, sin encabezado editorial. Máxima calidad.
- * - `texto_nota_limpia`: sin ruido fuerte de menú/nav, pero incluye autor/fecha.
- * - `texto_extraido`: fallback raw, puede tener ruido de relacionadas/footer.
- */
-function camposDe(n: NoticiaScanRow): CampoBuscable[] {
-  const textoEfectivo = n.texto_cuerpo_nota ?? n.texto_nota_limpia ?? n.texto_extraido ?? '';
-  return [
-    { nombre: 'titulo', texto: n.titulo ?? '', peso: PESOS_CAMPO.titulo! },
-    { nombre: 'subtitulo', texto: n.subtitulo ?? '', peso: PESOS_CAMPO.subtitulo! },
-    { nombre: 'resumen', texto: n.resumen ?? '', peso: PESOS_CAMPO.resumen! },
-    { nombre: 'seccion', texto: n.seccion ?? '', peso: PESOS_CAMPO.seccion! },
-    { nombre: 'texto_extraido', texto: textoEfectivo, peso: PESOS_CAMPO.texto_extraido! },
-    { nombre: 'medio', texto: n.medio_nombre ?? '', peso: PESOS_CAMPO.medio! },
-  ];
-}
-
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
+  const args = parseDetectArgs(process.argv.slice(2));
   const started = Date.now();
-
   const config = await getConfigMap();
   const configLimit = parseIntOrNull(config['max_noticias_por_deteccion']) ?? 500;
   const limit = args.limit ?? configLimit;
@@ -165,162 +46,66 @@ async function main() {
     }
   }
 
-  const runAnchor = new Date();
-
   logger.info(
     {
       dryRun: args.dryRun,
       limit,
       onlyWithText: args.onlyWithText ?? false,
-      includeDiagnostic: args.includeDiagnostic ?? false,
-      medioIds: args.medioIds ?? null,
-      clientId: args.clientId ?? null,
-      maxInserts: args.maxInserts ?? null,
+      clientIds: args.clientIds ?? null,
       freshLane: args.freshLane ?? false,
       freshHours: args.freshLane ? (args.freshHours ?? MENTION_QUEUE_DEFAULTS.freshHours) : null,
       freshShare: args.freshLane ? (args.freshShare ?? MENTION_QUEUE_DEFAULTS.freshShare) : null,
     },
-    'Iniciando detección de menciones',
+    'Iniciando detección de menciones (control-plane scope)',
   );
 
-  let keywordRows = await getKeywordsActivas();
-  if (args.clientId) {
-    keywordRows = keywordRows.filter((k) => k.cliente_id === args.clientId);
-    logger.info({ clientId: args.clientId, keywords_cliente: keywordRows.length }, 'Filtrando keywords por cliente');
-    if (keywordRows.length === 0) {
-      logger.warn({ clientId: args.clientId }, 'No hay keywords activas para este cliente. Sin menciones.');
-      return;
-    }
-  }
-  const reglas = keywordRows.map(toRule);
-  const alertaPorKeyword = new Map(keywordRows.map((k) => [k.keyword_id, k.alerta]));
-
-  const cola = await getNoticiasPendientesConCola({
+  const result = await runDetectMentions(
+    { ...args, limit },
+    {
+      getClientes: getAllClientes,
+      getKeywordsActivas,
+      getCola: getNoticiasPendientesConCola,
+      insertMenciones,
+      markNoticiasProcesadas,
+    },
     limit,
-    onlyWithText: args.onlyWithText,
-    excludeDiagnostic: !args.includeDiagnostic,
-    medioIds: args.medioIds,
-    freshLane: args.freshLane,
-    freshHours: args.freshLane ? (args.freshHours ?? MENTION_QUEUE_DEFAULTS.freshHours) : undefined,
-    freshShare: args.freshLane ? (args.freshShare ?? MENTION_QUEUE_DEFAULTS.freshShare) : undefined,
-    anchor: runAnchor,
-  });
-  const noticias = cola.rows;
-  logger.info(cola.telemetry, 'Cola de detección seleccionada');
-  logger.info(
-    { keywords: reglas.length, noticias: noticias.length },
-    'Noticias pendientes cargadas',
   );
 
-  if (reglas.length === 0) {
-    logger.warn('No hay keywords activas; no se detectarán menciones.');
-  }
-
-  const menciones: MencionInsert[] = [];
-  for (const noticia of noticias) {
-    const campos = camposDe(noticia);
-    for (const regla of reglas) {
-      const res = matchKeyword(regla, campos);
-      if (!res) continue;
-      menciones.push({
-        noticia_id: noticia.noticia_id,
-        cliente_id: regla.cliente_id,
-        keyword_id: regla.keyword_id,
-        keyword: regla.keyword,
-        texto_match: res.texto_match,
-        tipo_match: res.tipo_match,
-        score_relevancia: res.score,
-        requiere_alerta: alertaPorKeyword.get(regla.keyword_id) ?? false,
-        estado_revision: 'pendiente',
-      });
-    }
-  }
-
-  if (args.dryRun) {
-    // Dry-run: mostrar resultado sin escribir en Supabase
-    logger.info(
-      {
-        analizadas: noticias.length,
-        menciones_potenciales: menciones.length,
-        keywords_activas: reglas.length,
-        usandoCuerpo: noticias.filter((n) => n.texto_cuerpo_nota !== null).length,
-        usandoTextoLimpio: noticias.filter((n) => n.texto_cuerpo_nota === null && n.texto_nota_limpia !== null).length,
-        usandoFallback: noticias.filter((n) => n.texto_cuerpo_nota === null && n.texto_nota_limpia === null && n.texto_extraido !== null).length,
-        sinTexto: noticias.filter((n) => n.texto_cuerpo_nota === null && n.texto_nota_limpia === null && n.texto_extraido === null).length,
-      },
-      '[dry-run] Resumen — no se insertó nada ni se marcó ninguna noticia',
-    );
-
-    // Mostrar top menciones (máx 10)
-    const top = menciones.slice(0, 10);
-    for (const m of top) {
-      const noticia = noticias.find((n) => n.noticia_id === m.noticia_id);
-      // Determinar en qué campo se detectó el match
-      const campoMatch = (() => {
-        if (noticia) {
-          const campos = camposDe(noticia);
-          for (const c of campos) {
-            if (c.texto && m.texto_match && c.texto.includes(m.texto_match.slice(0, 20))) {
-              return c.nombre;
-            }
-          }
-        }
-        return 'desconocido';
-      })();
-
-      logger.info(
-        {
-          noticia_id: m.noticia_id,
-          titulo: noticia?.titulo ?? '(sin título)',
-          medio: noticia?.medio_nombre ?? '(desconocido)',
-          keyword: m.keyword,
-          tipo_match: m.tipo_match,
-          score: m.score_relevancia,
-          campo_match: campoMatch,
-          usaTextoLimpio: noticia?.texto_nota_limpia !== null,
-          extracto_match: m.texto_match?.slice(0, 200) ?? null,
-        },
-        '[dry-run] Mención potencial',
-      );
-    }
-
-    if (menciones.length > 10) {
-      logger.info(
-        { total: menciones.length, mostradas: 10 },
-        '[dry-run] Solo se muestran las primeras 10 menciones',
-      );
-    }
-    return;
-  }
-
-  // Modo real: insertar y (opcionalmente) marcar
-  const mencionesAInsertar = args.maxInserts != null ? menciones.slice(0, args.maxInserts) : menciones;
-  if (args.maxInserts != null && menciones.length > args.maxInserts) {
-    logger.info({ total: menciones.length, insertando: mencionesAInsertar.length, cap: args.maxInserts }, 'max-inserts cap aplicado');
-  }
-  const insertadas = await insertMenciones(mencionesAInsertar);
-
-  // Cuando se filtra por --client, NO se marcan las noticias como procesadas:
-  // el detect global futuro debe poder procesarlas con keywords de otros clientes.
-  if (!args.clientId) {
-    await markNoticiasProcesadas(noticias.map((n) => n.noticia_id));
-  } else {
-    logger.info({ clientId: args.clientId }, 'Noticias NO marcadas como procesadas (modo --client): el detect global las seguirá viendo.');
-  }
-
-  await writeIngestaLog({
-    accion: 'detect_mentions',
-    nivel: 'info',
-    mensaje: `${insertadas} menciones de ${noticias.length} noticias analizadas`,
-    urls_detectadas: noticias.length,
-    notas_nuevas: insertadas,
-    duracion_ms: Date.now() - started,
-  });
-
   logger.info(
-    { analizadas: noticias.length, menciones: insertadas },
-    'Detección de menciones completada.',
+    {
+      clientes_activos: result.scope.detection_client_ids,
+      keywords_activas: result.scope.detection_keywords.length,
+      title_only_keywords: result.scope.title_only_keywords.length,
+      noticias_candidatas: result.noticias,
+      fresh_selected: result.fresh_selected,
+      backlog_selected: result.backlog_selected,
+      matches: result.matches,
+      matches_by_client: result.matches_by_client,
+      matches_by_keyword: result.matches_by_keyword,
+      inserted: result.inserted,
+      marked_processed: result.marked_processed,
+      writes: result.writes,
+      dry_run: result.dry_run,
+      termination_reason: result.termination_reason,
+    },
+    result.dry_run ? '[dry-run] Detección — 0 writes' : 'Detección de menciones completada',
   );
+
+  if (!args.dryRun && result.termination_reason !== 'INSERT_FAILED' && result.termination_reason !== 'NO_ACTIVE_CLIENTS' && result.termination_reason !== 'NO_ELIGIBLE_KEYWORDS') {
+    await writeIngestaLog({
+      accion: 'detect_mentions',
+      nivel: 'info',
+      mensaje: `${result.inserted} menciones de ${result.noticias} noticias analizadas`,
+      urls_detectadas: result.noticias,
+      notas_nuevas: result.inserted,
+      duracion_ms: Date.now() - started,
+    });
+  }
+
+  if (result.termination_reason === 'INSERT_FAILED') {
+    logger.error(result, 'Inserción de menciones falló; no se marcaron noticias.');
+    process.exit(1);
+  }
 }
 
 main().catch((err) => {

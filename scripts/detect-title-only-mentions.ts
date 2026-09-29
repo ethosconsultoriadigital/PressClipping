@@ -1,12 +1,13 @@
 /**
  * Lane TITLE_ONLY. No usa cuerpo y nunca marca menciones_procesado.
  *
- * Barrido completo de 48h. --limit se acepta y no recorta el universo.
+ * Scope: keywords exacta/frase_exacta de clientes activos del Control Plane.
  *   npm run detect-title-only -- --dry-run --hours=48 --page-size=500 --max-scan=10000
  */
-import { getKeywordsActivas, getNoticiasTitleOnly, insertMenciones } from '../src/supabase/repositories.js';
+import { getAllClientes, getKeywordsActivas, getNoticiasTitleOnly, insertMenciones } from '../src/supabase/repositories.js';
 import { splitTerminos, type KeywordRule, type TipoKeyword } from '../src/matchers/keyword.js';
-import { evaluarTitleOnly, TITLE_ONLY_CLIENTES, TITLE_ONLY_TIPOS } from '../src/matching/titleOnlyLane.js';
+import { evaluarTitleOnly, TITLE_ONLY_TIPOS } from '../src/matching/titleOnlyLane.js';
+import { buildMentionScope } from '../src/matching/controlPlaneScope.js';
 import { puedeInsertarTitleOnly, TITLE_ONLY_MAX_SCAN, TITLE_ONLY_PAGE_SIZE } from '../src/matching/titleOnlySweep.js';
 import { logger } from '../src/utils/logger.js';
 import { pathToFileURL } from 'node:url';
@@ -20,6 +21,7 @@ export interface TitleOnlyArgs {
   maxScan: number;
   /** Compatibilidad. No recorta el barrido; el tope es maxScan. */
   legacyLimit: number | null;
+  clientIds: string[] | null;
 }
 
 export function parseTitleOnlyArgs(argv: string[]): TitleOnlyArgs {
@@ -29,6 +31,7 @@ export function parseTitleOnlyArgs(argv: string[]): TitleOnlyArgs {
     pageSize: TITLE_ONLY_PAGE_SIZE,
     maxScan: TITLE_ONLY_MAX_SCAN,
     legacyLimit: null,
+    clientIds: null,
   };
   for (const arg of argv) {
     if (!arg.startsWith('--')) continue;
@@ -41,6 +44,8 @@ export function parseTitleOnlyArgs(argv: string[]): TitleOnlyArgs {
     if (key === 'page-size') out.pageSize = Number(val) || TITLE_ONLY_PAGE_SIZE;
     if (key === 'max-scan') out.maxScan = Number(val) || TITLE_ONLY_MAX_SCAN;
     if (key === 'limit') out.legacyLimit = Number(val) || null;
+    if (key === 'clients' && val) out.clientIds = val.split(',').map((s) => s.trim()).filter(Boolean);
+    if (key === 'client' && val) out.clientIds = [val];
   }
   return out;
 }
@@ -75,9 +80,22 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const started = Date.now();
   const cutoffIso = new Date(Date.now() - args.hours * 3600e3).toISOString();
   const keywords = await getKeywordsActivas();
+  const clientes = await getAllClientes();
+  const scope = buildMentionScope({
+    clientes,
+    keywords: keywords.map((k) => ({
+      keyword_id: k.keyword_id,
+      cliente_id: k.cliente_id,
+      keyword: k.keyword,
+      tipo_keyword: k.tipo_keyword,
+      activa: true,
+    })),
+    clientFilter: args.clientIds,
+  });
+  const allowed = new Set(scope.title_only_keywords.map((k) => k.keyword_id));
   const reglas = keywords
     .map(aRegla)
-    .filter((r) => TITLE_ONLY_CLIENTES.includes(r.cliente_id as (typeof TITLE_ONLY_CLIENTES)[number]))
+    .filter((r) => allowed.has(r.keyword_id))
     .filter((r) => TITLE_ONLY_TIPOS.includes(r.tipo));
 
   const barrido = await getNoticiasTitleOnly({
@@ -111,6 +129,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       legacy_limit_ignored: args.legacyLimit,
       selected: noticias.length,
       keywords: reglas.length,
+      clientes: scope.detection_client_ids,
+      title_only_keywords: scope.title_only_keywords.length,
       menciones_potenciales: menciones.length,
       por_cliente: porCliente,
       por_keyword: porKeyword,

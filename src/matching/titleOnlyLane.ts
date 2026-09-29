@@ -1,6 +1,7 @@
 /**
  * Lane de solo título. No usa cuerpo ni marca menciones_procesado.
- * Keywords: solo exacta y frase_exacta de los tres clientes prioritarios.
+ * Keywords: exacta y frase_exacta del Control Plane (clientes activos).
+ * TITLE_ONLY_CLIENTES queda como lista histórica del canary V0; no es el default.
  */
 import {
   matchKeyword,
@@ -11,6 +12,7 @@ import {
 } from '../matchers/keyword.js';
 import { noticiaEnVentanaEditorial } from '../exporters/liveNewsWindow.js';
 
+/** @deprecated Canary V0. El scope V1 usa clientes activos del Control Plane. */
 export const TITLE_ONLY_CLIENTES = ['CLI-MERY-TEST', 'CLI-0001', 'CLI-0002'] as const;
 export const TITLE_ONLY_TIPOS: TipoKeyword[] = ['exacta', 'frase_exacta'];
 export const TITLE_ONLY_TIPOS_EXCLUIDOS: TipoKeyword[] = ['contiene', 'exacta_contextual', 'booleana'];
@@ -38,9 +40,14 @@ export interface TitleOnlyMatch {
   mark_processed: false;
 }
 
-export function reglaAptaTitleOnly(regla: KeywordRule, clientes: readonly string[] = TITLE_ONLY_CLIENTES): boolean {
-  if (!regla.cliente_id || !clientes.includes(regla.cliente_id)) return false;
-  return TITLE_ONLY_TIPOS.includes(regla.tipo);
+export function reglaAptaTitleOnly(
+  regla: KeywordRule,
+  clientes?: readonly string[] | null,
+): boolean {
+  if (!TITLE_ONLY_TIPOS.includes(regla.tipo)) return false;
+  if (!regla.cliente_id) return false;
+  if (clientes && clientes.length > 0) return clientes.includes(regla.cliente_id);
+  return true;
 }
 
 export function camposTitleOnly(n: NoticiaTitleOnly): CampoBuscable[] {
@@ -58,12 +65,16 @@ export function enVentanaTitleOnly(
   return noticiaEnVentanaEditorial(n.fecha_publicacion, n.fecha_captura, cutoffIso);
 }
 
-export function evaluarTitleOnly(n: NoticiaTitleOnly, reglas: KeywordRule[]): TitleOnlyMatch[] {
+export function evaluarTitleOnly(
+  n: NoticiaTitleOnly,
+  reglas: KeywordRule[],
+  clientes?: readonly string[] | null,
+): TitleOnlyMatch[] {
   const campos = camposTitleOnly(n);
   const vistos = new Set<string>();
   const out: TitleOnlyMatch[] = [];
   for (const regla of reglas) {
-    if (!reglaAptaTitleOnly(regla)) continue;
+    if (!reglaAptaTitleOnly(regla, clientes)) continue;
     const res = matchKeyword(regla, campos);
     if (!res) continue;
     if (res.campo !== 'titulo' && res.campo !== 'subtitulo' && res.campo !== 'resumen') continue;

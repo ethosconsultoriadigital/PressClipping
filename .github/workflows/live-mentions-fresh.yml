@@ -2,9 +2,9 @@
 # LIVE MENTIONS FRESH — canary manual (sin horario)
 # ----------------------------------------------------------------------------
 # 1. Recovery de contenido en medios prioritarios (enrich existente, acotado).
-# 2. Body Fresh Lane global.
-# 3. Title-only lane para Mery, Jumex y Patrón. No marca procesado.
-# 4. Export solo 02_Menciones de esos tres clientes.
+# 2. Body Fresh Lane global (keywords activas de clientes activos).
+# 3. Title-only: exacta/frase_exacta del Control Plane. No marca procesado.
+# 4. Export 02_Menciones de clientes activos del Control Plane.
 #
 # NO hace crawl, alertas, email, WhatsApp, Twilio ni SMTP.
 # NO escribe Sheets finales de cliente.
@@ -100,7 +100,7 @@ jobs:
           fi
           npm run detect-mentions -- $ARGS
 
-      - name: Detect title-only (Mery, Jumex, Patrón; no marca procesado)
+      - name: Detect title-only (Control Plane exacta/frase_exacta; no marca procesado)
         env:
           NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
           INPUT_DRY_RUN: ${{ inputs.dry_run || 'true' }}
@@ -118,7 +118,7 @@ jobs:
           INPUT_DRY_RUN: ${{ inputs.dry_run || 'true' }}
         run: |
           set -euo pipefail
-          ARGS="--mentions-only --clients=CLI-MERY-TEST,CLI-0001,CLI-0002 --window-hours=48 --news-window-hours=48 --recent-first --limit=500"
+          ARGS="--mentions-only --from-control-plane --window-hours=48 --news-window-hours=48 --recent-first --limit=500"
           if [ "$INPUT_DRY_RUN" = "true" ]; then
             ARGS="$ARGS --dry-run"
           fi

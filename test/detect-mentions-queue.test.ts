@@ -146,7 +146,8 @@ describe('parseArgs --fresh-lane', () => {
 
 describe('legacy y Fresh Lane — invariantes de código', () => {
   const repo = readFileSync(join(process.cwd(), 'src/supabase/repositories.ts'), 'utf-8');
-  const detect = readFileSync(join(process.cwd(), 'scripts/detect-mentions.ts'), 'utf-8');
+  const detect = readFileSync(join(process.cwd(), 'src/matching/detectMentionsCore.ts'), 'utf-8');
+  const cli = readFileSync(join(process.cwd(), 'scripts/detect-mentions.ts'), 'utf-8');
 
   it('getNoticiasPendientes(number) sigue exportada (retrocompatible)', () => {
     expect(repo).toMatch(/export async function getNoticiasPendientes\(/);
@@ -172,14 +173,16 @@ describe('legacy y Fresh Lane — invariantes de código', () => {
   });
 
   it('Fresh Lane + --client sigue SIN marcar procesadas', () => {
-    expect(detect).toMatch(/if \(!args\.clientId\)/);
+    expect(detect).toMatch(/const filtered = args\.clientIds && args\.clientIds\.length > 0/);
+    expect(detect).toMatch(/if \(!filtered\)/);
     expect(detect).toMatch(/markNoticiasProcesadas\(noticias\.map/);
-    expect(detect).not.toMatch(/if \(!args\.clientId && !args\.freshLane\)/);
+    expect(detect).not.toMatch(/if \(!filtered && !args\.freshLane\)/);
   });
 
   it('marca solo las noticias seleccionadas (cola.rows), no pools crudos', () => {
     expect(detect).toMatch(/const noticias = cola\.rows/);
     expect(detect).toMatch(/markNoticiasProcesadas\(noticias\.map\(\(n\) => n\.noticia_id\)\)/);
+    expect(cli).toContain('--fresh-lane');
   });
 
   it('workflows shadow no activan Fresh Lane todavía', () => {
