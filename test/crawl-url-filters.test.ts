@@ -183,4 +183,31 @@ describe('Wave 2 URL filters — print/archive, medio-scoped', () => {
     ).toBe(false);
     expect(shouldRejectCrawlUrl('MED-0008', 'https://paralelo19.tv/blog/')).toBe(false);
   });
+
+  it('Chihuahua /cartones/ rejected; news article kept', () => {
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0160',
+        'https://eldiariodechihuahua.mx/cartones/2026/sep/28/-842127.html',
+      ),
+    ).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0160',
+        'https://eldiariodechihuahua.mx/local/2026/sep/29/arranca-hoy-el-tercer-encuentro-842161.html',
+      ),
+    ).toBe(false);
+  });
+
+  it('Hidrocálido print edition landing rejected; other paths not this rule', () => {
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0166',
+        'https://www.hidrocalidodigital.com/hidrocalido-23-de-septiembre-de-2026/',
+      ),
+    ).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0008', 'https://www.hidrocalidodigital.com/hidrocalido-23-de-septiembre-de-2026/')).toBe(
+      false,
+    );
+  });
 });

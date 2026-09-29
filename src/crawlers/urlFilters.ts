@@ -50,6 +50,10 @@ export function shouldRejectCrawlUrl(medioId: string, url: string): boolean {
         const p = path.replace(/\/+$/, '') || '/';
         return p === '/' || /\/2018\//i.test(path);
       }
+    case 'MED-0160': // El Diario de Chihuahua — /cartones/ es viñeta, no nota
+      return /\/cartones\//i.test(path);
+    case 'MED-0166': // Hidrocálido Digital — portadas de edición impresa / paywall login
+      return /\/hidrocalido-\d/i.test(path);
     case 'MED-0012': // Paralelo 19 — Yoast mezcla listados (/blog, /tag, secciones) con notas
       {
         const p = path.replace(/\/+$/, '') || '/';
