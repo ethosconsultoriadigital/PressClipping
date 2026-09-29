@@ -332,7 +332,7 @@ async function appendRows(
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const startedAt = new Date();
-  const sinceIso = new Date(startedAt.getTime() - args.overlapMinutes * 60_000).toISOString();
+  let sinceIso = new Date(startedAt.getTime() - args.overlapMinutes * 60_000).toISOString();
 
   const captureArgs: NewsLakeCaptureArgs = {
     dryRun: args.dryRun,
@@ -367,6 +367,16 @@ async function main(): Promise<void> {
     sheet = doc.sheetsByTitle[args.tab] ?? null;
     if (!sheet) throw new Error(`No existe pestaña ${args.tab} en ${args.sheetId}`);
     existingKeys = await loadExistingKeys(sheet);
+    // Bootstrap inicial: si la Master todavía no tiene filas, sembrar desde la
+    // misma ventana operativa (default 2 días) para que la primera corrida no
+    // dependa exclusivamente de encontrar una mención nacida en los últimos 90 min.
+    if (existingKeys.size === 0) {
+      sinceIso = new Date(startedAt.getTime() - args.windowDays * 24 * 60 * 60_000).toISOString();
+      logger.info(
+        { bootstrap_since_iso: sinceIso, bootstrap_window_days: args.windowDays },
+        'MENCIONES_MASTER vacía: bootstrap inicial de menciones recientes',
+      );
+    }
   }
 
   logger.info({
