@@ -50,6 +50,14 @@ export function shouldRejectCrawlUrl(medioId: string, url: string): boolean {
         const p = path.replace(/\/+$/, '') || '/';
         return p === '/' || /\/2018\//i.test(path);
       }
+    case 'MED-0012': // Paralelo 19 — Yoast mezcla listados (/blog, /tag, secciones) con notas
+      {
+        const p = path.replace(/\/+$/, '') || '/';
+        if (p === '/' || p === '/blog') return true;
+        if (/^\/(tag|category)\//i.test(path)) return true;
+        // Las notas reales llevan fecha /YYYY/MM/DD/ en el path.
+        return !/\/20\d{2}\/\d{2}\/\d{2}\//.test(path);
+      }
     default:
       return false;
   }

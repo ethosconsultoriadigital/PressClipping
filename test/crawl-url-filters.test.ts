@@ -163,4 +163,24 @@ describe('Wave 2 URL filters — print/archive, medio-scoped', () => {
     ).toBe(false);
     expect(shouldRejectCrawlUrl('MED-0101', 'https://www.diarioelindependiente.mx/')).toBe(true);
   });
+
+  it('Paralelo 19 listings rejected; dated article path kept', () => {
+    expect(shouldRejectCrawlUrl('MED-0012', 'https://paralelo19.tv/blog/')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0012', 'https://paralelo19.tv/blog')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0012', 'https://paralelo19.tv/tag/morena-tlaxcala/')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0012', 'https://paralelo19.tv/puebla/estado/')).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0012',
+        'https://paralelo19.tv/puebla/estado/2026/09/29/armenta-felicita-ana-lilia-rivera-candidata-morena-tlaxcala/',
+      ),
+    ).toBe(false);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0012',
+        'https://paralelo19.tv/tendencia/2023/05/12/belinda-se-presento-con-exito-en-el-teatro-del-pueblo/',
+      ),
+    ).toBe(false);
+    expect(shouldRejectCrawlUrl('MED-0008', 'https://paralelo19.tv/blog/')).toBe(false);
+  });
 });
