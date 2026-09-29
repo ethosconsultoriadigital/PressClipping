@@ -4,9 +4,10 @@
  * Cada ciclo:
  *   1) selecciona medios activos/seguros con la misma política de news-lake-capture
  *   2) procesa chunks con concurrencia acotada (crawl -> enrich)
- *   3) INMEDIATAMENTE después de cada chunk exitoso, busca noticias frescas
- *      enriquecidas de esos medios, aplica TODAS las keywords activas y
- *      consolida 1 fila por noticia + cliente
+ *   3) INMEDIATAMENTE después de cada chunk con crawl exitoso, busca noticias
+ *      frescas con mínimo TÍTULO + DESCRIPCIÓN/RESUMEN + URL. Si el enrich ya
+ *      produjo cuerpo limpio se aprovecha; si no, la descripción es suficiente.
+ *      Aplica TODAS las keywords activas y consolida 1 fila por noticia + cliente
  *   4) append-only a MENCIONES_MASTER con dedupe cliente_id//noticia_id
  *
  * Guardrails:
@@ -178,7 +179,9 @@ async function fetchFreshNews(medioIds: string[], sinceIso: string): Promise<Mas
     )
     .in('medio_id', medioIds)
     .gte('fecha_captura', sinceIso)
-    .not('texto_cuerpo_nota', 'is', null)
+    .not('titulo', 'is', null)
+    .not('resumen', 'is', null)
+    .not('url_original', 'is', null)
     .neq('origen_cobertura', 'pressclipping_diagnostico')
     .order('fecha_captura', { ascending: true })
     .limit(2000);
@@ -201,7 +204,11 @@ async function fetchFreshNews(medioIds: string[], sinceIso: string): Promise<Mas
     texto_cuerpo_nota: n.texto_cuerpo_nota ?? null,
     tipo_nota: n.tipo_nota ?? null,
     calidad_extraccion: n.calidad_extraccion ?? null,
-  }));
+  })).filter((n: MasterNewsRow) =>
+    Boolean(n.titulo?.trim()) &&
+    Boolean(n.resumen?.trim()) &&
+    Boolean(n.url_original?.trim()),
+  );
 }
 
 function buildRows(
@@ -373,6 +380,8 @@ async function main(): Promise<void> {
     since_iso: sinceIso,
     sheet_id: args.sheetId.slice(0, 8) + '...',
     tab: args.tab,
+    minimo_export: 'titulo + resumen/descripcion + url',
+    cuerpo_completo: 'best_effort_no_bloqueante',
   }, '=== MENTIONS MASTER FAST LANE start ===');
 
   let nextIndex = 0;
@@ -388,9 +397,20 @@ async function main(): Promise<void> {
       if (index >= plan.chunks.length) return;
       const chunk = plan.chunks[index]!;
       const result = await procesarChunk(chunk, captureArgs, index, plan.chunks.length);
-      if (!result.ok) {
+      // La condición mínima para exportar NO es tener cuerpo completo.
+      // Si el crawl funcionó, podemos publicar una mención con título +
+      // descripción/resumen + URL aunque el enrich haya fallado o no haya
+      // conseguido cuerpo. El enrich sigue siendo best-effort y, cuando existe,
+      // mejora "nota completa".
+      if (result.crawlCode !== 0) {
         failedChunks++;
         continue;
+      }
+      if (result.enrichCode !== 0) {
+        logger.warn(
+          { worker_id: workerId, chunk_index: index + 1, medios: chunk, enrich_code: result.enrichCode },
+          'Enrich no quedó completo; se continúa con metadata mínima (título + descripción + URL)',
+        );
       }
 
       if (args.dryRun) continue;
@@ -407,7 +427,7 @@ async function main(): Promise<void> {
         worker_id: workerId,
         chunk_index: index + 1,
         medios: chunk,
-        noticias_frescas_enriquecidas: news.length,
+        noticias_frescas_elegibles: news.length,
         menciones_consolidadas: rows.length,
         appended_master: write.appended,
         skipped_dedupe: write.skipped,
@@ -426,7 +446,7 @@ async function main(): Promise<void> {
     medios_plan: plan.medioIds.length,
     chunks: plan.chunks.length,
     chunks_fallidos: failedChunks,
-    noticias_frescas_enriquecidas: totalNews,
+    noticias_frescas_elegibles: totalNews,
     menciones_consolidadas: totalMatches,
     appended_master: totalAppended,
     skipped_dedupe: totalSkipped,
