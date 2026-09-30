@@ -17,6 +17,7 @@ import * as cheerio from 'cheerio';
 import { fetchTextWithMeta, HttpRequestError, type HttpFailureKind } from '../utils/http.js';
 import { tituloDesdeUrl } from './titleFromUrl.js';
 import { applyHostOverride, hostOverrideFromUrl, type HostExtractionOverride } from './hostOverrides.js';
+import { fetchHtmlRespectingTransient403 } from './transient403Retry.js';
 
 /** Método con el que se obtuvo el título. */
 export type MetodoTitulo =
@@ -797,6 +798,8 @@ export interface FetchExtractOpts extends ExtractOpts {
   boundBodyRead?: boolean;
   /** Tope duro de intentos HTTP. El drain usa 1: el reintento es persistente. */
   maxAttempts?: number;
+  /** Inyectable en tests. Por defecto `fetchHtmlRespectingTransient403`. */
+  fetchHtml?: typeof fetchTextWithMeta;
 }
 
 /** Detalle estructurado del fallo HTTP, para clasificarlo sin leer el mensaje. */
@@ -848,11 +851,15 @@ export async function fetchAndExtract(
   };
 
   try {
-    const { text: html, finalUrl } = await fetchTextWithMeta(url, {
-      timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      boundBodyRead: opts.boundBodyRead,
-      maxAttempts: opts.maxAttempts,
-    });
+    const { text: html, finalUrl } = await fetchHtmlRespectingTransient403(
+      url,
+      {
+        timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        boundBodyRead: opts.boundBodyRead,
+        maxAttempts: opts.maxAttempts,
+      },
+      opts.fetchHtml ?? fetchTextWithMeta,
+    );
     const extracto = extractFromHtml(html, url, opts);
     return { ...extracto, ok: true, error: null, finalUrl };
   } catch (err) {
