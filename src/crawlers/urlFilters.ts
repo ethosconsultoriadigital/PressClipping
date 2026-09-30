@@ -78,6 +78,23 @@ export function shouldRejectCrawlUrl(medioId: string, url: string): boolean {
           p,
         );
       }
+    case 'MED-0419': // El Piñero — sitemap_index mezcló granja SEO + chrome
+      {
+        const p = path.replace(/\/+$/, '') || '/';
+        if (p === '/' || p === '/contact' || p === '/about' || p === '/cookie-policy') return true;
+        return /badminton/i.test(path);
+      }
+    case 'MED-0420': // e-Veracruz — homepage y hubs de sección de 1 segmento
+      {
+        const segs = path.replace(/\/+$/, '').split('/').filter(Boolean);
+        return segs.length < 2;
+      }
+    case 'MED-0425': // Al Diálogo — sitemap es hubs, no notas
+      {
+        const p = path.replace(/\/+$/, '') || '/';
+        if (p === '/' || p === '/etiqueta' || p === '/impreso' || p === '/contacto.tsx') return true;
+        return /^\/(categoria|etiqueta)(\/|$)/i.test(p);
+      }
     default:
       return false;
   }

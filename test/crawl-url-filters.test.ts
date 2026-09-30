@@ -262,4 +262,39 @@ describe('Wave 2 URL filters — print/archive, medio-scoped', () => {
     expect(shouldRejectCrawlUrl('MED-0401', 'https://www.capital21.cdmx.gob.mx/transparencia')).toBe(true);
     expect(shouldRejectCrawlUrl('MED-0008', 'https://www.capital21.cdmx.gob.mx/programacion')).toBe(false);
   });
+
+  it('El Piñero badminton SEO farm rejected; real Veracruz path would pass', () => {
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0419',
+        'https://elpinerodelacuenca.com.mx/backhand-clear-shot-in-badminton-grip-stance-followthrough/',
+      ),
+    ).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0419', 'https://elpinerodelacuenca.com.mx/contact/')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0419', 'https://elpinerodelacuenca.com.mx/')).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0008',
+        'https://elpinerodelacuenca.com.mx/backhand-clear-shot-in-badminton-grip-stance-followthrough/',
+      ),
+    ).toBe(false);
+  });
+
+  it('e-Veracruz section hubs rejected; article paths pass', () => {
+    expect(shouldRejectCrawlUrl('MED-0420', 'https://e-veracruz.mx/')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0420', 'https://e-veracruz.mx/seguridad/')).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0420',
+        'https://e-veracruz.mx/seguridad/asesinan-a-balazos-a-un-hombre-en-los-carriles-en-coatepec',
+      ),
+    ).toBe(false);
+  });
+
+  it('Al Diálogo category hubs rejected; other hosts unaffected', () => {
+    expect(shouldRejectCrawlUrl('MED-0425', 'https://aldialogo.mx/categoria/queretaro/')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0425', 'https://aldialogo.mx/impreso')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0425', 'https://aldialogo.mx/contacto.tsx')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0008', 'https://aldialogo.mx/categoria/queretaro/')).toBe(false);
+  });
 });
