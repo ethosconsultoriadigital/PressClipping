@@ -96,7 +96,7 @@ describe('diagnostic TRANSIENT vs production TRANSIENT', () => {
     expect(transientAffectsArticleClass('TRANSIENT', 'HEALTHY')).toBe(false);
   });
 
-  it('production transient: keeps editorial impact (B OTHER)', () => {
+  it('production transient: visible as OTHER but does not drop A-quality article inventory', () => {
     expect(transientAffectsArticleClass('TRANSIENT', 'TRANSIENT')).toBe(true);
     const r = classifyOperational({
       ...aQuality,
@@ -105,8 +105,8 @@ describe('diagnostic TRANSIENT vs production TRANSIENT', () => {
       lastEstado: 'error',
       lastError: 'timeout connecting to rss',
     });
-    expect(r.cls).toBe('B');
-    expect(r.primary).toBe('OTHER');
+    expect(r.cls).toBe('A');
+    expect(r.secondary).toBe('OTHER');
   });
 
   it('diagnostic TRANSIENT + stale production PERSISTENT does not add OTHER', () => {

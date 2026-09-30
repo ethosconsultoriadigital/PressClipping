@@ -261,13 +261,17 @@ export function classifyOperational(p: ClassifyInput): ClassifyResult {
     p.probe.class !== 'PERSISTENT' &&
     !structureBad;
 
-  if (aGate && minor.filter((x) => x !== 'LOW_VOLUME' && x !== 'LATENCY').length === 0) {
+  if (aGate && minor.filter((x) => x !== 'LOW_VOLUME' && x !== 'LATENCY' && x !== 'OTHER').length === 0) {
     const tech = p.n7 === 0 ? 'EN_CRON_SIN_NOTICIAS' : 'LISTO_LEYENDO';
     return {
       cls: 'A',
       reason: 'certified_operational_7d',
       primary: minor.includes('LOW_VOLUME') ? 'LOW_VOLUME' : null,
-      secondary: minor.includes('LATENCY') ? 'LATENCY' : null,
+      secondary: minor.includes('LATENCY')
+        ? 'LATENCY'
+        : minor.includes('OTHER')
+          ? 'OTHER'
+          : null,
       tech,
       repairable: null,
       prio: null,
