@@ -148,6 +148,15 @@ describe('construirActualizacion', () => {
     expect(fields.titulo).toBeUndefined();
   });
 
+  it('force-refresh SÍ corrige título con mojibake', () => {
+    const { fields } = construirActualizacion(
+      noticia({ titulo: 'Protecci�n Civil en Ensenada' }),
+      extracto({ titulo: 'Protección Civil en Ensenada', ok: true }),
+      { forceRefreshCleanText: true },
+    );
+    expect(fields.titulo).toBe('Protección Civil en Ensenada');
+  });
+
   it('force-refresh NO sobrescribe si la extracción falló (ok=false)', () => {
     const { fields, campos } = construirActualizacion(
       noticia({ texto_nota_limpia: 'contenido bueno previo' }),

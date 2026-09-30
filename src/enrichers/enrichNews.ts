@@ -257,7 +257,9 @@ export function construirActualizacion(
   const force = Boolean(opts.forceRefreshCleanText) && extracto.ok;
 
   // Título: respeta el real; si falta, usa extracción y, en su defecto, slug.
-  if (vacio(noticia.titulo)) {
+  // En force-refresh, sí corrige títulos con mojibake (p. ej. latin1 leído como utf-8).
+  const tituloMojibake = /Ã.|Â.|â€|�|Ã¡|Ã©|Ã­|Ã³|Ãº/.test(noticia.titulo ?? '');
+  if (vacio(noticia.titulo) || (force && tituloMojibake)) {
     const tituloHtml = extracto.titulo;
     const { titulo, generadoDesdeUrl } = resolverTitulo(
       tituloHtml,
