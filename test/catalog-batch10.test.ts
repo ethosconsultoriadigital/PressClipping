@@ -30,7 +30,7 @@ describe('catalog-batch10 — media expansion batch 2 P2', () => {
       expect(m.frecuencia_minutos).toBe(360);
       expect(m.pais).toBe('MX');
       expect(m.prioridad).toBe('Alta');
-      expect(['Puebla', 'Guanajuato', 'Querétaro', 'Veracruz', 'Chihuahua']).toContain(m.estado);
+      expect(['Puebla', 'Guanajuato', 'Querétaro', 'Veracruz', 'Chihuahua', 'Baja California']).toContain(m.estado);
       expect(['RSS', 'SITEMAP']).toContain(m.metodo_extraccion);
       if (m.metodo_extraccion === 'RSS') {
         expect(m.rss_url).toMatch(/^https:\/\//);
@@ -69,9 +69,9 @@ describe('catalog-batch10 — media expansion batch 2 P2', () => {
     expect(byId.get('MED-0425')?.nombre_medio).toBe('Al Diálogo');
     expect(MEDIOS_BATCH10.filter((m) => m.estado === 'Veracruz')).toHaveLength(8);
     expect(MEDIOS_BATCH10.filter((m) => m.estado === 'Querétaro')).toHaveLength(5);
-    expect(MEDIOS_BATCH10.filter((m) => m.estado === 'Puebla')).toHaveLength(7);
+    expect(MEDIOS_BATCH10.filter((m) => m.estado === 'Puebla')).toHaveLength(6);
     expect(MEDIOS_BATCH10.filter((m) => m.estado === 'Guanajuato')).toHaveLength(1);
     expect(MEDIOS_BATCH10.filter((m) => m.estado === 'Chihuahua')).toHaveLength(4);
-    expect(MEDIOS_BATCH10.filter((m) => m.estado === 'Baja California')).toHaveLength(0);
+    expect(MEDIOS_BATCH10.filter((m) => m.estado === 'Baja California')).toHaveLength(1);
   });
 });

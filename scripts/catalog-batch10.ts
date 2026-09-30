@@ -15,7 +15,7 @@ import { pathToFileURL } from 'node:url';
 import { getSupabase } from '../src/supabase/client.js';
 import type { Medio } from '../src/types/schemas.js';
 
-type EstadoP2 = 'Puebla' | 'Guanajuato' | 'Querétaro' | 'Veracruz' | 'Chihuahua';
+type EstadoP2 = 'Puebla' | 'Guanajuato' | 'Querétaro' | 'Veracruz' | 'Chihuahua' | 'Baja California';
 
 function baseMedio(partial: {
   medio_id: string;
@@ -196,13 +196,13 @@ export const MEDIOS_BATCH10: Medio[] = [
     rss_url: 'https://sintesis.mx/feed/',
     notas_tecnicas: `${NOTA} RSS. Periódico Puebla (no Síntesis TV).`,
   }),
-  medioRss({
+  medioSitemap({
     medio_id: 'MED-0428',
-    nombre_medio: 'Puebla Online',
-    url_base: 'https://www.pueblaonline.com.mx',
-    estado: 'Puebla',
-    rss_url: 'https://www.pueblaonline.com.mx/feed/',
-    notas_tecnicas: `${NOTA} RSS. Digital Puebla.`,
+    nombre_medio: 'Ensenada.net',
+    url_base: 'https://ensenada.net',
+    estado: 'Baja California',
+    sitemap_url: 'https://ensenada.net/sitemap.xml',
+    notas_tecnicas: `${NOTA} SITEMAP. Digital Ensenada. Reemplazo de Puebla Online (HTTP 403 persistente sin content:encoded).`,
   }),
   medioRss({
     medio_id: 'MED-0429',
