@@ -103,6 +103,13 @@ export function shouldRejectCrawlUrl(medioId: string, url: string): boolean {
       }
     case 'MED-0462': // Sinaloa en Línea — columnas sin cuerpo editorial
       return /\/en-el-blanco-por-/i.test(path) || /mexico-no-solo-es-corrupto/i.test(path);
+    case 'MED-0466': // Enfoque Informativo — flipbook diario digital, no nota
+      return /\/diario-digital-/i.test(path);
+    case 'MED-0473': // El Mercurio Victoria — sitemap_index incluye homepage
+      {
+        const p = path.replace(/\/+$/, '') || '/';
+        return p === '/';
+      }
     default:
       return false;
   }

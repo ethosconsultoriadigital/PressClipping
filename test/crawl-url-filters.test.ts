@@ -320,4 +320,36 @@ describe('Wave 2 URL filters — print/archive, medio-scoped', () => {
       ),
     ).toBe(false);
   });
+
+  it('Enfoque Informativo diario-digital flipbook rejected; news slug kept', () => {
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0466',
+        'https://www.enfoqueinformativo.mx/diario-digital-30-de-septiembre-de-2026/',
+      ),
+    ).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0466',
+        'https://www.enfoqueinformativo.mx/avanza-la-transformacion-de-acapulco-con-obras-hidraulicas/',
+      ),
+    ).toBe(false);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0008',
+        'https://www.enfoqueinformativo.mx/diario-digital-30-de-septiembre-de-2026/',
+      ),
+    ).toBe(false);
+  });
+
+  it('El Mercurio Victoria homepage rejected; section article kept', () => {
+    expect(shouldRejectCrawlUrl('MED-0473', 'https://elmercurio.com.mx/')).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0473',
+        'https://elmercurio.com.mx/la-region/amenaza-sequia-extrema-a-20-del-estado-en-2026',
+      ),
+    ).toBe(false);
+    expect(shouldRejectCrawlUrl('MED-0008', 'https://elmercurio.com.mx/')).toBe(false);
+  });
 });
