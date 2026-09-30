@@ -99,10 +99,22 @@ export function hostOverrideFromUrl(url: string): HostExtractionOverride | null 
         /Resumen y análisis automáticos realizados con Inteligencia Artificial|¿Fue útil este resumen\?|Desarrollado por SACS IA|Este resumen y su análisis fueron generados con apoyo de Inteligencia Artificial/i,
     };
   }
-  if (host === 'periodicovanguardia.mx') {
+  if (host === 'periodicovanguardia.mx' || host === 'primeraplana.mx') {
     return {
       extraRemoveSelectors: ['.td-a-rec', '.td-post-sharing', '.td-related-inline'],
       preferSelectors: ['.td-post-content', '.td-ss-main-content'],
+    };
+  }
+  if (host === 'elbravo.mx') {
+    return {
+      extraRemoveSelectors: ['.sharedaddy', '.jp-relatedposts'],
+      preferSelectors: ['.the-content', '.entry-content'],
+    };
+  }
+  if (host === 'eldiariomx.com') {
+    return {
+      extraRemoveSelectors: ['.brxe-post-sharing', '.ads__texto'],
+      preferSelectors: ['.brxe-post-content'],
     };
   }
   return null;

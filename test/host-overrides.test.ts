@@ -263,3 +263,65 @@ describe('host-scoped Periodico Vanguardia td-post-content', () => {
     expect(r.metodo_texto).toBe('html_container');
   });
 });
+
+const BRAVO_BODY =
+  'Líderes del campo de Matamoros se comprometieron a impulsar la producción agropecuaria en Tamaulipas durante una reunión con autoridades municipales y estatales. ';
+
+function htmlBravo(): string {
+  return `<html><body>
+    <article></article>
+    <div class="the-content">
+      <p>${BRAVO_BODY}${BRAVO_BODY}</p>
+      <p>${BRAVO_BODY}${BRAVO_BODY}</p>
+    </div>
+  </body></html>`;
+}
+
+describe('host-scoped El Bravo .the-content', () => {
+  it('AFTER: empty article does not hide .the-content', () => {
+    const r = extractFromHtml(
+      htmlBravo(),
+      'https://www.elbravo.mx/lideres-de-campo-se-comprometen/',
+    );
+    expect(r.texto_cuerpo_nota ?? '').toContain('producción agropecuaria');
+    expect((r.cuerpo_nota_chars ?? 0) >= 200).toBe(true);
+    expect(r.metodo_texto).toBe('html_container');
+  });
+});
+
+const DIARIO_BODY =
+  'El Congreso de Tamaulipas aprobó la reforma de nacionalidad única para gobernantes electos en el estado. La medida entra en vigor tras su publicación. ';
+
+function htmlDiarioVictoria(): string {
+  return `<html><body>
+    <article class="brxe-container"><h1>Título</h1></article>
+    <div class="brxe-post-content">
+      <p>${DIARIO_BODY}${DIARIO_BODY}</p>
+      <p>${DIARIO_BODY}${DIARIO_BODY}</p>
+    </div>
+  </body></html>`;
+}
+
+describe('host-scoped El Diario de Victoria brxe-post-content', () => {
+  it('AFTER: Bricks empty article does not hide .brxe-post-content', () => {
+    const r = extractFromHtml(
+      htmlDiarioVictoria(),
+      'https://eldiariomx.com/2026/09/30/tamaulipas-aprueba-nacionalidad-unica/',
+    );
+    expect(r.texto_cuerpo_nota ?? '').toContain('nacionalidad única');
+    expect((r.cuerpo_nota_chars ?? 0) >= 200).toBe(true);
+    expect(r.metodo_texto).toBe('html_container');
+  });
+});
+
+describe('host-scoped Primera Plana Michoacán td-post-content', () => {
+  it('AFTER: TagDiv empty article wrapper does not hide .td-post-content', () => {
+    const r = extractFromHtml(
+      htmlVanguardia(),
+      'https://primeraplana.mx/archivos/1157740',
+    );
+    expect(r.texto_cuerpo_nota ?? '').toContain('actualizaciones de seguridad');
+    expect((r.cuerpo_nota_chars ?? 0) >= 200).toBe(true);
+    expect(r.metodo_texto).toBe('html_container');
+  });
+});
