@@ -64,6 +64,20 @@ export function shouldRejectCrawlUrl(medioId: string, url: string): boolean {
         // Las notas reales llevan fecha /YYYY/MM/DD/ en el path.
         return !/\/20\d{2}\/\d{2}\/\d{2}\//.test(path);
       }
+    case 'MED-0410': // El Valle — portada impresa y slugs emoji, no nota
+      return (
+        /edicion-numero-/i.test(path) ||
+        /%f0%9f/i.test(url) ||
+        /[\u{1F300}-\u{1FAFF}]/u.test(path)
+      );
+    case 'MED-0401': // Capital 21 — sitemap es chrome institucional, no notas
+      {
+        const p = path.replace(/\/+$/, '') || '/';
+        if (p === '/') return true;
+        return /^\/(transparencia|en-vivo|programacion|directorio|administracion|nosotros|avisosdeprivacidad|gobiernoc21|atencion)(\/|$)/i.test(
+          p,
+        );
+      }
     default:
       return false;
   }

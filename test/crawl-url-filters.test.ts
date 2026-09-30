@@ -236,4 +236,30 @@ describe('Wave 2 URL filters — print/archive, medio-scoped', () => {
       shouldRejectCrawlUrl('MED-0008', 'https://www.yucatan.com.mx/juegos/2026/09/29/jugar-sudoku-29-de-septiembre-2026.html'),
     ).toBe(false);
   });
+
+  it('El Valle print edition and emoji slug rejected; dated news kept', () => {
+    expect(
+      shouldRejectCrawlUrl('MED-0410', 'https://elvalle.com.mx/2026/09/29/edicion-numero-10797/'),
+    ).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0410',
+        'https://elvalle.com.mx/2026/09/29/%f0%9f%a4%96%f0%9f%a7%a0-basta-de-usar-a-chatgpt-como-tu-psicologo-aqui-te-damos-las-razones/',
+      ),
+    ).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0410',
+        'https://elvalle.com.mx/2026/09/29/atletas-mexiquenses-brillan-con-79-preseas-en-la-paralimpiada-nacional/',
+      ),
+    ).toBe(false);
+    expect(shouldRejectCrawlUrl('MED-0008', 'https://elvalle.com.mx/2026/09/29/edicion-numero-10797/')).toBe(false);
+  });
+
+  it('Capital 21 institutional chrome rejected; other hosts unaffected', () => {
+    expect(shouldRejectCrawlUrl('MED-0401', 'https://www.capital21.cdmx.gob.mx/')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0401', 'https://www.capital21.cdmx.gob.mx/programacion')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0401', 'https://www.capital21.cdmx.gob.mx/transparencia')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0008', 'https://www.capital21.cdmx.gob.mx/programacion')).toBe(false);
+  });
 });
