@@ -135,6 +135,24 @@ export function hostOverrideFromUrl(url: string): HostExtractionOverride | null 
       preferSelectors: ['.post-content'],
     };
   }
+  if (host === 'informabtl.com') {
+    return {
+      extraRemoveSelectors: [
+        '.mc4wp-form',
+        '.newsletter',
+        '.widget_mc4wp_form_widget',
+        '#mc_embed_signup',
+      ],
+      preferSelectors: [
+        '.elementor-widget-theme-post-content',
+        '.td-post-content',
+        '.entry-content',
+        '.post-content',
+      ],
+      removeIfTextMatches:
+        /Regístrate a nuestro newsletter|recibe a primera hora las noticias más importantes de marketing/i,
+    };
+  }
   return null;
 }
 

@@ -352,4 +352,18 @@ describe('Wave 2 URL filters — print/archive, medio-scoped', () => {
     ).toBe(false);
     expect(shouldRejectCrawlUrl('MED-0008', 'https://elmercurio.com.mx/')).toBe(false);
   });
+
+  it('El Congresista clima/resultados hubs rejected; news slug kept', () => {
+    expect(shouldRejectCrawlUrl('MED-0492', 'https://elcongresista.mx/')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0492', 'https://elcongresista.mx/clima/mexicali')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0492', 'https://elcongresista.mx/resultados/chispazo')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0492', 'https://elcongresista.mx/tag/villa-diamante')).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0492',
+        'https://elcongresista.mx/politica/chiapas/grupo-armado-irrumpe-vientos-culturales-tuxtla',
+      ),
+    ).toBe(false);
+    expect(shouldRejectCrawlUrl('MED-0008', 'https://elcongresista.mx/clima/mexicali')).toBe(false);
+  });
 });

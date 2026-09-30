@@ -20,6 +20,14 @@ import { applyHostOverride, hostOverrideFromUrl, type HostExtractionOverride } f
 import { fetchHtmlRespectingRssEncodedFallback } from './rssEncodedFallback.js';
 import { hostnameOfArticleUrl } from './transient403Retry.js';
 
+/** Hosts cuyo HTML de artículo llega en ISO-8859-1 / windows-1252, no UTF-8. */
+export const LATIN1_ARTICLE_HOSTS = new Set([
+  'ensenada.net',
+  'uniradiobaja.com',
+  'uniradiosonora.com',
+]);
+
+
 /** Método con el que se obtuvo el título. */
 export type MetodoTitulo =
   | 'html_og'
@@ -867,7 +875,7 @@ export async function fetchAndExtract(
         timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         boundBodyRead: opts.boundBodyRead,
         maxAttempts: opts.maxAttempts,
-        textEncoding: hostnameOfArticleUrl(url) === 'ensenada.net' ? 'latin1' : undefined,
+        textEncoding: LATIN1_ARTICLE_HOSTS.has(hostnameOfArticleUrl(url)) ? 'latin1' : undefined,
       },
       opts.fetchHtml ?? fetchTextWithMeta,
     );

@@ -376,3 +376,31 @@ describe('host-scoped La Verdad JNews content-inner', () => {
     expect(r.metodo_texto).toBe('html_container');
   });
 });
+
+describe('host-scoped InformaBTL newsletter chrome', () => {
+  it('AFTER: newsletter widget is stripped from body', () => {
+    const html = `<html><body>
+      <article class="td-post-content">
+        <p>Jack Daniel’s está ampliando su portafolio en México con una estrategia que combina dos tendencias dentro de la industria de bebidas alcohólicas premium y RTD de sabor.</p>
+        <p>La marca apuesta por Blackberry como extensión de línea para el mercado mexicano de destilados y cócteles listos para tomar.</p>
+      </article>
+      <div class="mc4wp-form">Regístrate a nuestro newsletter en la siguiente forma y recibe a primera hora las noticias más importantes de marketing de consumo, BTL y retail tu correo.</div>
+    </body></html>`;
+    const r = extractFromHtml(html, 'https://www.informabtl.com/jack-daniels-tennessee-blackberry-mexico-rtd/');
+    expect(r.texto_cuerpo_nota ?? '').toContain('Jack Daniel');
+    expect(r.texto_cuerpo_nota ?? '').not.toMatch(/Regístrate a nuestro newsletter/i);
+  });
+
+  it('AFTER: Elementor theme-post-content is preferred over listing <article>', () => {
+    const html = `<html><body>
+      <article class="elementor-post" role="listitem"><p>Related teaser</p></article>
+      <div class="elementor-widget-theme-post-content">
+        <p>Mientras Bodega Aurrera vende Gatorade, Tiendas 3B ofrece Burst Sport como alternativa de hidratante de bajo costo en el retail mexicano.</p>
+        <p>La categoría de bebidas deportivas se disputa en el canal de precio con marcas propias y de valor.</p>
+      </div>
+    </body></html>`;
+    const r = extractFromHtml(html, 'https://www.informabtl.com/mientras-bodega-aurrera-vende-gatorade-tiendas-3b-ofrece-burst-sport-la-guerra-de-los-hidratantes-de-bajo-costo/');
+    expect(r.texto_cuerpo_nota ?? '').toContain('Gatorade');
+    expect(r.texto_cuerpo_nota ?? '').not.toContain('Related teaser');
+  });
+});

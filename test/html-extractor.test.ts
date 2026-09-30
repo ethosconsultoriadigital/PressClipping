@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { extractFromHtml, fetchAndExtract, normalizarUrlImagen, limpiarTextoExtraido, extraerCuerpoNota, extraerStorylineOem } from '../src/extractors/html.js';
+import { extractFromHtml, fetchAndExtract, LATIN1_ARTICLE_HOSTS, normalizarUrlImagen, limpiarTextoExtraido, extraerCuerpoNota, extraerStorylineOem } from '../src/extractors/html.js';
 
 const PARRAFO = 'Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. ';
 
@@ -699,5 +699,13 @@ describe('fetchAndExtract', () => {
     const r = await fetchAndExtract('https://m.mx/nota/inexistente');
     expect(r.ok).toBe(false);
     expect(r.error).toBeTruthy();
+  });
+});
+
+describe('LATIN1_ARTICLE_HOSTS — Uniradio Batch 5', () => {
+  it('incluye Uniradio Baja y Sonora; no Uniradio Informa', () => {
+    expect(LATIN1_ARTICLE_HOSTS.has('uniradiobaja.com')).toBe(true);
+    expect(LATIN1_ARTICLE_HOSTS.has('uniradiosonora.com')).toBe(true);
+    expect(LATIN1_ARTICLE_HOSTS.has('uniradioinforma.com')).toBe(false);
   });
 });

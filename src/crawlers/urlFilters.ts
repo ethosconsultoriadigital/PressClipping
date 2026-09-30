@@ -110,6 +110,12 @@ export function shouldRejectCrawlUrl(medioId: string, url: string): boolean {
         const p = path.replace(/\/+$/, '') || '/';
         return p === '/';
       }
+    case 'MED-0492': // El Congresista — sitemap mezcló homepage + hubs clima/resultados/tag
+      {
+        const p = path.replace(/\/+$/, '') || '/';
+        if (p === '/') return true;
+        return /^\/(clima|resultados|tag)(\/|$)/i.test(path);
+      }
     default:
       return false;
   }
