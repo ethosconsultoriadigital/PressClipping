@@ -325,3 +325,54 @@ describe('host-scoped Primera Plana Michoacán td-post-content', () => {
     expect(r.metodo_texto).toBe('html_container');
   });
 });
+
+const ZAC_BODY =
+  'Gerardo Sandoval Carrillo, quien contendió por la Presidencia Municipal de Tlaltenango, fue asesinado en su rancho de Zacatecas. Autoridades investigan el homicidio. ';
+
+function htmlZacDigital(): string {
+  return `<html><body>
+    <header class="entry-header ct-container"></header>
+    <div class="entry-content">
+      <p>${ZAC_BODY}${ZAC_BODY}</p>
+      <p>${ZAC_BODY}${ZAC_BODY}</p>
+    </div>
+  </body></html>`;
+}
+
+describe('host-scoped Zacatecas Digital entry-content', () => {
+  it('AFTER: Blocksy entry-content is preferred over chrome panels', () => {
+    const r = extractFromHtml(
+      htmlZacDigital(),
+      'https://zacatecasdigital.mx/2026/09/29/matan-a-excandidato/',
+    );
+    expect(r.texto_cuerpo_nota ?? '').toContain('Tlaltenango');
+    expect((r.cuerpo_nota_chars ?? 0) >= 200).toBe(true);
+    expect(r.metodo_texto).toBe('html_container');
+  });
+});
+
+const VERDAD_BODY =
+  'Una mujer de 87 años volverá a su casa en Reynosa después de un desalojo. Autoridades municipales acordaron reponer el inmueble con apoyo social. ';
+
+function htmlLaVerdad(): string {
+  return `<html><body>
+    <div class="jeg_inner_content">
+      <div class="content-inner">
+        <p>${VERDAD_BODY}${VERDAD_BODY}</p>
+        <p>${VERDAD_BODY}${VERDAD_BODY}</p>
+      </div>
+    </div>
+  </body></html>`;
+}
+
+describe('host-scoped La Verdad JNews content-inner', () => {
+  it('AFTER: JNews content-inner is preferred over ads chrome', () => {
+    const r = extractFromHtml(
+      htmlLaVerdad(),
+      'https://laverdad.com.mx/2026/09/mujer-de-87-anos-volvera-a-casa-tras-desalojo/',
+    );
+    expect(r.texto_cuerpo_nota ?? '').toContain('87 años');
+    expect((r.cuerpo_nota_chars ?? 0) >= 200).toBe(true);
+    expect(r.metodo_texto).toBe('html_container');
+  });
+});

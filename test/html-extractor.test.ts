@@ -410,6 +410,16 @@ describe('extraerCuerpoNota - texto_cuerpo_nota', () => {
     expect(r.texto_cuerpo_nota).toBe(solo);
   });
 
+  it('no trata "Por ahora" ni "Por su parte" en párrafos largos como byline', () => {
+    const texto =
+      'Gerardo Sandoval fue asesinado en su rancho de Tlaltenango.\n\nPor su parte, Reyes Mugüerza señaló que la Fiscalía recaba datos de prueba.\n\nPor ahora, el regreso depende del alta hospitalaria.';
+    const r = extraerCuerpoNota(texto);
+    expect(r.texto_cuerpo_nota).toContain('Gerardo Sandoval');
+    expect(r.texto_cuerpo_nota).toContain('Por su parte, Reyes Mugüerza');
+    expect(r.texto_cuerpo_nota).toContain('Por ahora, el regreso');
+    expect(r.cuerpo_nota_chars).toBeGreaterThan(80);
+  });
+
   it('extractFromHtml incluye texto_cuerpo_nota, extracto_cuerpo_1300, cuerpo_nota_chars, tipo_nota', () => {
     const html = `<html><body><article><p>${FIXTURE_CUERPO.replace(/\n/g, '</p><p>')}</p></article></body></html>`;
     const r = extractFromHtml(html, 'https://m.mx/nota/reforma');

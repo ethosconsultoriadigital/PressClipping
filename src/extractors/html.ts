@@ -300,7 +300,16 @@ function esLineaFecha(l: string): boolean {
 }
 
 function esLineaAutor(l: string): boolean {
-  return /^por\s+/i.test(l.trim());
+  const t = l.trim();
+  // Bylines are short ("Por Redacción"). "Por ahora" / "Por su parte" are body copy.
+  if (t.length > 80) return false;
+  if (!/^por\s+/i.test(t)) return false;
+  if (
+    /^por\s+(ahora|su\s+parte|ello|eso|lo\s+|otro|esta|este|tanto|ejemplo)\b/i.test(t)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function esEtiquetaEditorial(l: string): boolean {

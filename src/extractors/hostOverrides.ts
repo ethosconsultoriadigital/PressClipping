@@ -117,6 +117,24 @@ export function hostOverrideFromUrl(url: string): HostExtractionOverride | null 
       preferSelectors: ['.brxe-post-content'],
     };
   }
+  if (host === 'zacatecasdigital.mx') {
+    return {
+      extraRemoveSelectors: [],
+      preferSelectors: ['.entry-content'],
+    };
+  }
+  if (host === 'laverdad.com.mx') {
+    return {
+      extraRemoveSelectors: ['.jeg_ad', '.jnews_inline_related_post'],
+      preferSelectors: ['.content-inner', '.entry-content', '.jeg_inner_content'],
+    };
+  }
+  if (host === 'elmercurio.com.mx') {
+    return {
+      extraRemoveSelectors: ['.carousel-post', '.post-social', '.post-labels'],
+      preferSelectors: ['.post-content'],
+    };
+  }
   return null;
 }
 
