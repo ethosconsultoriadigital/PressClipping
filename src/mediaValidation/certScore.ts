@@ -68,7 +68,7 @@ export function isGenericListing(url: string): boolean {
     const path = new URL(url).pathname;
     const segs = path.split('/').filter(Boolean);
     if (segs.length > 2) return false;
-    return /\/(category|tag|author|seccion|secciones|tema|temas|etiqueta|section|search|busca|page\/\d+)\b/i.test(
+    return /\/(?:category|tag|author|seccion|secciones|tema|temas|etiqueta|section|search|busca)(?:\/|$)|\/page\/\d+/i.test(
       path,
     );
   } catch {

@@ -7,7 +7,7 @@ import {
   transientAffectsArticleClass,
 } from '../src/mediaValidation/certProbe.js';
 import { classifyOperational } from '../src/mediaValidation/certClassify.js';
-import { scoreMediaAtAnchor, type CertNote } from '../src/mediaValidation/certScore.js';
+import { scoreMediaAtAnchor, isGenericListing, type CertNote } from '../src/mediaValidation/certScore.js';
 
 describe('cert eligibility reuses shouldRejectCrawlUrl (no prefix list duplicada)', () => {
   it('valid article INCLUDED; /tag archive EXCLUDED (Jalisco)', () => {
@@ -286,5 +286,15 @@ describe('403 fetch on healthy RSS is BLOCKED_EXTERNAL, not repairable extractor
     expect(r.cls).toBe('C');
     expect(r.primary).toBe('BLOCKED_EXTERNAL');
     expect(r.repairable).toBe(false);
+  });
+});
+
+describe('isGenericListing does not treat /busca- slugs as hubs', () => {
+  it('article slug starting with busca- is not a listing; /busca/ hub is', () => {
+    expect(
+      isGenericListing('https://coahuilaenlinea.com/busca-gabriel-elizondo-reconocer-derechos-de-cuidadoras/'),
+    ).toBe(false);
+    expect(isGenericListing('https://example.com/busca/')).toBe(true);
+    expect(isGenericListing('https://example.com/category/sonora/')).toBe(true);
   });
 });
