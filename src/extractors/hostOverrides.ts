@@ -99,6 +99,12 @@ export function hostOverrideFromUrl(url: string): HostExtractionOverride | null 
         /Resumen y análisis automáticos realizados con Inteligencia Artificial|¿Fue útil este resumen\?|Desarrollado por SACS IA|Este resumen y su análisis fueron generados con apoyo de Inteligencia Artificial/i,
     };
   }
+  if (host === 'periodicovanguardia.mx') {
+    return {
+      extraRemoveSelectors: ['.td-a-rec', '.td-post-sharing', '.td-related-inline'],
+      preferSelectors: ['.td-post-content', '.td-ss-main-content'],
+    };
+  }
   return null;
 }
 

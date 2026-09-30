@@ -236,3 +236,30 @@ describe('host-scoped Diario del Yaqui post_content', () => {
     expect(r.metodo_texto).toBe('html_article');
   });
 });
+
+const VANGUARDIA_BODY =
+  'Apple publicó nuevas actualizaciones de seguridad para sus dispositivos después de identificar una vulnerabilidad que podría permitir ejecutar código malicioso en iPhone y Mac. ';
+
+function htmlVanguardia(): string {
+  return `<html><body>
+    <article class="td-post-template-7"></article>
+    <div class="td-ss-main-content">
+      <div class="td-post-content">
+        <p>${VANGUARDIA_BODY}${VANGUARDIA_BODY}</p>
+        <p>${VANGUARDIA_BODY}${VANGUARDIA_BODY}</p>
+      </div>
+    </div>
+  </body></html>`;
+}
+
+describe('host-scoped Periodico Vanguardia td-post-content', () => {
+  it('AFTER: TagDiv empty article wrapper does not hide .td-post-content', () => {
+    const r = extractFromHtml(
+      htmlVanguardia(),
+      'https://periodicovanguardia.mx/2026/09/30/apple-corrige-una-vulnerabilidad/',
+    );
+    expect(r.texto_cuerpo_nota ?? '').toContain('actualizaciones de seguridad');
+    expect((r.cuerpo_nota_chars ?? 0) >= 200).toBe(true);
+    expect(r.metodo_texto).toBe('html_container');
+  });
+});
