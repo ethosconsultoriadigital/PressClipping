@@ -12,6 +12,8 @@ import { fetchHtmlRespectingTransient403, hostnameOfArticleUrl, type FetchHtmlFn
 
 export const RSS_ENCODED_FALLBACK_FEEDS = new Map<string, string>([
   ['energiahoy.com', 'https://energiahoy.com/feed/'],
+  ['diariocambio.com.mx', 'https://www.diariocambio.com.mx/feed/'],
+  ['heraldoleon.mx', 'https://www.heraldoleon.mx/feed/'],
 ]);
 
 const MIN_ENCODED_CHARS = 200;
@@ -39,7 +41,8 @@ export function shouldUseRssEncodedFallback(url: string, err: HttpRequestError):
   const host = hostnameOfArticleUrl(url);
   if (!RSS_ENCODED_FALLBACK_FEEDS.has(host)) return false;
   if (err.kind === 'timeout') return true;
-  return err.kind === 'http_status' && err.status === 502;
+  if (err.kind !== 'http_status') return false;
+  return err.status === 502 || err.status === 403 || err.status === 307;
 }
 
 function slugOf(url: string): string {

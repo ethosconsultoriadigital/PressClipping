@@ -63,6 +63,18 @@ describe('RSS content:encoded fallback (Energía Hoy)', () => {
     expect(shouldUseRssEncodedFallback(EH, eTimeout)).toBe(true);
     expect(shouldUseRssEncodedFallback(EH, e404)).toBe(false);
     expect(shouldUseRssEncodedFallback(OTHER, other502)).toBe(false);
+    expect(
+      shouldUseRssEncodedFallback(
+        'https://www.diariocambio.com.mx/2026/economia/nota/',
+        new HttpRequestError('HTTP 403', { kind: 'http_status', url: 'https://www.diariocambio.com.mx/x', status: 403, retryable: false }),
+      ),
+    ).toBe(true);
+    expect(
+      shouldUseRssEncodedFallback(
+        'https://www.heraldoleon.mx/nota/',
+        new HttpRequestError('HTTP 307', { kind: 'http_status', url: 'https://www.heraldoleon.mx/x', status: 307, retryable: true }),
+      ),
+    ).toBe(true);
   });
 
   it('recovers article body from RSS after HTTP 502', async () => {

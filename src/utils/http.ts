@@ -75,6 +75,8 @@ export interface FetchOptions {
   boundBodyRead?: boolean;
   /** Tope duro de intentos totales. Tiene prioridad sobre `retries`. */
   maxAttempts?: number;
+  /** Decodificación del cuerpo. Default utf-8 (`res.text()`). */
+  textEncoding?: 'utf8' | 'latin1';
 }
 
 /** Respuesta con metadata: status real y URL final tras redirecciones. */
@@ -161,7 +163,10 @@ export async function fetchTextWithMeta(
           retryable: false,
         });
       }
-      const text = await res.text();
+      const text =
+        opts.textEncoding === 'latin1'
+          ? Buffer.from(await res.arrayBuffer()).toString('latin1')
+          : await res.text();
       if (boundBodyRead) clearTimeout(timer);
       return { text, status: res.status, finalUrl };
     } catch (err) {

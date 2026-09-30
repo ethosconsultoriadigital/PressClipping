@@ -18,6 +18,7 @@ import { fetchTextWithMeta, HttpRequestError, type HttpFailureKind } from '../ut
 import { tituloDesdeUrl } from './titleFromUrl.js';
 import { applyHostOverride, hostOverrideFromUrl, type HostExtractionOverride } from './hostOverrides.js';
 import { fetchHtmlRespectingRssEncodedFallback } from './rssEncodedFallback.js';
+import { hostnameOfArticleUrl } from './transient403Retry.js';
 
 /** Método con el que se obtuvo el título. */
 export type MetodoTitulo =
@@ -857,6 +858,7 @@ export async function fetchAndExtract(
         timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         boundBodyRead: opts.boundBodyRead,
         maxAttempts: opts.maxAttempts,
+        textEncoding: hostnameOfArticleUrl(url) === 'ensenada.net' ? 'latin1' : undefined,
       },
       opts.fetchHtml ?? fetchTextWithMeta,
     );
