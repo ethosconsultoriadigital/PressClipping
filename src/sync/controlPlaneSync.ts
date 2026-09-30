@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Control Plane Sync V2 — Google Sheets (03_Clientes + 02_Keywords) → Supabase.
  *
  * Identidad semántica (solo para conflicto de ID, no para UPDATE de campos):
@@ -14,6 +14,7 @@
 import { createHash } from 'node:crypto';
 import { mapClienteRow, mapKeywordRowStrict, type Cliente, type Keyword } from '../types/schemas.js';
 import type { RawRow } from '../sheets/read.js';
+import { isRecognizedBoolCell } from '../utils/parse.js';
 
 export const CONTROL_PLANE_ENTITIES = ['clientes', 'keywords'] as const;
 export type ControlPlaneEntity = (typeof CONTROL_PLANE_ENTITIES)[number];
@@ -86,9 +87,18 @@ export type RowDisposition =
 
 export interface ControlPlaneArgs {
   apply: boolean;
+  auto?: boolean;
   expectedHash: string | null;
   entities: ControlPlaneEntity[];
 }
+
+export const AUTO_SYNC_MAX_WRITES = 25;
+
+export type CanonicalSyncVerdict =
+  | 'CONTROL_PLANE_SYNC_PASS'
+  | 'CONTROL_PLANE_SYNC_NO_CHANGES'
+  | 'CONTROL_PLANE_SYNC_ABORTED'
+  | 'CONTROL_PLANE_SYNC_INFRA_ERROR';
 
 export interface InvalidRow {
   tab: '03_Clientes' | '02_Keywords';
@@ -146,10 +156,12 @@ export interface ControlPlaneResult {
     | 'CONTROL_PLANE_CHANGED_SINCE_DRY_RUN'
     | 'CONFIG_SYNC_FAIL'
     | 'UNSUPPORTED_IN_CONTROL_PLANE_V2';
+  sync_verdict: CanonicalSyncVerdict;
   plan: ControlPlanePlan;
   writes: number;
   panel_target_drift: FieldDrift[];
   db_only_preserved_count: number;
+  duration_ms: number;
 }
 
 export interface ControlPlaneIo {
@@ -163,10 +175,15 @@ export interface ControlPlaneIo {
 
 export function parseControlPlaneArgs(argv: string[]): ControlPlaneArgs | { error: string } {
   let apply = false;
+  let auto = false;
   let expectedHash: string | null = null;
   let entities: ControlPlaneEntity[] = ['clientes', 'keywords'];
 
   for (const raw of argv) {
+    if (raw === '--auto') {
+      auto = true;
+      continue;
+    }
     if (raw === '--apply') {
       apply = true;
       continue;
@@ -199,7 +216,14 @@ export function parseControlPlaneArgs(argv: string[]): ControlPlaneArgs | { erro
     return { error: `UNKNOWN_ARG:${raw}` };
   }
 
-  return { apply, expectedHash, entities };
+  if (auto && apply) {
+    return { error: 'AUTO_INCOMPATIBLE_WITH_APPLY' };
+  }
+  if (auto && expectedHash) {
+    return { error: 'AUTO_GENERATES_EXPECTED_HASH' };
+  }
+
+  return { apply, auto, expectedHash, entities };
 }
 
 function isBlank(v: unknown): boolean {
@@ -238,6 +262,12 @@ function issuesFromZod(error?: { issues: { path: (string | number)[]; message: s
   return error.issues.map((i) => `${i.path.join('.') || '(fila)'}: ${i.message}`);
 }
 
+function boolFieldIssues(row: RawRow, fields: readonly string[]): string[] {
+  return fields
+    .filter((f) => !isRecognizedBoolCell(row[f]))
+    .map((f) => `${f}: invalid boolean`);
+}
+
 export function validateControlPlaneSheet(
   clienteRows: RawRow[],
   keywordRows: RawRow[],
@@ -254,12 +284,13 @@ export function validateControlPlaneSheet(
 
   clienteRows.forEach((row, idx) => {
     if (rowIsFullyEmpty(row, CLIENT_FIELDS)) return;
+    const bools = boolFieldIssues(row, ['activo', 'alertas_activas']);
     const parsed = mapClienteRow(row);
-    if (!parsed.success || !parsed.data) {
+    if (bools.length > 0 || !parsed.success || !parsed.data) {
       invalid_rows.push({
         tab: '03_Clientes',
         row: idx + 2,
-        issues: issuesFromZod(parsed.error),
+        issues: bools.length > 0 ? bools : issuesFromZod(parsed.error),
       });
       return;
     }
@@ -269,12 +300,13 @@ export function validateControlPlaneSheet(
   const keywords: Keyword[] = [];
   keywordRows.forEach((row, idx) => {
     if (rowIsFullyEmpty(row, KEYWORD_FIELDS)) return;
+    const bools = boolFieldIssues(row, ['activa', 'alerta']);
     const parsed = mapKeywordRowStrict(row);
-    if (!parsed.success || !parsed.data) {
+    if (bools.length > 0 || !parsed.success || !parsed.data) {
       invalid_rows.push({
         tab: '02_Keywords',
         row: idx + 2,
-        issues: issuesFromZod(parsed.error),
+        issues: bools.length > 0 ? bools : issuesFromZod(parsed.error),
       });
       return;
     }
@@ -620,34 +652,68 @@ function abortPlan(mode: SyncMode, reason: string, hash = ''): ControlPlanePlan 
   return { ...partial, plan_hash: computePlanHash(partial) };
 }
 
-export async function runControlPlaneSync(
+export function canonicalSyncVerdict(
+  verdict: ControlPlaneResult['verdict'],
+  plannedWrites: number,
+): CanonicalSyncVerdict {
+  switch (verdict) {
+    case 'APPLY_PASS':
+      return 'CONTROL_PLANE_SYNC_PASS';
+    case 'NO_CHANGES_TO_APPLY':
+      return 'CONTROL_PLANE_SYNC_NO_CHANGES';
+    case 'DRY_RUN_PASS':
+      return plannedWrites === 0 ? 'CONTROL_PLANE_SYNC_NO_CHANGES' : 'CONTROL_PLANE_SYNC_PASS';
+    case 'CONFIG_SYNC_FAIL':
+      return 'CONTROL_PLANE_SYNC_INFRA_ERROR';
+    default:
+      return 'CONTROL_PLANE_SYNC_ABORTED';
+  }
+}
+
+function plannedWriteCount(plan: ControlPlanePlan): number {
+  return plan.client_writes.length + plan.keyword_writes.length;
+}
+
+function finishResult(
+  partial: Omit<ControlPlaneResult, 'sync_verdict' | 'duration_ms'>,
+  startedAt: number,
+): ControlPlaneResult {
+  return {
+    ...partial,
+    sync_verdict: canonicalSyncVerdict(partial.verdict, plannedWriteCount(partial.plan)),
+    duration_ms: Date.now() - startedAt,
+  };
+}
+
+async function runControlPlaneOnce(
   args: ControlPlaneArgs,
   io: ControlPlaneIo,
+  startedAt: number,
 ): Promise<ControlPlaneResult> {
   const mode: SyncMode = args.apply ? 'APPLY' : 'DRY_RUN';
 
   if (args.entities.some((e) => e !== 'clientes' && e !== 'keywords')) {
     const plan = abortPlan(mode, 'UNSUPPORTED_IN_CONTROL_PLANE_V2');
-    return {
+    return finishResult({
       ok: false,
       verdict: 'UNSUPPORTED_IN_CONTROL_PLANE_V2',
       plan,
       writes: 0,
       panel_target_drift: [],
       db_only_preserved_count: 0,
-    };
+    }, startedAt);
   }
 
   if (args.apply && !args.expectedHash) {
     const plan = abortPlan('APPLY', 'APPLY_REQUIRES_EXPECTED_HASH');
-    return {
+    return finishResult({
       ok: false,
       verdict: 'PLAN_ABORTED',
       plan,
       writes: 0,
       panel_target_drift: [],
       db_only_preserved_count: 0,
-    };
+    }, startedAt);
   }
 
   const sheetClientesRaw = await io.readClientesSheet();
@@ -673,26 +739,26 @@ export async function runControlPlaneSync(
       duplicate_keyword_ids: validated.duplicate_keyword_ids,
       orphan_keywords: validated.orphan_keywords,
     });
-    return {
+    return finishResult({
       ok: false,
       verdict: 'PLAN_ABORTED',
       plan,
       writes: 0,
       panel_target_drift: [],
       db_only_preserved_count: 0,
-    };
+    }, startedAt);
   }
 
   if (args.apply && args.expectedHash && hashNow !== args.expectedHash) {
     const plan = abortPlan('APPLY', 'CONTROL_PLANE_CHANGED_SINCE_DRY_RUN', hashNow);
-    return {
+    return finishResult({
       ok: false,
       verdict: 'CONTROL_PLANE_CHANGED_SINCE_DRY_RUN',
       plan,
       writes: 0,
       panel_target_drift: [],
       db_only_preserved_count: 0,
-    };
+    }, startedAt);
   }
 
   const dbClientes = await io.loadDbClientes();
@@ -711,7 +777,7 @@ export async function runControlPlaneSync(
   });
 
   if (plan.aborted) {
-    return {
+    return finishResult({
       ok: false,
       verdict: 'PLAN_ABORTED',
       plan,
@@ -719,11 +785,11 @@ export async function runControlPlaneSync(
       panel_target_drift: [],
       db_only_preserved_count:
         plan.clientes.db_only_preserved.length + plan.keywords.db_only_preserved.length,
-    };
+    }, startedAt);
   }
 
   if (mode === 'DRY_RUN') {
-    return {
+    return finishResult({
       ok: true,
       verdict: 'DRY_RUN_PASS',
       plan,
@@ -731,11 +797,11 @@ export async function runControlPlaneSync(
       panel_target_drift: [],
       db_only_preserved_count:
         plan.clientes.db_only_preserved.length + plan.keywords.db_only_preserved.length,
-    };
+    }, startedAt);
   }
 
   if (plan.client_writes.length === 0 && plan.keyword_writes.length === 0) {
-    return {
+    return finishResult({
       ok: true,
       verdict: 'NO_CHANGES_TO_APPLY',
       plan,
@@ -743,7 +809,7 @@ export async function runControlPlaneSync(
       panel_target_drift: [],
       db_only_preserved_count:
         plan.clientes.db_only_preserved.length + plan.keywords.db_only_preserved.length,
-    };
+    }, startedAt);
   }
 
   const w1 = await io.writeClientes(plan.client_writes);
@@ -754,7 +820,7 @@ export async function runControlPlaneSync(
   const afterK = await io.loadDbKeywords();
   const drift = panelTargetDrift(validated.clientes, validated.keywords, afterC, afterK);
   if (drift.length > 0) {
-    return {
+    return finishResult({
       ok: false,
       verdict: 'CONFIG_SYNC_FAIL',
       plan,
@@ -762,10 +828,10 @@ export async function runControlPlaneSync(
       panel_target_drift: drift,
       db_only_preserved_count:
         plan.clientes.db_only_preserved.length + plan.keywords.db_only_preserved.length,
-    };
+    }, startedAt);
   }
 
-  return {
+  return finishResult({
     ok: true,
     verdict: 'APPLY_PASS',
     plan,
@@ -773,15 +839,107 @@ export async function runControlPlaneSync(
     panel_target_drift: [],
     db_only_preserved_count:
       plan.clientes.db_only_preserved.length + plan.keywords.db_only_preserved.length,
+  }, startedAt);
+}
+
+async function runControlPlaneAutoSync(
+  args: ControlPlaneArgs,
+  io: ControlPlaneIo,
+  startedAt: number,
+): Promise<ControlPlaneResult> {
+  const entities = args.entities;
+  const planned = await runControlPlaneOnce(
+    { apply: false, auto: false, expectedHash: null, entities },
+    io,
+    startedAt,
+  );
+  if (!planned.ok) return planned;
+
+  const n = plannedWriteCount(planned.plan);
+  if (n === 0) {
+    return {
+      ...planned,
+      verdict: 'NO_CHANGES_TO_APPLY',
+      sync_verdict: 'CONTROL_PLANE_SYNC_NO_CHANGES',
+      duration_ms: Date.now() - startedAt,
+    };
+  }
+  if (n > AUTO_SYNC_MAX_WRITES) {
+    return finishResult({
+      ok: false,
+      verdict: 'PLAN_ABORTED',
+      plan: {
+        ...planned.plan,
+        aborted: true,
+        abort_reason: `AUTO_SYNC_WRITE_CAP:${n}>${AUTO_SYNC_MAX_WRITES}`,
+        client_writes: [],
+        keyword_writes: [],
+      },
+      writes: 0,
+      panel_target_drift: [],
+      db_only_preserved_count: planned.db_only_preserved_count,
+    }, startedAt);
+  }
+
+  return runControlPlaneOnce(
+    {
+      apply: true,
+      auto: false,
+      expectedHash: planned.plan.control_plane_hash,
+      entities,
+    },
+    io,
+    startedAt,
+  );
+}
+
+export async function runControlPlaneSync(
+  args: ControlPlaneArgs,
+  io: ControlPlaneIo,
+): Promise<ControlPlaneResult> {
+  const startedAt = Date.now();
+  if (args.auto) return runControlPlaneAutoSync(args, io, startedAt);
+  return runControlPlaneOnce(args, io, startedAt);
+}
+
+export function controlPlaneObservability(result: ControlPlaneResult): Record<string, unknown> {
+  const { plan } = result;
+  return {
+    CONTROL_PLANE_SYNC: result.sync_verdict,
+    mode: plan.mode,
+    sheet_clients: plan.clientes.sheet,
+    db_clients: plan.clientes.db,
+    sheet_keywords: plan.keywords.sheet,
+    db_keywords: plan.keywords.db,
+    clients_create: plan.clientes.create.length,
+    clients_update: plan.clientes.update.length,
+    clients_unchanged: plan.clientes.unchanged.length,
+    keywords_create: plan.keywords.create.length,
+    keywords_update: plan.keywords.update.length,
+    keywords_unchanged: plan.keywords.unchanged.length,
+    db_only_preserved: result.db_only_preserved_count,
+    invalid_rows: plan.invalid_rows.length,
+    duplicate_client_ids: plan.duplicate_client_ids.length,
+    duplicate_keyword_ids: plan.duplicate_keyword_ids.length,
+    orphan_keywords: plan.orphan_keywords.length,
+    semantic_conflicts:
+      plan.clientes.semantic_conflicts.length + plan.keywords.semantic_conflicts.length,
+    control_plane_hash: plan.control_plane_hash,
+    writes: result.writes,
+    duration: result.duration_ms,
+    verdict: result.sync_verdict,
+    abort_reason: plan.abort_reason,
   };
 }
 
 export function formatControlPlaneReport(result: ControlPlaneResult): string {
   const { plan } = result;
   const lines = [
+    `CONTROL_PLANE_SYNC=${result.sync_verdict}`,
     `MODE=${plan.mode}`,
     `VERDICT=${result.verdict}`,
     plan.abort_reason ? `ABORT_REASON=${plan.abort_reason}` : null,
+    `DURATION_MS=${result.duration_ms}`,
     '',
     'CLIENTES:',
     `sheet=${plan.clientes.sheet}`,
@@ -826,6 +984,6 @@ export function formatControlPlaneReport(result: ControlPlaneResult): string {
     lines.push('INVALID_DETAIL=' + JSON.stringify(plan.invalid_rows));
   }
   lines.push('');
-  lines.push(result.verdict + (result.ok ? '.' : '.'));
+  lines.push(`${result.sync_verdict}.`);
   return lines.join('\n');
 }

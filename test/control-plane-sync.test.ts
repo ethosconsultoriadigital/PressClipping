@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mapKeywordRow, mapKeywordRowStrict, type Cliente, type Keyword } from '../src/types/schemas.js';
 import type { RawRow } from '../src/sheets/read.js';
 import {
+  AUTO_SYNC_MAX_WRITES,
   buildControlPlanePlan,
   computeControlPlaneHash,
   parseControlPlaneArgs,
@@ -123,6 +124,7 @@ describe('Control Plane Sync V2', () => {
     const parsed = parseControlPlaneArgs([]);
     expect(parsed).toEqual({
       apply: false,
+      auto: false,
       expectedHash: null,
       entities: ['clientes', 'keywords'],
     });
@@ -447,5 +449,176 @@ describe('Control Plane Sync V2', () => {
     });
     expect(plan.keywords.update).toEqual([]);
     expect(plan.keywords.unchanged).toEqual(['KEY-0003']);
+  });
+});
+
+describe('Control Plane Auto-Sync V1', () => {
+  it('rejects --auto with --apply', () => {
+    expect(parseControlPlaneArgs(['--auto', '--apply'])).toEqual({
+      error: 'AUTO_INCOMPATIBLE_WITH_APPLY',
+    });
+  });
+
+  it('invalid boolean → abort 0 writes', async () => {
+    const writes = { clientes: [] as Cliente[][], keywords: [] as Keyword[][] };
+    const bad = rawCliente(jumex);
+    bad.activo = 'quizá';
+    const result = await runControlPlaneSync(
+      { apply: false, expectedHash: null, entities: ['clientes', 'keywords'] },
+      ioFor([bad], [], [jumex], [], writes),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.sync_verdict).toBe('CONTROL_PLANE_SYNC_ABORTED');
+    expect(result.plan.invalid_rows.some((r) => r.issues.some((i) => i.includes('invalid boolean')))).toBe(true);
+    expect(result.writes).toBe(0);
+    expect(writes.clientes).toHaveLength(0);
+  });
+
+  it('missing required nombre_cliente → abort', async () => {
+    const row = rawCliente(jumex);
+    row.nombre_cliente = '';
+    const result = await runControlPlaneSync(
+      { apply: false, expectedHash: null, entities: ['clientes', 'keywords'] },
+      ioFor([row], [], [jumex], []),
+    );
+    expect(result.sync_verdict).toBe('CONTROL_PLANE_SYNC_ABORTED');
+    expect(result.plan.invalid_rows.length).toBeGreaterThan(0);
+    expect(result.writes).toBe(0);
+  });
+
+  it('--auto with no drift → NO_CHANGES 0 writes', async () => {
+    const writes = { clientes: [] as Cliente[][], keywords: [] as Keyword[][] };
+    const result = await runControlPlaneSync(
+      { apply: false, auto: true, expectedHash: null, entities: ['clientes', 'keywords'] },
+      ioFor([rawCliente(alcohol)], [rawKeyword(keyTequila)], [alcohol], [keyTequila], writes),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.sync_verdict).toBe('CONTROL_PLANE_SYNC_NO_CHANGES');
+    expect(result.writes).toBe(0);
+    expect(writes.clientes).toHaveLength(0);
+    expect(writes.keywords).toHaveLength(0);
+  });
+
+  it('--auto notas-only update → 1 client write', async () => {
+    const writes = { clientes: [] as Cliente[][], keywords: [] as Keyword[][] };
+    const sheet = { ...jumex, notas: 'AUTO_SYNC_CANARY' };
+    const result = await runControlPlaneSync(
+      { apply: false, auto: true, expectedHash: null, entities: ['clientes', 'keywords'] },
+      ioFor([rawCliente(sheet)], [], [jumex], [], writes),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.sync_verdict).toBe('CONTROL_PLANE_SYNC_PASS');
+    expect(result.plan.clientes.update).toEqual(['CLI-0001']);
+    expect(result.writes).toBe(1);
+    expect(writes.clientes).toHaveLength(1);
+    expect(writes.keywords).toHaveLength(1);
+    expect(writes.keywords[0]).toHaveLength(0);
+  });
+
+  it('--auto TOCTOU: sheet change between plan and apply → abort 0 writes', async () => {
+    const writes = { clientes: [] as Cliente[][], keywords: [] as Keyword[][] };
+    let reads = 0;
+    const io: ControlPlaneIo = {
+      readClientesSheet: async () => {
+        reads += 1;
+        const notas = reads === 1 ? 'v1' : 'v2';
+        return [rawCliente({ ...alcohol, notas })];
+      },
+      readKeywordsSheet: async () => [rawKeyword(keyTequila)],
+      loadDbClientes: async () => [alcohol],
+      loadDbKeywords: async () => [keyTequila],
+      writeClientes: async (rows) => {
+        writes.clientes.push(rows);
+        return rows.length;
+      },
+      writeKeywords: async (rows) => {
+        writes.keywords.push(rows);
+        return rows.length;
+      },
+    };
+    const result = await runControlPlaneSync(
+      { apply: false, auto: true, expectedHash: null, entities: ['clientes', 'keywords'] },
+      io,
+    );
+    expect(result.verdict).toBe('CONTROL_PLANE_CHANGED_SINCE_DRY_RUN');
+    expect(result.sync_verdict).toBe('CONTROL_PLANE_SYNC_ABORTED');
+    expect(result.writes).toBe(0);
+    expect(writes.clientes).toHaveLength(0);
+  });
+
+  it('inactive client field still syncs (activo true→false)', async () => {
+    const writes = { clientes: [] as Cliente[][], keywords: [] as Keyword[][] };
+    const result = await runControlPlaneSync(
+      { apply: false, auto: true, expectedHash: null, entities: ['clientes', 'keywords'] },
+      ioFor(
+        [rawCliente({ ...jumex, activo: false })],
+        [],
+        [jumex],
+        [],
+        writes,
+      ),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.plan.clientes.update).toEqual(['CLI-0001']);
+    expect(result.writes).toBe(1);
+  });
+
+  it('--auto new keyword with valid client → CREATE', async () => {
+    const writes = { clientes: [] as Cliente[][], keywords: [] as Keyword[][] };
+    const result = await runControlPlaneSync(
+      { apply: false, auto: true, expectedHash: null, entities: ['clientes', 'keywords'] },
+      ioFor([rawCliente(alcohol)], [rawKeyword(keyTequila)], [alcohol], [], writes),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.plan.keywords.create).toEqual(['KEY-0003']);
+    expect(result.writes).toBe(1);
+  });
+
+  it('--auto never deletes DB-only keyword', async () => {
+    const extra = keyword({
+      keyword_id: 'KEY-DBONLY',
+      cliente_id: 'CLI-0002',
+      keyword: 'histórica',
+    });
+    const writes = { clientes: [] as Cliente[][], keywords: [] as Keyword[][] };
+    const result = await runControlPlaneSync(
+      { apply: false, auto: true, expectedHash: null, entities: ['clientes', 'keywords'] },
+      ioFor(
+        [rawCliente(alcohol)],
+        [rawKeyword(keyTequila)],
+        [alcohol],
+        [keyTequila, extra],
+        writes,
+      ),
+    );
+    expect(result.sync_verdict).toBe('CONTROL_PLANE_SYNC_NO_CHANGES');
+    expect(result.plan.keywords.db_only_preserved).toEqual(['KEY-DBONLY']);
+    expect(result.writes).toBe(0);
+    expect(writes.keywords).toHaveLength(0);
+  });
+
+  it('--auto write cap aborts unexpected flood', async () => {
+    const many = Array.from({ length: AUTO_SYNC_MAX_WRITES + 1 }, (_, i) =>
+      keyword({
+        keyword_id: `KEY-FLOOD-${String(i).padStart(3, '0')}`,
+        cliente_id: 'CLI-0002',
+        keyword: `flood-${i}`,
+      }),
+    );
+    const writes = { clientes: [] as Cliente[][], keywords: [] as Keyword[][] };
+    const result = await runControlPlaneSync(
+      { apply: false, auto: true, expectedHash: null, entities: ['clientes', 'keywords'] },
+      ioFor(
+        [rawCliente(alcohol)],
+        many.map(rawKeyword),
+        [alcohol],
+        [],
+        writes,
+      ),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.plan.abort_reason).toMatch(/^AUTO_SYNC_WRITE_CAP:/);
+    expect(result.writes).toBe(0);
+    expect(writes.keywords).toHaveLength(0);
   });
 });

@@ -1,0 +1,65 @@
+name: control-plane-auto-sync
+
+# Control Plane Auto-Sync V1
+# 03_Clientes + 02_Keywords → Supabase (one-way, fail-closed, no deletes).
+#
+# Cadencia :12/:42 para que Fast Lane (:17/:47) consuma la config nueva
+# en el mismo ciclo horario.
+#
+# Default CLI de sync-sheets sigue siendo DRY-RUN. Este job usa --auto:
+# plan → hash → apply condicional. Si el Sheet cambia entre plan y apply: ABORT.
+
+on:
+  schedule:
+    - cron: '12,42 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Solo plan; 0 writes a Supabase'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: control-plane-auto-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sheet Control Plane → Supabase
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      LOG_FORMAT: json
+      RUN_BY: github-actions-control-plane-auto-sync
+      NO_SEND: 'true'
+      NO_EMAIL: 'true'
+      NO_WHATSAPP: 'true'
+      NO_TWILIO: 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Control Plane Auto-Sync
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+          INPUT_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+        run: |
+          set -euo pipefail
+          if [ "${INPUT_DRY_RUN}" = "true" ]; then
+            npm run sync-sheets
+          else
+            npm run sync-sheets -- --auto
+          fi
