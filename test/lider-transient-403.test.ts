@@ -17,6 +17,7 @@ describe('transient 403 retry (Líder Empresarial, same UA)', () => {
     expect(shouldRetryOnceOn403(OTHER, 403)).toBe(false);
     expect(shouldRetryOnceOn403(LIDER, 404)).toBe(false);
     expect(shouldRetryOnceOn403(LIDER, 200)).toBe(false);
+    expect(shouldRetryOnceOn403('https://voxpopulinoticias.com.mx/2026/09/nota/', 403)).toBe(true);
   });
 
   it('second GET after 403 returns the body (no UA spoof)', async () => {

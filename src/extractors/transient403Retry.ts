@@ -8,7 +8,7 @@
  */
 import { fetchTextWithMeta, HttpRequestError, type FetchOptions, type HttpFetchResult } from '../utils/http.js';
 
-export const TRANSIENT_403_RETRY_HOSTS = new Set(['liderempresarial.com']);
+export const TRANSIENT_403_RETRY_HOSTS = new Set(['liderempresarial.com', 'voxpopulinoticias.com.mx']);
 
 export function hostnameOfArticleUrl(url: string): string {
   try {
