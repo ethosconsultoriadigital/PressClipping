@@ -199,3 +199,40 @@ describe('host-scoped Rompeviento TV social CTA strip', () => {
     expect(r.texto_cuerpo_nota ?? r.texto_nota_limpia ?? '').toMatch(/síguenos en nuestras redes sociales/i);
   });
 });
+
+const YAQUI_BODY =
+  'De acuerdo con los avances presentados por el titular de Conagua, Efraín Morales López, también se contempla infraestructura hídrica para Cananea y las comunidades del Plan de Justicia. ';
+
+function htmlYaqui(): string {
+  return `<html><body>
+    <article class="post">
+      <div class="post_content">
+        <div class="w-full max-w-3xl mx-auto font-asap my-8 select-none">
+          <p>Resumen y análisis automáticos realizados con Inteligencia Artificial</p>
+          <p>Este resumen y su análisis fueron generados con apoyo de Inteligencia Artificial.</p>
+        </div>
+        <p>${YAQUI_BODY}${YAQUI_BODY}</p>
+        <p>${YAQUI_BODY}${YAQUI_BODY}</p>
+      </div>
+    </article>
+  </body></html>`;
+}
+
+describe('host-scoped Diario del Yaqui post_content', () => {
+  it('AFTER: .post_content is the body and SACS IA widget is stripped', () => {
+    const r = extractFromHtml(
+      htmlYaqui(),
+      'https://diariodelyaqui.mx/nacional/conagua-destaca-avances/144724',
+    );
+    expect(r.texto_cuerpo_nota ?? '').toContain('titular de Conagua');
+    expect(r.texto_cuerpo_nota ?? '').not.toMatch(/Resumen y análisis automáticos/i);
+    expect(r.texto_cuerpo_nota ?? '').not.toMatch(/SACS IA/i);
+    expect((r.cuerpo_nota_chars ?? 0) >= 200).toBe(true);
+    expect(r.metodo_texto).toBe('html_container');
+  });
+
+  it('control: same HTML on another host does not use Yaqui preferSelectors', () => {
+    const r = extractFromHtml(htmlYaqui(), 'https://www.eluniversal.com.mx/nota.html');
+    expect(r.metodo_texto).toBe('html_article');
+  });
+});

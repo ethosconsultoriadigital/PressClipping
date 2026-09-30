@@ -84,6 +84,21 @@ export function hostOverrideFromUrl(url: string): HostExtractionOverride | null 
         /síguenos en nuestras redes sociales|facebook\.com\/rompeviento|instagram\.com\/rompevientotv|tiktok\.com\/@rompevientotv|t\.me\/rompevientotv|threads\.net\/@rompevientotv|posts by rompeviento/i,
     };
   }
+  if (host === 'diariodelyaqui.mx') {
+    return {
+      extraRemoveSelectors: [
+        '.ia-content',
+        '.acordeon-content',
+        '.related-posts',
+        '.single_related_post',
+        '.espacio-publicidad',
+        'div.font-asap.select-none',
+      ],
+      preferSelectors: ['.post_content', '.single_post_entry_content', '.jl_content'],
+      removeIfTextMatches:
+        /Resumen y análisis automáticos realizados con Inteligencia Artificial|¿Fue útil este resumen\?|Desarrollado por SACS IA|Este resumen y su análisis fueron generados con apoyo de Inteligencia Artificial/i,
+    };
+  }
   return null;
 }
 
