@@ -77,6 +77,13 @@ export function hostOverrideFromUrl(url: string): HostExtractionOverride | null 
         /En Xataka Selección publicamos ofertas y descuentos/i,
     };
   }
+  if (host === 'rompeviento.tv') {
+    return {
+      extraRemoveSelectors: ['.single-post-share', '.share-holder', '.post-share'],
+      removeIfTextMatches:
+        /síguenos en nuestras redes sociales|facebook\.com\/rompeviento|instagram\.com\/rompevientotv|tiktok\.com\/@rompevientotv|t\.me\/rompevientotv|threads\.net\/@rompevientotv|posts by rompeviento/i,
+    };
+  }
   return null;
 }
 
@@ -90,11 +97,11 @@ export function applyHostOverride(
   }
   const re = override.removeIfTextMatches;
   if (!re) return;
-  $('article p, main p').each((_, el) => {
+  $('article p, main p, body p').each((_, el) => {
     const t = $(el).text();
     if (t.length < 600 && re.test(t)) $(el).remove();
   });
-  $('article div, main div').each((_, el) => {
+  $('article div, main div, body div').each((_, el) => {
     const $el = $(el);
     if ($el.find('p').length >= 3) return;
     if (re.test($el.text())) $el.remove();

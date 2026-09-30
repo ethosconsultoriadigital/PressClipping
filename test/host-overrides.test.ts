@@ -136,3 +136,66 @@ describe('host-scoped Xataka article-content (no author-bio clone)', () => {
     expect(r.texto_cuerpo_nota ?? r.texto_nota_limpia ?? '').toMatch(/Valeria Romero Guevara es periodista/i);
   });
 });
+
+const ROMPE_SHOW =
+  'Por www.rompeviento.tv y Rompeviento TV en YouTube. Una colaboración con el Movimiento de Los Pueblos Por La Paz y La Justicia, Global Exchange y RompevientoTV analiza el escenario jurídico internacional de la cumbre. ';
+const ROMPE_ARTICULO =
+  'Aquí la disputa por el sentido adquiere una dimensión material. Las palabras no flotan inocentemente sobre la sociedad. Mérito, competencia, libertad y progreso se disputan el significado en la esfera pública mexicana. ';
+
+function htmlRompevientoVideo(): string {
+  return `<html><body>
+    <div class="single-post-content fl-wrap">
+      <div class="single-post-content_text">
+        <p>17/Septiembre/26 #LaEncrucijada 16:00 hrs.</p>
+        <p>– Justicia popular para Donald Trump</p>
+        <p>${ROMPE_SHOW}${ROMPE_SHOW}</p>
+        <p>#Encrucijada #MPPJ #CumbrePorLaPaz</p>
+        <p>¡Síguenos en nuestras redes sociales!</p>
+        <p>► Faceboook https://www.facebook.com/rompeviento.tv/</p>
+        <p>► Instagram https://www.instagram.com/rompevientotv/</p>
+      </div>
+    </div>
+    <p>Tu dirección de correo electrónico no será publicada. Los campos obligatorios están marcados con *</p>
+  </body></html>`;
+}
+
+function htmlRompevientoArticulo(): string {
+  return `<html><body>
+    <div class="single-post-content fl-wrap">
+      <div class="single-post-content_text">
+        <p>${ROMPE_ARTICULO}${ROMPE_ARTICULO}</p>
+        <p>${ROMPE_ARTICULO}${ROMPE_ARTICULO}</p>
+      </div>
+    </div>
+    <p>¡Síguenos en nuestras redes sociales!</p>
+    <p>► Faceboook https://www.facebook.com/rompeviento.tv/</p>
+  </body></html>`;
+}
+
+describe('host-scoped Rompeviento TV social CTA strip', () => {
+  it('AFTER: article body kept, social CTA removed', () => {
+    const r = extractFromHtml(
+      htmlRompevientoArticulo(),
+      'https://www.rompeviento.tv/mexico-independencia-inconclusa/',
+    );
+    expect(r.texto_cuerpo_nota ?? '').toContain('Aquí la disputa por el sentido');
+    expect(r.texto_cuerpo_nota ?? '').not.toMatch(/síguenos en nuestras redes sociales/i);
+    expect((r.cuerpo_nota_chars ?? 0) >= 200).toBe(true);
+  });
+
+  it('AFTER: video show page is not the social-follow boilerplate', () => {
+    const r = extractFromHtml(
+      htmlRompevientoVideo(),
+      'https://www.rompeviento.tv/justicia-popular-para-donald-trump-la-encrucijada-2026/',
+    );
+    const t = `${r.texto_cuerpo_nota ?? ''} ${r.texto_nota_limpia ?? ''}`;
+    expect(t).not.toMatch(/síguenos en nuestras redes sociales/i);
+    expect(t).not.toMatch(/facebook\.com\/rompeviento/i);
+    expect(r.texto_nota_limpia ?? '').toMatch(/colaboración con el Movimiento/i);
+  });
+
+  it('control: same HTML on another host keeps the social CTA in paragraphs', () => {
+    const r = extractFromHtml(htmlRompevientoArticulo(), 'https://www.eluniversal.com.mx/nota.html');
+    expect(r.texto_cuerpo_nota ?? r.texto_nota_limpia ?? '').toMatch(/síguenos en nuestras redes sociales/i);
+  });
+});

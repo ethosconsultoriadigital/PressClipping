@@ -17,7 +17,7 @@ import * as cheerio from 'cheerio';
 import { fetchTextWithMeta, HttpRequestError, type HttpFailureKind } from '../utils/http.js';
 import { tituloDesdeUrl } from './titleFromUrl.js';
 import { applyHostOverride, hostOverrideFromUrl, type HostExtractionOverride } from './hostOverrides.js';
-import { fetchHtmlRespectingTransient403 } from './transient403Retry.js';
+import { fetchHtmlRespectingRssEncodedFallback } from './rssEncodedFallback.js';
 
 /** Método con el que se obtuvo el título. */
 export type MetodoTitulo =
@@ -798,7 +798,7 @@ export interface FetchExtractOpts extends ExtractOpts {
   boundBodyRead?: boolean;
   /** Tope duro de intentos HTTP. El drain usa 1: el reintento es persistente. */
   maxAttempts?: number;
-  /** Inyectable en tests. Por defecto `fetchHtmlRespectingTransient403`. */
+  /** Inyectable en tests. Por defecto `fetchHtmlRespectingRssEncodedFallback`. */
   fetchHtml?: typeof fetchTextWithMeta;
 }
 
@@ -851,7 +851,7 @@ export async function fetchAndExtract(
   };
 
   try {
-    const { text: html, finalUrl } = await fetchHtmlRespectingTransient403(
+    const { text: html, finalUrl } = await fetchHtmlRespectingRssEncodedFallback(
       url,
       {
         timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
