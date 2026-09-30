@@ -297,4 +297,27 @@ describe('Wave 2 URL filters — print/archive, medio-scoped', () => {
     expect(shouldRejectCrawlUrl('MED-0425', 'https://aldialogo.mx/contacto.tsx')).toBe(true);
     expect(shouldRejectCrawlUrl('MED-0008', 'https://aldialogo.mx/categoria/queretaro/')).toBe(false);
   });
+
+  it('Punto Medio blog hub and print edition rejected; news slug kept', () => {
+    expect(shouldRejectCrawlUrl('MED-0450', 'https://puntomedio.mx/blog/')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0450', 'https://puntomedio.mx/edicion-impresa-sabado-15-julio-2017/')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0450', 'https://puntomedio.mx/lluvias-causan-estragos-en-la-ciudad/')).toBe(false);
+    expect(shouldRejectCrawlUrl('MED-0008', 'https://puntomedio.mx/blog/')).toBe(false);
+  });
+
+  it('Sinaloa en Línea empty columns rejected; news slug kept', () => {
+    expect(shouldRejectCrawlUrl('MED-0462', 'https://sinaloaenlinea.com/en-el-blanco-por-fernando-zepeda-h-617/')).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0462',
+        'https://sinaloaenlinea.com/mazatlan-crisis-de-servicios-morena-siguen-inconformidades-mexico-no-solo-es-corrupto/',
+      ),
+    ).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0462',
+        'https://sinaloaenlinea.com/ssp-llama-a-cuidarse-durante-el-llamado-reloj-criminologico/',
+      ),
+    ).toBe(false);
+  });
 });

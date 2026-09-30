@@ -95,6 +95,14 @@ export function shouldRejectCrawlUrl(medioId: string, url: string): boolean {
         if (p === '/' || p === '/etiqueta' || p === '/impreso' || p === '/contacto.tsx') return true;
         return /^\/(categoria|etiqueta)(\/|$)/i.test(p);
       }
+    case 'MED-0450': // Punto Medio — sitemap_index mezcló /blog y edición impresa
+      {
+        const p = path.replace(/\/+$/, '') || '/';
+        if (p === '/' || p === '/blog') return true;
+        return /\/edicion-impresa/i.test(path);
+      }
+    case 'MED-0462': // Sinaloa en Línea — columnas sin cuerpo editorial
+      return /\/en-el-blanco-por-/i.test(path) || /mexico-no-solo-es-corrupto/i.test(path);
     default:
       return false;
   }
