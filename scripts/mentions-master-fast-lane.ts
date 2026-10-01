@@ -30,9 +30,14 @@ import { calcularPlan, procesarChunk, type NewsLakeCaptureArgs } from './news-la
 import { getSupabase } from '../src/supabase/client.js';
 import { getAllClientes, getKeywordsActivas, type KeywordActivaRow } from '../src/supabase/repositories.js';
 import { getSpreadsheetById, withSheetsRetry } from '../src/sheets/client.js';
-import { matchKeyword, PESOS_CAMPO, type CampoBuscable, type MatchResultado } from '../src/matchers/keyword.js';
+import { matchKeyword, type CampoBuscable, type MatchResultado } from '../src/matchers/keyword.js';
 import { toKeywordRule } from '../src/matching/detectMentionsCore.js';
 import { buildMentionScope } from '../src/matching/controlPlaneScope.js';
+import {
+  buildTrustedMatchingFields,
+  isBodyMatchingV2Enabled,
+  type MatchingMode,
+} from '../src/matching/trustedBody.js';
 import { normalizeHeader, parseIntOrNull } from '../src/utils/parse.js';
 import { logger } from '../src/utils/logger.js';
 
@@ -172,17 +177,18 @@ function displayText(n: MasterNewsRow): string {
 }
 
 /**
- * Matching Fast Lane MASTER: título/subtítulo/resumen/sección.
- * El body no dispara menciones: calidad_extraccion no distingue cuerpo
- * concatenado/relacionados (alta = longitud/ratio, no trust editorial).
+ * Matching Fast Lane MASTER.
+ * Default: título/subtítulo/resumen/sección (producción actual).
+ * BODY_MATCHING_V2=true: añade texto_cuerpo_nota de alta calidad (sin texto_extraido).
  */
-export function matchingFields(n: MasterNewsRow): CampoBuscable[] {
-  return [
-    { nombre: 'titulo', texto: n.titulo ?? '', peso: PESOS_CAMPO.titulo! },
-    { nombre: 'subtitulo', texto: n.subtitulo ?? '', peso: PESOS_CAMPO.subtitulo! },
-    { nombre: 'resumen', texto: n.resumen ?? '', peso: PESOS_CAMPO.resumen! },
-    { nombre: 'seccion', texto: n.seccion ?? '', peso: PESOS_CAMPO.seccion! },
-  ];
+export function matchingFields(
+  n: MasterNewsRow,
+  opts: { bodyMatchingV2?: boolean; mode?: MatchingMode } = {},
+): CampoBuscable[] {
+  const mode: MatchingMode =
+    opts.mode ??
+    ((opts.bodyMatchingV2 ?? isBodyMatchingV2Enabled()) ? 'body_high' : 'current');
+  return buildTrustedMatchingFields(n, { mode }).campos;
 }
 
 function localHour(iso: string | null): string {
@@ -206,7 +212,11 @@ function truncateForSheet(text: string): string {
   return text.slice(0, MASTER_SNIPPET_CHARS - suffix.length) + suffix;
 }
 
-export async function fetchEligibleNews(sinceIso: string, medioIds?: string[]): Promise<MasterNewsRow[]> {
+export async function fetchEligibleNews(
+  sinceIso: string,
+  medioIds?: string[],
+  fetchCap = GLOBAL_FETCH_CAP,
+): Promise<MasterNewsRow[]> {
   const select =
     'noticia_id, medio_id, titulo, subtitulo, resumen, url_original, fecha_publicacion, fecha_captura,' +
     ' autor, seccion, texto_extraido, texto_nota_limpia, texto_cuerpo_nota, tipo_nota, calidad_extraccion,' +
@@ -256,7 +266,7 @@ export async function fetchEligibleNews(sinceIso: string, medioIds?: string[]): 
 
   const out: MasterNewsRow[] = [];
   const page = 1000;
-  for (let from = 0; from < GLOBAL_FETCH_CAP; from += page) {
+  for (let from = 0; from < fetchCap; from += page) {
     const data = await runPage(from, from + page - 1);
     out.push(...data.map(mapRow).filter(eligible));
     if (data.length < page) break;
@@ -268,14 +278,22 @@ export function buildRows(
   news: MasterNewsRow[],
   keywordsByClient: Map<string, KeywordActivaRow[]>,
   clientNames: Map<string, string>,
+  opts: { bodyMatchingV2?: boolean; mode?: MatchingMode; contextRadius?: number } = {},
 ): OutRow[] {
   const rows: OutRow[] = [];
   for (const n of news) {
-    const campos = matchingFields(n);
+    const packed = buildTrustedMatchingFields(n, {
+      mode:
+        opts.mode ??
+        ((opts.bodyMatchingV2 ?? isBodyMatchingV2Enabled()) ? 'body_high' : 'current'),
+    });
+    const campos = packed.campos;
     for (const [clientId, kws] of keywordsByClient.entries()) {
       const matches: MatchBundle[] = [];
       for (const kw of kws) {
-        const result = matchKeyword(toKeywordRule(kw), campos);
+        const result = matchKeyword(toKeywordRule(kw), campos, {
+          contextRadius: opts.contextRadius,
+        });
         if (result) matches.push({ kw, result });
       }
       if (matches.length === 0) continue;

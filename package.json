@@ -87,6 +87,7 @@
     "media-validation:batch": "tsx scripts/media-validation-batch.ts",
     "client-live:sheet": "tsx scripts/client-live-sheet-export.ts",
     "mentions-master:fast-lane": "tsx scripts/mentions-master-fast-lane.ts",
+    "mentions-matching:shadow-v2": "tsx scripts/shadow-unified-body-matching-v2.ts",
     "mention-routing:apply-sheet": "tsx scripts/apply-mention-routing-sheet.ts",
     "mention-routing:dry-run": "tsx scripts/mention-routing-dry-run.ts",
     "news-lake:mentions:lab": "tsx scripts/news-lake-mention-backfill-lab.ts",

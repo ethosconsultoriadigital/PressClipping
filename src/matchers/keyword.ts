@@ -15,6 +15,7 @@ import {
   esKeywordTequilaAmpliaCli0002,
   esKeywordJumexAmpliaCli0001,
 } from '../matching/contextualKeywordRules.js';
+import { windowsAroundHits } from '../matching/bodyProximity.js';
 
 export type TipoKeyword =
   | 'exacta'
@@ -55,9 +56,20 @@ export const PESOS_CAMPO: Record<string, number> = {
   subtitulo: 0.8,
   resumen: 0.6,
   seccion: 0.5,
+  texto_cuerpo_nota: 0.4,
+  texto_nota_limpia: 0.35,
   texto_extraido: 0.4,
   medio: 0.3,
 };
+
+const CUERPO_CAMPOS = new Set([
+  'subtitulo',
+  'resumen',
+  'seccion',
+  'texto_cuerpo_nota',
+  'texto_nota_limpia',
+  'texto_extraido',
+]);
 
 /** Construye un snippet de evidencia alrededor de `index` en el texto original. */
 function snippet(original: string, index: number, len: number, ventana = 90): string {
@@ -90,11 +102,25 @@ function buscarTermino(
  * Evalúa una keyword contra los campos de una noticia.
  * Devuelve el match de mayor peso de campo, o null si no hay match.
  */
+export interface MatchKeywordOpts {
+  /** Si se define, las puertas de contexto usan ventanas ±radius alrededor del hit (shadow). */
+  contextRadius?: number;
+}
+
 export function matchKeyword(
   rule: KeywordRule,
   campos: CampoBuscable[],
+  opts: MatchKeywordOpts = {},
 ): MatchResultado | null {
-  const foldedFull = campos.map((c) => foldText(c.texto)).join('\n');
+  const foldedFull = foldText(
+    campos
+      .map((c) =>
+        opts.contextRadius && (c.nombre === 'texto_cuerpo_nota' || c.nombre === 'texto_nota_limpia')
+          ? windowOrFull_(c.texto, rule.terminos, rule.tipo, opts.contextRadius)
+          : c.texto,
+      )
+      .join('\n'),
+  );
 
   // La keyword amplia de tequila (CLI-0002) se rige EXCLUSIVAMENTE por la puerta
   // contextual de código (política de 3 niveles), no por los contexto_incluir/
@@ -126,12 +152,20 @@ export function matchKeyword(
   // título + cuerpo (se excluye el nombre del medio para no contaminar).
   const textoContexto = campos
     .filter((c) => c.nombre !== 'medio')
-    .map((c) => c.texto)
+    .map((c) =>
+      opts.contextRadius && (c.nombre === 'texto_cuerpo_nota' || c.nombre === 'texto_nota_limpia')
+        ? windowOrFull_(c.texto, rule.terminos, rule.tipo, opts.contextRadius)
+        : c.texto,
+    )
     .join('\n');
   const tituloContexto = campos.find((c) => c.nombre === 'titulo')?.texto ?? '';
   const cuerpoContexto = campos
-    .filter((c) => c.nombre === 'subtitulo' || c.nombre === 'resumen' || c.nombre === 'seccion' || c.nombre === 'texto_extraido')
-    .map((c) => c.texto)
+    .filter((c) => CUERPO_CAMPOS.has(c.nombre))
+    .map((c) =>
+      opts.contextRadius && (c.nombre === 'texto_cuerpo_nota' || c.nombre === 'texto_nota_limpia')
+        ? windowOrFull_(c.texto, rule.terminos, rule.tipo, opts.contextRadius)
+        : c.texto,
+    )
     .join('\n');
   if (
     !pasaPuertaContextualClienteKeyword({
@@ -201,6 +235,16 @@ function mejorCampoPara(
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+function windowOrFull_(
+  text: string,
+  terms: string[],
+  tipo: TipoKeyword,
+  radius: number,
+): string {
+  const w = windowsAroundHits(text, terms, tipo, radius);
+  return w || text;
 }
 
 /** Helper: parte una celda multivalor 'a|b|c' en términos limpios. */
