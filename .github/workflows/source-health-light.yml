@@ -1,0 +1,36 @@
+name: Source health light
+
+# Cadencia Zero-AI. No toca matching / Fast Lane / alertas.
+# HEALTHY: diario. DEGRADED se prioriza con --discovered-only no aplica;
+# el script recorre canales activos. Deep NO corre aquí.
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: Máximo de canales a sondear
+        required: false
+        default: '80'
+  schedule:
+    - cron: '0 12 * * *'
+
+concurrency:
+  group: source-health-light
+  cancel-in-progress: false
+
+jobs:
+  light:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      RUN_BY: github-actions-source-health-light
+      LOG_FORMAT: json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Light probe (no IA, no deep diario)
+        run: npm run source-health:scan -- --mode=light --limit=${{ github.event.inputs.limit || 80 }}

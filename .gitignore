@@ -40,3 +40,8 @@ Thumbs.db
 # Cobertura / temporales de test
 coverage/
 .vitest/
+
+# Dumps Astra LIVE (no commitear)
+data/source-registry/*.csv
+data/source-registry/*.xlsx
+!data/source-registry/README.md
