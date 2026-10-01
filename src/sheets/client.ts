@@ -21,6 +21,8 @@ export const SHEET_TABS = {
   LOGS: '05_Logs',
   RESULTADOS: '06_Resultados',
   DICCIONARIOS: '07_Diccionarios',
+  RUTEO_MENCIONES: '08_Ruteo_Menciones',
+  RUTEO_PENDIENTE: '09_Ruteo_Pendiente',
 } as const;
 
 /** Nombres canónicos de las pestañas de la base operativa de captura (salida). */

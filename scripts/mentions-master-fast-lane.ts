@@ -30,9 +30,19 @@ import { calcularPlan, procesarChunk, type NewsLakeCaptureArgs } from './news-la
 import { getSupabase } from '../src/supabase/client.js';
 import { getAllClientes, getKeywordsActivas, type KeywordActivaRow } from '../src/supabase/repositories.js';
 import { getSpreadsheetById, withSheetsRetry } from '../src/sheets/client.js';
-import { matchKeyword, PESOS_CAMPO, type CampoBuscable, type MatchResultado } from '../src/matchers/keyword.js';
+import { matchKeyword, type CampoBuscable, type MatchResultado } from '../src/matchers/keyword.js';
 import { toKeywordRule } from '../src/matching/detectMentionsCore.js';
 import { buildMentionScope } from '../src/matching/controlPlaneScope.js';
+import {
+  buildTrustedMatchingFields,
+  type MatchingMode,
+} from '../src/matching/trustedBody.js';
+import {
+  describeMasterBodyPolicy,
+  isBodyCampo,
+  keywordGetsTrustedBody,
+} from '../src/matching/masterBodyCanary.js';
+import { emptyBodyMatchingCounters, type BodyMatchingCounters } from '../src/matching/bodyMatchingMetrics.js';
 import { normalizeHeader, parseIntOrNull } from '../src/utils/parse.js';
 import { logger } from '../src/utils/logger.js';
 
@@ -165,24 +175,34 @@ export function newsInOverlapWindow(fechaCaptura: string | null, sinceIso: strin
   return Boolean(fechaCaptura && fechaCaptura >= sinceIso);
 }
 
-function displayText(n: MasterNewsRow): string {
-  const body = (n.texto_cuerpo_nota ?? n.texto_nota_limpia ?? n.texto_extraido ?? '').trim();
-  if (body.length > 0) return body;
-  return n.resumen ?? '';
+export function displayText(n: MasterNewsRow): string {
+  const cuerpo = (n.texto_cuerpo_nota ?? '').trim();
+  if (cuerpo) return cuerpo;
+  const limpia = (n.texto_nota_limpia ?? '').trim();
+  if (limpia) return limpia;
+  return (n.resumen ?? '').trim();
 }
 
 /**
- * Matching Fast Lane MASTER: título/subtítulo/resumen/sección.
- * El body no dispara menciones: calidad_extraccion no distingue cuerpo
- * concatenado/relacionados (alta = longitud/ratio, no trust editorial).
+ * Matching Fast Lane MASTER.
+ * Default: título/subtítulo/resumen/sección (producción actual).
+ * BODY canary: MENTIONS_MASTER_BODY_V2 + allowlist por keyword (BODY_TRUSTED).
  */
-export function matchingFields(n: MasterNewsRow): CampoBuscable[] {
-  return [
-    { nombre: 'titulo', texto: n.titulo ?? '', peso: PESOS_CAMPO.titulo! },
-    { nombre: 'subtitulo', texto: n.subtitulo ?? '', peso: PESOS_CAMPO.subtitulo! },
-    { nombre: 'resumen', texto: n.resumen ?? '', peso: PESOS_CAMPO.resumen! },
-    { nombre: 'seccion', texto: n.seccion ?? '', peso: PESOS_CAMPO.seccion! },
-  ];
+export interface BuildRowsOpts {
+  bodyMatchingV2?: boolean;
+  masterBodyV2?: boolean;
+  mode?: MatchingMode;
+  contextRadius?: number;
+  keywordAllowlist?: Iterable<string>;
+  metrics?: BodyMatchingCounters;
+}
+
+export function matchingFields(
+  n: MasterNewsRow,
+  opts: BuildRowsOpts = {},
+): CampoBuscable[] {
+  const mode: MatchingMode = opts.mode ?? 'current';
+  return buildTrustedMatchingFields(n, { mode }).campos;
 }
 
 function localHour(iso: string | null): string {
@@ -206,7 +226,11 @@ function truncateForSheet(text: string): string {
   return text.slice(0, MASTER_SNIPPET_CHARS - suffix.length) + suffix;
 }
 
-export async function fetchEligibleNews(sinceIso: string, medioIds?: string[]): Promise<MasterNewsRow[]> {
+export async function fetchEligibleNews(
+  sinceIso: string,
+  medioIds?: string[],
+  fetchCap = GLOBAL_FETCH_CAP,
+): Promise<MasterNewsRow[]> {
   const select =
     'noticia_id, medio_id, titulo, subtitulo, resumen, url_original, fecha_publicacion, fecha_captura,' +
     ' autor, seccion, texto_extraido, texto_nota_limpia, texto_cuerpo_nota, tipo_nota, calidad_extraccion,' +
@@ -256,7 +280,7 @@ export async function fetchEligibleNews(sinceIso: string, medioIds?: string[]): 
 
   const out: MasterNewsRow[] = [];
   const page = 1000;
-  for (let from = 0; from < GLOBAL_FETCH_CAP; from += page) {
+  for (let from = 0; from < fetchCap; from += page) {
     const data = await runPage(from, from + page - 1);
     out.push(...data.map(mapRow).filter(eligible));
     if (data.length < page) break;
@@ -268,15 +292,43 @@ export function buildRows(
   news: MasterNewsRow[],
   keywordsByClient: Map<string, KeywordActivaRow[]>,
   clientNames: Map<string, string>,
+  opts: BuildRowsOpts = {},
 ): OutRow[] {
   const rows: OutRow[] = [];
+  const metrics = opts.metrics;
+  const mode: MatchingMode = opts.mode ?? 'body_high';
   for (const n of news) {
-    const campos = matchingFields(n);
+    const signalPacked = buildTrustedMatchingFields(n, { mode: 'current' });
+    const bodyPacked = buildTrustedMatchingFields(n, { mode });
+    const trustedCanary = bodyPacked.body.status === 'BODY_TRUSTED';
+    const bodyUsable =
+      mode === 'body_high' ? trustedCanary : Boolean(bodyPacked.body.text);
+    if (metrics) {
+      if ((n.texto_cuerpo_nota ?? '').trim()) metrics.body_available += 1;
+      if (bodyPacked.body.status === 'BODY_TRUSTED') metrics.body_trusted += 1;
+      else if (bodyPacked.body.status === 'BODY_FALLBACK_CLEAN') metrics.body_fallback_clean += 1;
+      else if (bodyPacked.body.status === 'BODY_REJECTED') metrics.body_rejected += 1;
+    }
     for (const [clientId, kws] of keywordsByClient.entries()) {
       const matches: MatchBundle[] = [];
+      let anySignal = false;
       for (const kw of kws) {
-        const result = matchKeyword(toKeywordRule(kw), campos);
-        if (result) matches.push({ kw, result });
+        const useBody = keywordGetsTrustedBody(kw.keyword_id, opts) && bodyUsable;
+        const rule = toKeywordRule(kw);
+        const campos = useBody ? bodyPacked.campos : signalPacked.campos;
+        const result = matchKeyword(rule, campos, {
+          contextRadius: opts.contextRadius,
+        });
+        if (!result) continue;
+        matches.push({ kw, result });
+        if (!useBody) {
+          anySignal = true;
+          continue;
+        }
+        const signalHit = matchKeyword(rule, signalPacked.campos, {
+          contextRadius: opts.contextRadius,
+        });
+        if (signalHit) anySignal = true;
       }
       if (matches.length === 0) continue;
 
@@ -286,6 +338,12 @@ export function buildRows(
       const dedupeKey = `${clientId.toLowerCase()}//${n.noticia_id.toLowerCase()}`;
       const uniqueKeywords = [...new Set(matches.map((m) => m.kw.keyword))];
       const uniqueKeywordIds = [...new Set(matches.map((m) => m.kw.keyword_id))];
+      if (metrics) {
+        if (isBodyCampo(best.result.campo)) metrics.body_matches += 1;
+        else metrics.signal_matches += 1;
+        if (!anySignal) metrics.body_only_matches += 1;
+        if (matches.length > 1) metrics.multi_field_matches += 1;
+      }
 
       rows.push({
         'NOTICIA': n.noticia_id,
@@ -327,6 +385,21 @@ export function buildRows(
     }
   }
   return rows;
+}
+
+function bodyRunObservability(metrics?: BodyMatchingCounters, rows: OutRow[] = []) {
+  const policy = describeMasterBodyPolicy();
+  const mery = rows.filter((r) => String(r['cliente_id'] ?? '').toUpperCase() === 'CLI-MERY-TEST');
+  const meryBody = mery.filter((r) => isBodyCampo(String(r['campo_match'] ?? '')));
+  return {
+    ...policy,
+    body_only_matches: metrics?.body_only_matches ?? 0,
+    body_matches: metrics?.body_matches ?? 0,
+    signal_matches: metrics?.signal_matches ?? 0,
+    mery_rows: mery.length,
+    mery_body_matches: meryBody.length,
+    mery_signal_matches: mery.length - meryBody.length,
+  };
 }
 
 async function loadExistingKeys(sheet: GoogleSpreadsheetWorksheet): Promise<Set<string>> {
@@ -421,6 +494,7 @@ async function main(): Promise<void> {
   }
 
   if (args.matchOnly) {
+    const matchMetrics = emptyBodyMatchingCounters();
     logger.info({
       dry_run: args.dryRun,
       match_only: true,
@@ -430,13 +504,12 @@ async function main(): Promise<void> {
       sheet_id: args.sheetId.slice(0, 8) + '...',
       tab: args.tab,
       minimo_export: 'titulo + resumen/descripcion + url',
-      matching_fields: 'titulo,subtitulo,resumen,seccion',
-      body_matching: false,
       global_sweep: true,
+      ...bodyRunObservability(),
     }, '=== MENTIONS MASTER FAST LANE start (match-only) ===');
 
     const news = await fetchEligibleNews(sinceIso);
-    const rows = buildRows(news, keywordsByClient, clientNames);
+    const rows = buildRows(news, keywordsByClient, clientNames, { metrics: matchMetrics });
     const write = await appendRows(sheet, rows, existingKeys, args.dryRun);
     const medios = new Set(news.map((n) => n.medio_id).filter(Boolean));
     const latencies = rows
@@ -458,6 +531,7 @@ async function main(): Promise<void> {
       no_email: true,
       no_twilio: true,
       no_menciones_db_write: true,
+      ...bodyRunObservability(matchMetrics, rows),
     }, '=== MENTIONS MASTER FAST LANE done (match-only) ===');
     return;
   }
@@ -476,9 +550,8 @@ async function main(): Promise<void> {
     sheet_id: args.sheetId.slice(0, 8) + '...',
     tab: args.tab,
     minimo_export: 'titulo + resumen/descripcion + url',
-    matching_fields: 'titulo,subtitulo,resumen,seccion',
-    body_matching: false,
     global_sweep: true,
+    ...bodyRunObservability(),
   }, '=== MENTIONS MASTER FAST LANE start ===');
 
   let nextIndex = 0;
@@ -536,8 +609,9 @@ async function main(): Promise<void> {
   );
   await Promise.all(workers);
 
+  const globalMetrics = emptyBodyMatchingCounters();
   const globalNews = await fetchEligibleNews(sinceIso);
-  const globalRows = buildRows(globalNews, keywordsByClient, clientNames);
+  const globalRows = buildRows(globalNews, keywordsByClient, clientNames, { metrics: globalMetrics });
   const globalWrite = await appendRows(sheet!, globalRows, existingKeys, args.dryRun);
   const globalMedios = new Set(globalNews.map((n) => n.medio_id).filter(Boolean));
   const fueraDePlan = [...globalMedios].filter((id) => !plan.medioIds.includes(id as string)).length;
@@ -549,6 +623,7 @@ async function main(): Promise<void> {
     appended_master: globalWrite.appended,
     skipped_dedupe: globalWrite.skipped,
     would_append: globalWrite.would_append,
+    ...bodyRunObservability(globalMetrics, globalRows),
   }, 'Global News Lake sweep (sin crawl)');
 
   logger.info({
@@ -565,6 +640,7 @@ async function main(): Promise<void> {
     no_email: true,
     no_twilio: true,
     no_menciones_db_write: true,
+    ...bodyRunObservability(globalMetrics, globalRows),
   }, '=== MENTIONS MASTER FAST LANE done ===');
 }
 

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   normalizeHeader,
   parseBool,
+  isRecognizedBoolCell,
   parseIntOrNull,
   parseList,
   parseTextOrNull,
@@ -30,6 +31,15 @@ describe('parseBool', () => {
   it('usa el fallback ante valores no reconocibles', () => {
     expect(parseBool('quizá', true)).toBe(true);
     expect(parseBool('quizá', false)).toBe(false);
+  });
+});
+
+describe('isRecognizedBoolCell', () => {
+  it('acepta TRUE/FALSE/vacío y rechaza basura', () => {
+    expect(isRecognizedBoolCell('TRUE')).toBe(true);
+    expect(isRecognizedBoolCell('')).toBe(true);
+    expect(isRecognizedBoolCell(null)).toBe(true);
+    expect(isRecognizedBoolCell('quizá')).toBe(false);
   });
 });
 

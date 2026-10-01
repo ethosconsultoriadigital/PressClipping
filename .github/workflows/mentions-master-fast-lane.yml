@@ -78,6 +78,8 @@ jobs:
       NO_EMAIL: 'true'
       NO_WHATSAPP: 'true'
       NO_TWILIO: 'true'
+      MENTIONS_MASTER_BODY_V2: 'true'
+      MENTIONS_MASTER_BODY_V2_KEYWORD_IDS: 'KEY-0040,KEY-0041,KEY-0042,KEY-0043,KEY-0044,KEY-0045,KEY-0046,KEY-0047,KEY-0076,KEY-0077'
 
     steps:
       - uses: actions/checkout@v4

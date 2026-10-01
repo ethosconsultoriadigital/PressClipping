@@ -51,6 +51,14 @@ export function parseBool(value: unknown, fallback = false): boolean {
   return fallback;
 }
 
+/** True si la celda es un booleano reconocible (incluye vacío = false). */
+export function isRecognizedBoolCell(value: unknown): boolean {
+  if (typeof value === 'boolean') return true;
+  if (value === null || value === undefined) return true;
+  const v = String(value).trim().toLowerCase();
+  return TRUE_VALUES.has(v) || FALSE_VALUES.has(v);
+}
+
 /** Entero o null si la celda está vacía o no es numérica. */
 export function parseIntOrNull(value: unknown): number | null {
   if (value === null || value === undefined) return null;
