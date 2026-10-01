@@ -56,9 +56,29 @@ EXPECTED V2: MATCH `CLI-MERY-TEST`, `campo_match=TEXTO_CUERPO_NOTA`, `dedupe_key
 
 ## Rollout
 
-1. Shadow (48h / 7d) — esta fase  
-2. Canary humano  
-3. Producción con `BODY_MATCHING_V2=true` **solo con autorización**
+1. Shadow 48h / 7d (completado, e9f7f905)
+2. **Canary selectivo por keyword** (esta fase) — `MENTIONS_MASTER_BODY_V2` + allowlist
+3. Producción MASTER canary Mery frase_exacta **solo con autorización**
+4. Detector (`DETECT_MENTIONS_BODY_V2`) permanece apagado hasta flag propio
+
+## Flags (separados)
+
+| Flag | Superficie | Default |
+| --- | --- | --- |
+| `MENTIONS_MASTER_BODY_V2` | Fast Lane → MASTER | false |
+| `MENTIONS_MASTER_BODY_V2_KEYWORD_IDS` | Allowlist `KEY-…` | vacío = no BODY |
+| `DETECT_MENTIONS_BODY_V2` | `detectMentionsCore` / `public.menciones` | false |
+| `BODY_MATCHING_V2` | **deprecado**; no habilita MASTER ni detector | false |
+
+Semántica MASTER: todas las keywords siguen evaluando título/subtítulo/resumen/sección. BODY_TRUSTED (`texto_cuerpo_nota` + calidad alta) **solo** para IDs allowlisted. 1 noticia + 1 cliente = 1 fila.
+
+Canary 1 (preparado, no escrito): KEY-0040..0047, KEY-0076, KEY-0077. Excluye KEY-0048..0051.
+
+Canary 2 marcas (shadow only): KEY-0060, 0061, 0070–0073.
+
+No BODY para KEY-0017/0019/0021 ni tequila/mezcal/COFEPRIS/aranceles.
+
+## Guardrails
 
 ## Guardrails
 
@@ -66,18 +86,21 @@ EXPECTED V2: MATCH `CLI-MERY-TEST`, `campo_match=TEXTO_CUERPO_NOTA`, `dedupe_key
 - No Apps Script / triggers / vistas derivadas
 - No append BODY_ONLY a MASTER hasta autorización
 - No backfill
-- Fast Lane default permanece título+resumen+sección
+- Fast Lane default permanece título+resumen+sección salvo canary allowlist autorizado
+- No activar `BODY_MATCHING_V2` global
+- GHA Fast Lane no define todavía `MENTIONS_MASTER_BODY_V2`
 - Agent A / catálogo de medios: no tocar
 
 ## Métricas
 
 `body_available`, `body_trusted`, `body_fallback_clean`, `body_rejected`, `signal_matches`, `body_matches`, `body_only_matches`, `multi_field_matches`, `raw_text_rejected`, `dedupe_suppressed`, `rows_appended` (+ desglose cliente/keyword/medio en shadow).
 
-Script: `npm run mentions-matching:shadow-v2`
+Script: `npm run mentions-matching:shadow-v2`  
+Canary shadow (sin writes): `npm run mentions-matching:selective-canary-shadow`
 
 ## Rollback
 
-Dejar `BODY_MATCHING_V2` unset/false. No hay filas V2 en MASTER si no se escribió. Código flag-off = política CURRENT.
+Dejar `MENTIONS_MASTER_BODY_V2` unset/false y allowlist vacía. Fast Lane vuelve a CURRENT. Detector no se toca.
 
 ## Política V1 recomendada (pendiente de autorización)
 

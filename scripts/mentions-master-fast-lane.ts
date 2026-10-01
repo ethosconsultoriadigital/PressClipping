@@ -35,9 +35,14 @@ import { toKeywordRule } from '../src/matching/detectMentionsCore.js';
 import { buildMentionScope } from '../src/matching/controlPlaneScope.js';
 import {
   buildTrustedMatchingFields,
-  isBodyMatchingV2Enabled,
   type MatchingMode,
 } from '../src/matching/trustedBody.js';
+import {
+  describeMasterBodyPolicy,
+  isBodyCampo,
+  keywordGetsTrustedBody,
+} from '../src/matching/masterBodyCanary.js';
+import { emptyBodyMatchingCounters, type BodyMatchingCounters } from '../src/matching/bodyMatchingMetrics.js';
 import { normalizeHeader, parseIntOrNull } from '../src/utils/parse.js';
 import { logger } from '../src/utils/logger.js';
 
@@ -179,15 +184,22 @@ function displayText(n: MasterNewsRow): string {
 /**
  * Matching Fast Lane MASTER.
  * Default: título/subtítulo/resumen/sección (producción actual).
- * BODY_MATCHING_V2=true: añade texto_cuerpo_nota de alta calidad (sin texto_extraido).
+ * BODY canary: MENTIONS_MASTER_BODY_V2 + allowlist por keyword (BODY_TRUSTED).
  */
+export interface BuildRowsOpts {
+  bodyMatchingV2?: boolean;
+  masterBodyV2?: boolean;
+  mode?: MatchingMode;
+  contextRadius?: number;
+  keywordAllowlist?: Iterable<string>;
+  metrics?: BodyMatchingCounters;
+}
+
 export function matchingFields(
   n: MasterNewsRow,
-  opts: { bodyMatchingV2?: boolean; mode?: MatchingMode } = {},
+  opts: BuildRowsOpts = {},
 ): CampoBuscable[] {
-  const mode: MatchingMode =
-    opts.mode ??
-    ((opts.bodyMatchingV2 ?? isBodyMatchingV2Enabled()) ? 'body_high' : 'current');
+  const mode: MatchingMode = opts.mode ?? 'current';
   return buildTrustedMatchingFields(n, { mode }).campos;
 }
 
@@ -278,23 +290,43 @@ export function buildRows(
   news: MasterNewsRow[],
   keywordsByClient: Map<string, KeywordActivaRow[]>,
   clientNames: Map<string, string>,
-  opts: { bodyMatchingV2?: boolean; mode?: MatchingMode; contextRadius?: number } = {},
+  opts: BuildRowsOpts = {},
 ): OutRow[] {
   const rows: OutRow[] = [];
+  const metrics = opts.metrics;
+  const mode: MatchingMode = opts.mode ?? 'body_high';
   for (const n of news) {
-    const packed = buildTrustedMatchingFields(n, {
-      mode:
-        opts.mode ??
-        ((opts.bodyMatchingV2 ?? isBodyMatchingV2Enabled()) ? 'body_high' : 'current'),
-    });
-    const campos = packed.campos;
+    const signalPacked = buildTrustedMatchingFields(n, { mode: 'current' });
+    const bodyPacked = buildTrustedMatchingFields(n, { mode });
+    const trustedCanary = bodyPacked.body.status === 'BODY_TRUSTED';
+    const bodyUsable =
+      mode === 'body_high' ? trustedCanary : Boolean(bodyPacked.body.text);
+    if (metrics) {
+      if ((n.texto_cuerpo_nota ?? '').trim()) metrics.body_available += 1;
+      if (bodyPacked.body.status === 'BODY_TRUSTED') metrics.body_trusted += 1;
+      else if (bodyPacked.body.status === 'BODY_FALLBACK_CLEAN') metrics.body_fallback_clean += 1;
+      else if (bodyPacked.body.status === 'BODY_REJECTED') metrics.body_rejected += 1;
+    }
     for (const [clientId, kws] of keywordsByClient.entries()) {
       const matches: MatchBundle[] = [];
+      let anySignal = false;
       for (const kw of kws) {
-        const result = matchKeyword(toKeywordRule(kw), campos, {
+        const useBody = keywordGetsTrustedBody(kw.keyword_id, opts) && bodyUsable;
+        const rule = toKeywordRule(kw);
+        const campos = useBody ? bodyPacked.campos : signalPacked.campos;
+        const result = matchKeyword(rule, campos, {
           contextRadius: opts.contextRadius,
         });
-        if (result) matches.push({ kw, result });
+        if (!result) continue;
+        matches.push({ kw, result });
+        if (!useBody) {
+          anySignal = true;
+          continue;
+        }
+        const signalHit = matchKeyword(rule, signalPacked.campos, {
+          contextRadius: opts.contextRadius,
+        });
+        if (signalHit) anySignal = true;
       }
       if (matches.length === 0) continue;
 
@@ -304,6 +336,12 @@ export function buildRows(
       const dedupeKey = `${clientId.toLowerCase()}//${n.noticia_id.toLowerCase()}`;
       const uniqueKeywords = [...new Set(matches.map((m) => m.kw.keyword))];
       const uniqueKeywordIds = [...new Set(matches.map((m) => m.kw.keyword_id))];
+      if (metrics) {
+        if (isBodyCampo(best.result.campo)) metrics.body_matches += 1;
+        else metrics.signal_matches += 1;
+        if (!anySignal) metrics.body_only_matches += 1;
+        if (matches.length > 1) metrics.multi_field_matches += 1;
+      }
 
       rows.push({
         'NOTICIA': n.noticia_id,
@@ -345,6 +383,16 @@ export function buildRows(
     }
   }
   return rows;
+}
+
+function bodyRunObservability(metrics?: BodyMatchingCounters) {
+  const policy = describeMasterBodyPolicy();
+  return {
+    ...policy,
+    body_only_matches: metrics?.body_only_matches ?? 0,
+    body_matches: metrics?.body_matches ?? 0,
+    signal_matches: metrics?.signal_matches ?? 0,
+  };
 }
 
 async function loadExistingKeys(sheet: GoogleSpreadsheetWorksheet): Promise<Set<string>> {
@@ -439,6 +487,7 @@ async function main(): Promise<void> {
   }
 
   if (args.matchOnly) {
+    const matchMetrics = emptyBodyMatchingCounters();
     logger.info({
       dry_run: args.dryRun,
       match_only: true,
@@ -448,13 +497,12 @@ async function main(): Promise<void> {
       sheet_id: args.sheetId.slice(0, 8) + '...',
       tab: args.tab,
       minimo_export: 'titulo + resumen/descripcion + url',
-      matching_fields: 'titulo,subtitulo,resumen,seccion',
-      body_matching: false,
       global_sweep: true,
+      ...bodyRunObservability(),
     }, '=== MENTIONS MASTER FAST LANE start (match-only) ===');
 
     const news = await fetchEligibleNews(sinceIso);
-    const rows = buildRows(news, keywordsByClient, clientNames);
+    const rows = buildRows(news, keywordsByClient, clientNames, { metrics: matchMetrics });
     const write = await appendRows(sheet, rows, existingKeys, args.dryRun);
     const medios = new Set(news.map((n) => n.medio_id).filter(Boolean));
     const latencies = rows
@@ -476,6 +524,7 @@ async function main(): Promise<void> {
       no_email: true,
       no_twilio: true,
       no_menciones_db_write: true,
+      ...bodyRunObservability(matchMetrics),
     }, '=== MENTIONS MASTER FAST LANE done (match-only) ===');
     return;
   }
@@ -494,9 +543,8 @@ async function main(): Promise<void> {
     sheet_id: args.sheetId.slice(0, 8) + '...',
     tab: args.tab,
     minimo_export: 'titulo + resumen/descripcion + url',
-    matching_fields: 'titulo,subtitulo,resumen,seccion',
-    body_matching: false,
     global_sweep: true,
+    ...bodyRunObservability(),
   }, '=== MENTIONS MASTER FAST LANE start ===');
 
   let nextIndex = 0;
@@ -554,8 +602,9 @@ async function main(): Promise<void> {
   );
   await Promise.all(workers);
 
+  const globalMetrics = emptyBodyMatchingCounters();
   const globalNews = await fetchEligibleNews(sinceIso);
-  const globalRows = buildRows(globalNews, keywordsByClient, clientNames);
+  const globalRows = buildRows(globalNews, keywordsByClient, clientNames, { metrics: globalMetrics });
   const globalWrite = await appendRows(sheet!, globalRows, existingKeys, args.dryRun);
   const globalMedios = new Set(globalNews.map((n) => n.medio_id).filter(Boolean));
   const fueraDePlan = [...globalMedios].filter((id) => !plan.medioIds.includes(id as string)).length;
@@ -583,6 +632,7 @@ async function main(): Promise<void> {
     no_email: true,
     no_twilio: true,
     no_menciones_db_write: true,
+    ...bodyRunObservability(globalMetrics),
   }, '=== MENTIONS MASTER FAST LANE done ===');
 }
 

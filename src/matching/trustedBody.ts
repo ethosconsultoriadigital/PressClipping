@@ -2,7 +2,8 @@
  * Unified Matching V2 — campos de señal + cuerpo editorial confiable.
  *
  * texto_extraido RAW nunca dispara menciones productivas.
- * Flag: BODY_MATCHING_V2=true (default false).
+ * Fast Lane canary: MENTIONS_MASTER_BODY_V2 + allowlist por keyword.
+ * Detector: DETECT_MENTIONS_BODY_V2 (independiente). BODY_MATCHING_V2 está deprecado.
  */
 import { PESOS_CAMPO, type CampoBuscable } from '../matchers/keyword.js';
 import { foldText } from '../matchers/text.js';
@@ -56,6 +57,7 @@ export interface TrustedBody {
   contaminated: boolean;
 }
 
+/** @deprecated No usar para producción. Fast Lane usa MENTIONS_MASTER_BODY_V2. */
 export function isBodyMatchingV2Enabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.BODY_MATCHING_V2 ?? '').trim().toLowerCase() === 'true';
 }

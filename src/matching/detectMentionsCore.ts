@@ -17,7 +17,8 @@ import {
 import { MENTION_QUEUE_DEFAULTS, type MentionQueueTelemetry } from './mentionQueue.js';
 import { buildMentionScope, type MentionScope, type ScopeCliente } from './controlPlaneScope.js';
 import { parseIntOrNull } from '../utils/parse.js';
-import { buildTrustedMatchingFields, isBodyMatchingV2Enabled } from './trustedBody.js';
+import { buildTrustedMatchingFields } from './trustedBody.js';
+import { isDetectMentionsBodyV2Enabled } from './masterBodyCanary.js';
 
 const TIPOS_VALIDOS: TipoKeyword[] = [
   'exacta',
@@ -117,7 +118,7 @@ export function toKeywordRule(row: KeywordActivaRow): KeywordRule {
 }
 
 export function camposDe(n: NoticiaScanRow): CampoBuscable[] {
-  if (isBodyMatchingV2Enabled()) {
+  if (isDetectMentionsBodyV2Enabled()) {
     const packed = buildTrustedMatchingFields(n, { mode: 'body_high' });
     return [
       ...packed.campos,
