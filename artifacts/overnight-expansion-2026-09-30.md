@@ -19,3 +19,14 @@
 - A%: 100
 - GATE: PASS
 - HISTORICAL_IMPACTS_RECOVERED: 301 (aprox. Quinta Fuerza 25 + Al Tiempo 23 + PLAYERS 22 + Mexico Informa 21 + Dónde Ir 18 + Cocina Vital 17 + Plaza Pública 17 + Diario Amanecer 16 + La de Hoy QRO 16 + Índice Político 15 + Presencia Puebla 14 + Periódico Victoria 14 + Food and Wine 14 + Cambio Digital 14 + Reporte Chihuahua 14 + Por La Libre 14 + Curul 9 + e-Tlaxcala 9 + Mundo Ejecutivo 9)
+
+## Batch 7
+
+- SELECTED: 24 (MED-0538..0562 salvo MED-0543 Zona Roja, HTTP 500 en todas las fuentes; ID no reutilizado)
+- A/B/C/D/E: 22 / 2 / 0 / 0 / 0
+- A%: 91.67
+- GATE: PASS
+- Lo de Hoy México (MED-0541): sitemap nacional mezcla `/local/`, `/municipios/`, `/en-juego/` con 403 persistente; filtro host-scoped. RSS/post-sitemap 404.
+- Gentleman México (MED-0552): `post-sitemap.xml` + filtro `/tag` y hubs de sección. sitemap_index mezclaba archivos.
+- Residual B: Adlatina (LATENCY+BODY_PARTIAL), Alianza Flotillera (CLONED_BODY Zeen + LATENCY). No force A.
+- Caps remaining after B7: 6 batches, ~151 altas.
