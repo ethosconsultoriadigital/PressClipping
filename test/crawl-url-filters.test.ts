@@ -380,4 +380,49 @@ describe('Wave 2 URL filters — print/archive, medio-scoped', () => {
     ).toBe(false);
     expect(shouldRejectCrawlUrl('MED-0008', 'https://www.cocinavital.mx/videoteca/')).toBe(false);
   });
+
+  it('Lo de Hoy México 403 regional sections rejected; national article kept', () => {
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0541',
+        'https://lodehoy.com.mx/local/2026/09/29/35048/cierran-300-negocios-en-cuautla-y-zona-oriente-por-amenazas-y-extorsion',
+      ),
+    ).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0541',
+        'https://lodehoy.com.mx/municipios/2026/09/29/35038/cuernavaca-mantendra-coordinacion-con-autoridades-federales-para',
+      ),
+    ).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0541',
+        'https://lodehoy.com.mx/en-juego/2026/09/29/35055/definen-equipos-de-morelos-que-participaran-en-los-juegos-nacionales',
+      ),
+    ).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0541',
+        'https://lodehoy.com.mx/estados/2026/09/29/35043/capturan-tigresa-de-bengala-de-100-kilos-que-atacaba-ganado-en-jalisco',
+      ),
+    ).toBe(false);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0008',
+        'https://lodehoy.com.mx/local/2026/09/29/35048/cierran-300-negocios-en-cuautla-y-zona-oriente-por-amenazas-y-extorsion',
+      ),
+    ).toBe(false);
+  });
+
+  it('Gentleman tag/section archives rejected; article slug kept', () => {
+    expect(shouldRejectCrawlUrl('MED-0552', 'https://gentleman.com.mx/tag/motor/')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0552', 'https://gentleman.com.mx/reportajes/motor/')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0552', 'https://gentleman.com.mx/estilo/apparel/')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0552', 'https://gentleman.com.mx/gourmet/restaurantes/')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0552', 'https://gentleman.com.mx/relojes/')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0552', 'https://gentleman.com.mx/checo-perez-regresa-a-reforma/')).toBe(
+      false,
+    );
+    expect(shouldRejectCrawlUrl('MED-0008', 'https://gentleman.com.mx/tag/motor/')).toBe(false);
+  });
 });

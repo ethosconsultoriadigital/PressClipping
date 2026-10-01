@@ -122,6 +122,15 @@ export function shouldRejectCrawlUrl(medioId: string, url: string): boolean {
         if (p === '/' || p === '/video' || p === '/videoteca' || p === '/get-videoteca' || p === '/test') return true;
         return /^\/academia-cocina-vital(\/|$)/i.test(path);
       }
+    case 'MED-0541': // Lo de Hoy México — sitemap nacional mezcla secciones Morelos que el origen 403 persistente
+      return /^\/(local|municipios|en-juego)(\/|$)/i.test(path);
+    case 'MED-0552': // Gentleman — sitemap_index mezcló /tag y hubs de sección, no notas
+      {
+        const p = path.replace(/\/+$/, '') || '/';
+        if (p === '/') return true;
+        if (/^\/tag(\/|$)/i.test(p)) return true;
+        return /^\/(reportajes|estilo|gourmet|relojes|destacadas|nombres-propios)(\/|$)/i.test(p);
+      }
     default:
       return false;
   }
