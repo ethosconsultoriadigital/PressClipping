@@ -31,6 +31,28 @@
 - Residual B: Adlatina (LATENCY+BODY_PARTIAL), Alianza Flotillera (CLONED_BODY Zeen + LATENCY). No force A.
 - Caps remaining after B7: 6 batches, ~151 altas.
 
+## Discovery V3 — Batch 8
+
+- SELECTED: 17 (MED-0563..0579)
+- A/B/C/D/E: 16 / 1 / 0 / 0 / 0
+- A%: 94.12
+- GATE: PASS
+- Cambio de Michoacán: post-sitemap (no sitemap_index Yoast)
+- Residual B: Storecheck ENCODING
+- Detalle: `artifacts/discovery-v3.md`
+
+
+## Discovery V3 — Batch 8
+
+- SELECTED: 17 (MED-0563..0579)
+- A/B/C/D/E: 16 / 1 / 0 / 0 / 0
+- A%: 94.12
+- GATE: PASS
+- Cambio de Michoacán: post-sitemap (no sitemap_index Yoast)
+- Residual B: Storecheck ENCODING
+- Detalle: `artifacts/discovery-v3.md`
+
+
 ## STOP
 
 - Leftover STRICT PASS vs LIVE: 1 (Zonaroja / zonaroja.com.mx), ya descartado en Batch 7 por HTTP 500 en feed y sitemaps.
