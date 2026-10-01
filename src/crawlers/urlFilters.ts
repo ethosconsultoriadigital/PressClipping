@@ -131,6 +131,32 @@ export function shouldRejectCrawlUrl(medioId: string, url: string): boolean {
         if (/^\/tag(\/|$)/i.test(p)) return true;
         return /^\/(reportajes|estilo|gourmet|relojes|destacadas|nombres-propios)(\/|$)/i.test(p);
       }
+    case 'MED-0304': // E-consulta — /secciones/{hub} es archivo, no nota
+      return /^\/secciones(\/|$)/i.test(path);
+    case 'MED-0307': // Noticias CDMX / NTCD — /etiqueta y hubs de 1 segmento
+      {
+        const p = path.replace(/\/+$/, '') || '/';
+        if (p === '/') return true;
+        if (/^\/(etiqueta|equipo)(\/|$)/i.test(p)) return true;
+        const segs = p.split('/').filter(Boolean);
+        return segs.length === 1 && /^(espectaculos|economia|actualidad|nacional|internacional)$/i.test(segs[0]!);
+      }
+    case 'MED-0332': // La Jornada Maya — homepage y hubs estado/sección (2 segmentos)
+      {
+        const p = path.replace(/\/+$/, '') || '/';
+        if (p === '/') return true;
+        const segs = p.split('/').filter(Boolean);
+        return segs.length < 3;
+      }
+    case 'MED-0572': // Storecheck — marketing/thank-you, no medio noticioso
+      {
+        const p = path.replace(/\/+$/, '') || '/';
+        if (p === '/') return true;
+        if (/gracias|thank-you|obrigado|contacto|biblioteca|planes|acerca-de|careers|about-us/i.test(p)) {
+          return true;
+        }
+        return /^\/(en|pt)(\/|$)/i.test(p);
+      }
     default:
       return false;
   }

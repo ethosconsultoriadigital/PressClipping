@@ -7,7 +7,7 @@ import {
   transientAffectsArticleClass,
 } from '../src/mediaValidation/certProbe.js';
 import { classifyOperational } from '../src/mediaValidation/certClassify.js';
-import { scoreMediaAtAnchor, isGenericListing, type CertNote } from '../src/mediaValidation/certScore.js';
+import { scoreMediaAtAnchor, isGenericListing, isHomepage, type CertNote } from '../src/mediaValidation/certScore.js';
 
 describe('cert eligibility reuses shouldRejectCrawlUrl (no prefix list duplicada)', () => {
   it('valid article INCLUDED; /tag archive EXCLUDED (Jalisco)', () => {
@@ -286,6 +286,18 @@ describe('403 fetch on healthy RSS is BLOCKED_EXTERNAL, not repairable extractor
     expect(r.cls).toBe('C');
     expect(r.primary).toBe('BLOCKED_EXTERNAL');
     expect(r.repairable).toBe(false);
+  });
+});
+
+describe('isHomepage treats WordPress /?p= permalinks as articles', () => {
+  it('bare origin is homepage; /?p=745709 is not', () => {
+    expect(isHomepage('https://www.diarioimagen.net/')).toBe(true);
+    expect(
+      isHomepage(
+        'https://www.diarioimagen.net/?p=745709&utm_source=rss&utm_medium=rss&utm_campaign=fuerzas-de-eu',
+      ),
+    ).toBe(false);
+    expect(isHomepage('https://www.lajornadamaya.mx/')).toBe(true);
   });
 });
 

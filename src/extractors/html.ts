@@ -25,6 +25,9 @@ export const LATIN1_ARTICLE_HOSTS = new Set([
   'ensenada.net',
   'uniradiobaja.com',
   'uniradiosonora.com',
+  'uniradioinforma.com',
+  'xeu.mx',
+  'laprensa.mx',
 ]);
 
 

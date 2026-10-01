@@ -702,10 +702,12 @@ describe('fetchAndExtract', () => {
   });
 });
 
-describe('LATIN1_ARTICLE_HOSTS — Uniradio Batch 5', () => {
-  it('incluye Uniradio Baja y Sonora; no Uniradio Informa', () => {
+describe('LATIN1_ARTICLE_HOSTS — Uniradio + ISO-8859-1 hosts', () => {
+  it('incluye Uniradio family, XEU y La Prensa.Mx con evidencia de latin1', () => {
     expect(LATIN1_ARTICLE_HOSTS.has('uniradiobaja.com')).toBe(true);
     expect(LATIN1_ARTICLE_HOSTS.has('uniradiosonora.com')).toBe(true);
-    expect(LATIN1_ARTICLE_HOSTS.has('uniradioinforma.com')).toBe(false);
+    expect(LATIN1_ARTICLE_HOSTS.has('uniradioinforma.com')).toBe(true);
+    expect(LATIN1_ARTICLE_HOSTS.has('xeu.mx')).toBe(true);
+    expect(LATIN1_ARTICLE_HOSTS.has('laprensa.mx')).toBe(true);
   });
 });

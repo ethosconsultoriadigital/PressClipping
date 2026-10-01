@@ -56,8 +56,15 @@ function median(nums: number[]): number | null {
 
 export function isHomepage(url: string): boolean {
   try {
-    const p = new URL(url).pathname.replace(/\/+$/, '') || '/';
-    return p === '/' || p === '';
+    const u = new URL(url);
+    const p = u.pathname.replace(/\/+$/, '') || '/';
+    if (p !== '/' && p !== '') return false;
+    // Permalinks WP/ASP en la raíz (`/?p=123`, `/?id=456`) son notas, no portada.
+    const pParam = u.searchParams.get('p');
+    const idParam = u.searchParams.get('id');
+    if (pParam && /^\d+$/.test(pParam)) return false;
+    if (idParam && /^\d+$/.test(idParam)) return false;
+    return true;
   } catch {
     return false;
   }

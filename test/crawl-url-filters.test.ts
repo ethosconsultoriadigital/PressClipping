@@ -425,4 +425,48 @@ describe('Wave 2 URL filters — print/archive, medio-scoped', () => {
     );
     expect(shouldRejectCrawlUrl('MED-0008', 'https://gentleman.com.mx/tag/motor/')).toBe(false);
   });
+
+  it('E-consulta /secciones hubs rejected; municipality article kept', () => {
+    expect(shouldRejectCrawlUrl('MED-0304', 'https://www.e-consulta.com/secciones/espectaculos')).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0304',
+        'https://www.e-consulta.com/municipios/hallazgo-de-tunel-en-atlixco-revive-relatos-sobre-pasadizos-coloniales',
+      ),
+    ).toBe(false);
+    expect(shouldRejectCrawlUrl('MED-0008', 'https://www.e-consulta.com/secciones/espectaculos')).toBe(false);
+  });
+
+  it('NTCD etiqueta/section hubs rejected; noticias- article kept', () => {
+    expect(shouldRejectCrawlUrl('MED-0307', 'https://ntcd.mx/etiqueta/sistema')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0307', 'https://ntcd.mx/espectaculos')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0307', 'https://ntcd.mx/equipo/redaccion')).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0307',
+        'https://ntcd.mx/noticias-pemex-eleva-refinacion-14-1-reduce-exportacion-crudo-enero-agosto-2026',
+      ),
+    ).toBe(false);
+    expect(shouldRejectCrawlUrl('MED-0008', 'https://ntcd.mx/etiqueta/sistema')).toBe(false);
+  });
+
+  it('Jornada Maya homepage and 2-segment section hubs rejected', () => {
+    expect(shouldRejectCrawlUrl('MED-0332', 'https://www.lajornadamaya.mx/')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0332', 'https://www.lajornadamaya.mx/quintana-roo/ecologia')).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0332',
+        'https://www.lajornadamaya.mx/quintana-roo/politica/alguna-nota-editorial',
+      ),
+    ).toBe(false);
+    expect(shouldRejectCrawlUrl('MED-0008', 'https://www.lajornadamaya.mx/quintana-roo/ecologia')).toBe(false);
+  });
+
+  it('Storecheck marketing/thank-you rejected; does not affect other hosts', () => {
+    expect(shouldRejectCrawlUrl('MED-0572', 'https://www.storecheck.com/en/thank-you-for-getting-in-touch/')).toBe(
+      true,
+    );
+    expect(shouldRejectCrawlUrl('MED-0572', 'https://www.storecheck.com/planes/')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0008', 'https://www.storecheck.com/planes/')).toBe(false);
+  });
 });
