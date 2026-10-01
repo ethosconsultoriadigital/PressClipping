@@ -10,6 +10,7 @@ import {
   windowSinceIso,
   newsInOverlapWindow,
   matchingFields,
+  displayText,
   type MasterNewsRow,
 } from '../scripts/mentions-master-fast-lane.js';
 import { toKeywordRule } from '../src/matching/detectMentionsCore.js';
@@ -278,5 +279,26 @@ describe('MASTER snippet operacional', () => {
     })], grouped.keywordsByClient, grouped.clientNames);
     expect(String(rows[0]?.['nota completa']).length).toBeLessThanOrEqual(MASTER_SNIPPET_CHARS);
     expect(String(rows[0]?.['nota completa'])).toContain('SNIPPET OPERACIONAL');
+  });
+
+  it('nota completa never falls back to raw texto_extraido', () => {
+    const grouped = groupKeywordsByActiveClient(
+      [{ cliente_id: 'CLI-A', nombre_cliente: 'Activo', activo: true }],
+      [kw({ keyword_id: 'KEY-A', keyword: 'AlphaBrand' })],
+    );
+    const resumen = 'Resumen editorial limpio de la nota.';
+    const raw = 'NOTAS RELACIONADAS\nMery Gómez Pozos presenta iniciativa...';
+    const n = news({
+      titulo: 'AlphaBrand reporta',
+      resumen,
+      texto_cuerpo_nota: null,
+      texto_nota_limpia: null,
+      texto_extraido: raw,
+    });
+    expect(displayText(n)).toBe(resumen);
+    expect(displayText(n)).not.toContain('NOTAS RELACIONADAS');
+    const rows = buildRows([n], grouped.keywordsByClient, grouped.clientNames);
+    expect(String(rows[0]?.['nota completa'])).toBe(resumen);
+    expect(String(rows[0]?.['nota completa'])).not.toContain('Mery Gómez Pozos');
   });
 });

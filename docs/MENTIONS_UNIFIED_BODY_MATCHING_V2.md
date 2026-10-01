@@ -57,9 +57,11 @@ EXPECTED V2: MATCH `CLI-MERY-TEST`, `campo_match=TEXTO_CUERPO_NOTA`, `dedupe_key
 ## Rollout
 
 1. Shadow 48h / 7d (completado, e9f7f905)
-2. **Canary selectivo por keyword** (esta fase) — `MENTIONS_MASTER_BODY_V2` + allowlist
-3. Producción MASTER canary Mery frase_exacta **solo con autorización**
-4. Detector (`DETECT_MENTIONS_BODY_V2`) permanece apagado hasta flag propio
+2. **Canary selectivo Mery frase_exacta EN FAST LANE** — KEY-0040..0047, KEY-0076, KEY-0077
+3. Detector (`DETECT_MENTIONS_BODY_V2`) permanece apagado
+4. Marcas / CLI-0003 / KEY-0048..0051: sin BODY
+
+`nota completa` en MASTER: `texto_cuerpo_nota` → `texto_nota_limpia` → `resumen`. Nunca `texto_extraido` RAW.
 
 ## Flags (separados)
 
@@ -72,7 +74,7 @@ EXPECTED V2: MATCH `CLI-MERY-TEST`, `campo_match=TEXTO_CUERPO_NOTA`, `dedupe_key
 
 Semántica MASTER: todas las keywords siguen evaluando título/subtítulo/resumen/sección. BODY_TRUSTED (`texto_cuerpo_nota` + calidad alta) **solo** para IDs allowlisted. 1 noticia + 1 cliente = 1 fila.
 
-Canary 1 (preparado, no escrito): KEY-0040..0047, KEY-0076, KEY-0077. Excluye KEY-0048..0051.
+Canary 1 **activo en Fast Lane GHA**: KEY-0040..0047, KEY-0076, KEY-0077. Excluye KEY-0048..0051.
 
 Canary 2 marcas (shadow only): KEY-0060, 0061, 0070–0073.
 
@@ -80,15 +82,13 @@ No BODY para KEY-0017/0019/0021 ni tequila/mezcal/COFEPRIS/aranceles.
 
 ## Guardrails
 
-## Guardrails
-
 - No WhatsApp / email / Twilio / alertas
 - No Apps Script / triggers / vistas derivadas
-- No append BODY_ONLY a MASTER hasta autorización
-- No backfill
-- Fast Lane default permanece título+resumen+sección salvo canary allowlist autorizado
+- No append BODY_ONLY de keywords no allowlisted
+- No backfill histórico forzado
+- Fast Lane canary Mery frase_exacta vía env GHA; resto CURRENT
 - No activar `BODY_MATCHING_V2` global
-- GHA Fast Lane no define todavía `MENTIONS_MASTER_BODY_V2`
+- GHA Fast Lane define `MENTIONS_MASTER_BODY_V2` + allowlist Mery. No define `DETECT_MENTIONS_BODY_V2` ni `BODY_MATCHING_V2`.
 - Agent A / catálogo de medios: no tocar
 
 ## Métricas

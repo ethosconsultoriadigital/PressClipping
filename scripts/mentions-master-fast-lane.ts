@@ -175,10 +175,12 @@ export function newsInOverlapWindow(fechaCaptura: string | null, sinceIso: strin
   return Boolean(fechaCaptura && fechaCaptura >= sinceIso);
 }
 
-function displayText(n: MasterNewsRow): string {
-  const body = (n.texto_cuerpo_nota ?? n.texto_nota_limpia ?? n.texto_extraido ?? '').trim();
-  if (body.length > 0) return body;
-  return n.resumen ?? '';
+export function displayText(n: MasterNewsRow): string {
+  const cuerpo = (n.texto_cuerpo_nota ?? '').trim();
+  if (cuerpo) return cuerpo;
+  const limpia = (n.texto_nota_limpia ?? '').trim();
+  if (limpia) return limpia;
+  return (n.resumen ?? '').trim();
 }
 
 /**
@@ -385,13 +387,18 @@ export function buildRows(
   return rows;
 }
 
-function bodyRunObservability(metrics?: BodyMatchingCounters) {
+function bodyRunObservability(metrics?: BodyMatchingCounters, rows: OutRow[] = []) {
   const policy = describeMasterBodyPolicy();
+  const mery = rows.filter((r) => String(r['cliente_id'] ?? '').toUpperCase() === 'CLI-MERY-TEST');
+  const meryBody = mery.filter((r) => isBodyCampo(String(r['campo_match'] ?? '')));
   return {
     ...policy,
     body_only_matches: metrics?.body_only_matches ?? 0,
     body_matches: metrics?.body_matches ?? 0,
     signal_matches: metrics?.signal_matches ?? 0,
+    mery_rows: mery.length,
+    mery_body_matches: meryBody.length,
+    mery_signal_matches: mery.length - meryBody.length,
   };
 }
 
@@ -524,7 +531,7 @@ async function main(): Promise<void> {
       no_email: true,
       no_twilio: true,
       no_menciones_db_write: true,
-      ...bodyRunObservability(matchMetrics),
+      ...bodyRunObservability(matchMetrics, rows),
     }, '=== MENTIONS MASTER FAST LANE done (match-only) ===');
     return;
   }
@@ -616,6 +623,7 @@ async function main(): Promise<void> {
     appended_master: globalWrite.appended,
     skipped_dedupe: globalWrite.skipped,
     would_append: globalWrite.would_append,
+    ...bodyRunObservability(globalMetrics, globalRows),
   }, 'Global News Lake sweep (sin crawl)');
 
   logger.info({
@@ -632,7 +640,7 @@ async function main(): Promise<void> {
     no_email: true,
     no_twilio: true,
     no_menciones_db_write: true,
-    ...bodyRunObservability(globalMetrics),
+    ...bodyRunObservability(globalMetrics, globalRows),
   }, '=== MENTIONS MASTER FAST LANE done ===');
 }
 

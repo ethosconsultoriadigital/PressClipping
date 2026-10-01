@@ -266,9 +266,12 @@ describe('Selective BODY canary regressions', () => {
 });
 
 describe('Fast Lane workflow stays CURRENT', () => {
-  it('does not set MENTIONS_MASTER_BODY_V2', () => {
+  it('does not set DETECT_MENTIONS_BODY_V2 or BODY_MATCHING_V2', () => {
     const wf = readFileSync(join(process.cwd(), '.github/workflows/mentions-master-fast-lane.yml'), 'utf8');
-    expect(wf).not.toContain('MENTIONS_MASTER_BODY_V2');
+    expect(wf).toContain("MENTIONS_MASTER_BODY_V2: 'true'");
+    expect(wf).toContain('KEY-0040,KEY-0041,KEY-0042,KEY-0043,KEY-0044,KEY-0045,KEY-0046,KEY-0047,KEY-0076,KEY-0077');
+    expect(wf).not.toContain('KEY-0048');
+    expect(wf).not.toContain('DETECT_MENTIONS_BODY_V2');
     expect(wf).not.toContain('BODY_MATCHING_V2');
   });
 });
