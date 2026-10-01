@@ -30,3 +30,9 @@
 - Gentleman México (MED-0552): `post-sitemap.xml` + filtro `/tag` y hubs de sección. sitemap_index mezclaba archivos.
 - Residual B: Adlatina (LATENCY+BODY_PARTIAL), Alianza Flotillera (CLONED_BODY Zeen + LATENCY). No force A.
 - Caps remaining after B7: 6 batches, ~151 altas.
+
+## STOP
+
+- Leftover STRICT PASS vs LIVE: 1 (Zonaroja / zonaroja.com.mx), ya descartado en Batch 7 por HTTP 500 en feed y sitemaps.
+- Candidatos STRICT < 15 → STOP overnight Factory. No se abre Batch 8.
+- No se bajó calidad ni se usó pool aleatorio.
