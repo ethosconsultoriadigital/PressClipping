@@ -121,6 +121,7 @@ describe('mention presentation routing', () => {
       routes,
     );
     expect(hidden.routed).toHaveLength(0);
+    expect(hidden.unrouted[0]?.reason).toBe('EXCLUDED_INTERNAL');
     const shown = routeMasterRows(
       [row({ keyword_ids_matched: 'KEY-PRUEBA-LOCAL-001', dedupe_key: 'i//1' })],
       routes,
@@ -175,7 +176,7 @@ describe('mention presentation routing', () => {
       shouldFullRebuild({
         routingHashNow: hb,
         routingHashPrev: ha,
-        masterRowCount: 10,
+        masterLastRow: 10,
         lastProcessedMasterRow: 10,
       }),
     ).toBe(true);
@@ -186,7 +187,7 @@ describe('mention presentation routing', () => {
       shouldFullRebuild({
         routingHashNow: 'abc',
         routingHashPrev: 'abc',
-        masterRowCount: 5,
+        masterLastRow: 5,
         lastProcessedMasterRow: 20,
       }),
     ).toBe(true);

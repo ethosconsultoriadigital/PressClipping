@@ -4,13 +4,21 @@
  * MASTER es READ-ONLY. 08_Ruteo_Menciones es READ-ONLY.
  * Detection ≠ presentation: no reanaliza título/cuerpo.
  *
+ * LAST_PROCESSED_MASTER_ROW = fila absoluta de Sheet (header=1).
+ * Con 1 header + 286 noticias, lastRow=287 y lastProcessed=287.
+ * Comparar lastRow < lastProcessed, NUNCA (lastRow-1) < lastProcessed.
+ *
+ * Full rebuild usa un snapshot de masterLastRow. Si MASTER crece durante el
+ * rebuild, se termina el snapshot y el incremental posterior cubre filas nuevas.
+ *
  * Bound esperado: ETHOS_MENCIONES_MASTER
- * Puerto de lógica: src/routing/mentionPresentation.ts
+ * Puerto de lógica: src/routing/mentionPresentation.ts + mentionRouterRuntime.ts
  */
 
 var DEFAULT_CONTROL_PLANE_ID = '1aPGIO5zt5b2C1sdC2lOPsmjhcpudn_NvmlCJ8OW39es';
 var DEFAULT_ROUTING_TAB = '08_Ruteo_Menciones';
 var DEFAULT_MASTER_TAB = 'MENCIONES_MASTER';
+var PENDING_TAB = '09_Ruteo_Pendiente';
 var VIEW_NOTE = 'VISTA DERIVADA — NO EDITAR COMO FUENTE DE VERDAD.';
 var STALE_NOTE = 'VISTA SIN RUTA ACTIVA';
 var ROW_HEIGHT = 30;
@@ -50,7 +58,7 @@ function ethosRouterSetup() {
   if (!p.getProperty('ROUTING_TAB')) p.setProperty('ROUTING_TAB', DEFAULT_ROUTING_TAB);
   if (!p.getProperty('MASTER_TAB')) p.setProperty('MASTER_TAB', DEFAULT_MASTER_TAB);
   if (!p.getProperty('INCLUDE_INTERNAL')) p.setProperty('INCLUDE_INTERNAL', 'false');
-  SpreadsheetApp.getUi().alert('Ethos router: PropertiesService listo. Ejecuta ethosRouterValidate() y luego ethosRouterFullRebuild().');
+  SpreadsheetApp.getUi().alert('Ethos router: PropertiesService listo. No instala trigger. Ejecuta Validate → DryRun → FullRebuild → InstallTrigger.');
 }
 
 function ethosRouterInstallTrigger() {
@@ -87,18 +95,38 @@ function ethosRouterStatus() {
   var p = props_();
   var v = loadAndValidateRouting_();
   var master = masterSheet_();
+  var lastRow = master.getLastRow();
+  var decision = decideRouterRun_({
+    requestedMode: 'incremental',
+    routingHashNow: v.hash,
+    routingHashApplied: p.getProperty('ROUTING_HASH'),
+    masterLastRow: lastRow,
+    lastProcessedMasterRow: Number(p.getProperty('LAST_PROCESSED_MASTER_ROW') || '1'),
+    fullRebuildInProgress: p.getProperty('FULL_REBUILD_IN_PROGRESS') === 'true',
+    fullRebuildTargetHash: p.getProperty('FULL_REBUILD_TARGET_HASH'),
+    fullRebuildMasterLastRow: Number(p.getProperty('FULL_REBUILD_MASTER_LAST_ROW') || '0'),
+  });
   var status = {
     CONTROL_PLANE_ID: cfg_().controlPlaneId,
     INCLUDE_INTERNAL: cfg_().includeInternal,
-    ROUTING_HASH: p.getProperty('ROUTING_HASH'),
-    ROUTING_HASH_NOW: v.hash,
+    FULL_REBUILD_IN_PROGRESS: p.getProperty('FULL_REBUILD_IN_PROGRESS') === 'true',
+    FULL_REBUILD_NEXT_VIEW: p.getProperty('FULL_REBUILD_NEXT_VIEW_INDEX'),
+    MASTER_LAST_ROW: lastRow,
     LAST_PROCESSED_MASTER_ROW: p.getProperty('LAST_PROCESSED_MASTER_ROW'),
-    MASTER_ROWS: Math.max(0, master.getLastRow() - 1),
-    ROUTES: v.routes.length,
-    INVALID: !v.ok,
+    ROUTING_HASH_CURRENT: v.hash,
+    ROUTING_HASH_APPLIED: p.getProperty('ROUTING_HASH'),
+    ACTIVE_VIEWS: v.ok ? activeViewNames_(v.routes, cfg_().includeInternal) : [],
     ACTIVE_KEYWORDS_WITHOUT_ROUTE: v.report.active_keywords_without_route || [],
+    ROUTE_FOR_INACTIVE_KEYWORD: v.report.route_for_inactive_keyword || [],
+    LAST_RUN_MODE: p.getProperty('LAST_RUN_MODE'),
+    LAST_RUN_VERDICT: p.getProperty('LAST_RUN_VERDICT'),
+    NEXT_RUN_MODE: decision.mode,
+    FULL_REBUILD_REQUIRED: decision.needFull,
+    FULL_REBUILD_REASON: decision.reason,
+    INVALID: !v.ok,
   };
   Logger.log(JSON.stringify(status, null, 2));
+  if (v.ok) refreshPendingTab_(v);
   return status;
 }
 
@@ -112,18 +140,43 @@ function ethosRouterDryRun() {
     var v = loadAndValidateRouting_();
     if (!v.ok) return { ok: false, validation: v.report };
     var pack = readMaster_();
-    var plan = routeMasterRows_(pack.rows, pack.headers, v.routes, cfg_().includeInternal);
+    var plan = routeMasterRows_(pack.rows, v.routes, cfg_().includeInternal);
+    var p = props_();
+    var decision = decideRouterRun_({
+      requestedMode: 'incremental',
+      routingHashNow: v.hash,
+      routingHashApplied: p.getProperty('ROUTING_HASH'),
+      masterLastRow: masterSheet_().getLastRow(),
+      lastProcessedMasterRow: Number(p.getProperty('LAST_PROCESSED_MASTER_ROW') || '1'),
+      fullRebuildInProgress: p.getProperty('FULL_REBUILD_IN_PROGRESS') === 'true',
+      fullRebuildTargetHash: p.getProperty('FULL_REBUILD_TARGET_HASH'),
+      fullRebuildMasterLastRow: Number(p.getProperty('FULL_REBUILD_MASTER_LAST_ROW') || '0'),
+    });
+    var pending = buildPending_(plan, v);
+    var activeRoutes = v.routes.filter(function (r) {
+      return r.activo && (cfg_().includeInternal || r.vista_tipo !== 'INTERNO');
+    });
+    var unique = {};
+    plan.routed.forEach(function (r) { unique[r.dedupe_key] = true; });
     var out = {
       ok: true,
       master_rows: pack.rows.length,
-      routed_rows: plan.routed.length,
-      unrouted_rows: plan.unrouted.length,
-      destinations: Object.keys(plan.rowsPerView),
-      rows_per_view: plan.rowsPerView,
-      multi_view_rows: plan.multiView,
+      active_route_count: activeRoutes.length,
+      active_view_count: activeViewNames_(v.routes, cfg_().includeInternal).length,
+      routed_unique_master_rows: Object.keys(unique).length,
+      routed_output_rows: plan.routed.length,
+      excluded_internal_rows: plan.unrouted.filter(function (u) { return u.reason === 'EXCLUDED_INTERNAL'; }).length,
+      unknown_route_rows: plan.unrouted.filter(function (u) { return u.reason === 'UNKNOWN_KEYWORD_ROUTE'; }).length,
+      active_keywords_without_route: v.report.active_keywords_without_route || [],
+      multi_view_master_rows: plan.multiView,
       duplicate_suppressed: plan.duplicateSuppressed,
+      full_rebuild_required: decision.needFull,
+      full_rebuild_reason: decision.reason,
+      rows_per_view: plan.rowsPerView,
+      pending: pending,
     };
     Logger.log(JSON.stringify(out, null, 2));
+    refreshPendingTab_(v, pending);
     return out;
   } finally {
     lock.releaseLock();
@@ -138,6 +191,26 @@ function ethosRouterFullRebuild() {
   runRouter_('full');
 }
 
+function decideRouterRun_(input) {
+  var lastProcessed = input.lastProcessedMasterRow;
+  if (input.fullRebuildInProgress) {
+    if (input.fullRebuildTargetHash && input.fullRebuildTargetHash !== input.routingHashNow) {
+      return { mode: 'full', needFull: true, reason: 'HASH_CHANGED_DURING_REBUILD' };
+    }
+    var snap = input.fullRebuildMasterLastRow || 0;
+    if (snap > 0 && input.masterLastRow < snap) {
+      return { mode: 'full', needFull: true, reason: 'MASTER_SHRANK_DURING_REBUILD' };
+    }
+    return { mode: 'resume_full', needFull: true, reason: 'RESUME_FULL_REBUILD' };
+  }
+  if (input.requestedMode === 'full') return { mode: 'full', needFull: true, reason: 'REQUESTED_FULL' };
+  if (!input.routingHashApplied) return { mode: 'full', needFull: true, reason: 'FIRST_RUN' };
+  if (input.routingHashApplied !== input.routingHashNow) return { mode: 'full', needFull: true, reason: 'ROUTING_HASH_CHANGED' };
+  if (input.masterLastRow < lastProcessed) return { mode: 'full', needFull: true, reason: 'MASTER_SHRANK' };
+  if (lastProcessed <= 1) return { mode: 'full', needFull: true, reason: 'FIRST_RUN' };
+  return { mode: 'incremental', needFull: false, reason: null };
+}
+
 function runRouter_(mode) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(5000)) {
@@ -150,33 +223,75 @@ function runRouter_(mode) {
     if (!v.ok) {
       Logger.log('CONTROL_PLANE_ROUTING_INVALID — vistas no modificadas');
       Logger.log(JSON.stringify(v.report));
+      props_().setProperty('LAST_RUN_VERDICT', 'CONTROL_PLANE_ROUTING_INVALID');
       return;
     }
     var p = props_();
-    var prevHash = p.getProperty('ROUTING_HASH');
     var master = masterSheet_();
     var lastRow = master.getLastRow();
-    var masterCount = Math.max(0, lastRow - 1);
-    var lastProcessed = Number(p.getProperty('LAST_PROCESSED_MASTER_ROW') || '1');
-    var needFull = mode === 'full' || !prevHash || prevHash !== v.hash || masterCount < lastProcessed;
+    var decision = decideRouterRun_({
+      requestedMode: mode,
+      routingHashNow: v.hash,
+      routingHashApplied: p.getProperty('ROUTING_HASH'),
+      masterLastRow: lastRow,
+      lastProcessedMasterRow: Number(p.getProperty('LAST_PROCESSED_MASTER_ROW') || '1'),
+      fullRebuildInProgress: p.getProperty('FULL_REBUILD_IN_PROGRESS') === 'true',
+      fullRebuildTargetHash: p.getProperty('FULL_REBUILD_TARGET_HASH'),
+      fullRebuildMasterLastRow: Number(p.getProperty('FULL_REBUILD_MASTER_LAST_ROW') || '0'),
+    });
     var pack = readMaster_();
-    var plan = routeMasterRows_(pack.rows, pack.headers, v.routes, cfg_().includeInternal);
     var viewHeaders = orderViewHeaders_(pack.headers);
-    var byView = groupByView_(plan.routed, viewHeaders);
-    var activeViews = {};
-    Object.keys(byView).forEach(function (name) { activeViews[name] = true; });
-    if (needFull) {
-      writeFullViews_(byView, viewHeaders, activeViews, started);
+    var activeNames = activeViewNames_(v.routes, cfg_().includeInternal);
+    if (decision.needFull) {
+      runFullRebuild_(v, pack, viewHeaders, activeNames, decision, lastRow, started);
     } else {
-      writeIncremental_(pack, plan, viewHeaders, lastProcessed, started);
+      writeIncremental_(pack, v.routes, viewHeaders, Number(p.getProperty('LAST_PROCESSED_MASTER_ROW') || '1'), started);
+      markStaleViews_(activeNames);
+      p.setProperty('LAST_PROCESSED_MASTER_ROW', String(lastRow));
+      p.setProperty('LAST_RUN_MODE', 'incremental');
+      p.setProperty('LAST_RUN_VERDICT', 'INCREMENTAL_DONE');
+      Logger.log('INCREMENTAL_DONE');
     }
-    markStaleViews_(activeViews);
-    p.setProperty('ROUTING_HASH', v.hash);
-    p.setProperty('LAST_PROCESSED_MASTER_ROW', String(master.getLastRow()));
-    Logger.log(needFull ? 'FULL_REBUILD_DONE' : 'INCREMENTAL_DONE');
   } finally {
     lock.releaseLock();
   }
+}
+
+function runFullRebuild_(v, pack, viewHeaders, activeNames, decision, currentLastRow, started) {
+  var p = props_();
+  var startIndex = 0;
+  var snapshotLastRow = currentLastRow;
+  if (decision.mode === 'resume_full' && decision.reason === 'RESUME_FULL_REBUILD') {
+    startIndex = Number(p.getProperty('FULL_REBUILD_NEXT_VIEW_INDEX') || '0');
+    snapshotLastRow = Number(p.getProperty('FULL_REBUILD_MASTER_LAST_ROW') || currentLastRow);
+  } else {
+    p.setProperty('FULL_REBUILD_IN_PROGRESS', 'true');
+    p.setProperty('FULL_REBUILD_TARGET_HASH', v.hash);
+    p.setProperty('FULL_REBUILD_NEXT_VIEW_INDEX', '0');
+    p.setProperty('FULL_REBUILD_MASTER_LAST_ROW', String(snapshotLastRow));
+    p.setProperty('LAST_RUN_MODE', 'full');
+    p.setProperty('LAST_RUN_VERDICT', 'FULL_REBUILD_IN_PROGRESS');
+  }
+  var snapshotRows = pack.rows.filter(function (r) { return r.sheetRow <= snapshotLastRow; });
+  var plan = routeMasterRows_(snapshotRows, v.routes, cfg_().includeInternal);
+  var result = writeFullViews_(activeNames, plan, viewHeaders, startIndex, started);
+  if (!result.completed) {
+    p.setProperty('FULL_REBUILD_IN_PROGRESS', 'true');
+    p.setProperty('FULL_REBUILD_NEXT_VIEW_INDEX', String(result.next_view_index));
+    p.setProperty('FULL_REBUILD_TARGET_HASH', v.hash);
+    p.setProperty('FULL_REBUILD_MASTER_LAST_ROW', String(snapshotLastRow));
+    p.setProperty('LAST_RUN_VERDICT', 'FULL_REBUILD_CHECKPOINT');
+    Logger.log('FULL_REBUILD_CHECKPOINT next=' + result.next_view_index + ' remaining=' + result.remaining_views.join(','));
+    return;
+  }
+  markStaleViews_(activeNames);
+  p.setProperty('FULL_REBUILD_IN_PROGRESS', 'false');
+  p.setProperty('FULL_REBUILD_NEXT_VIEW_INDEX', '0');
+  p.setProperty('ROUTING_HASH', v.hash);
+  p.setProperty('LAST_PROCESSED_MASTER_ROW', String(snapshotLastRow));
+  p.setProperty('LAST_RUN_MODE', 'full');
+  p.setProperty('LAST_RUN_VERDICT', 'FULL_REBUILD_DONE');
+  Logger.log('FULL_REBUILD_DONE snapshotLastRow=' + snapshotLastRow);
 }
 
 function masterSpreadsheet_() {
@@ -190,23 +305,33 @@ function masterSheet_() {
   return sh;
 }
 
+function assertDerivedSheet_(sh) {
+  var n = sh.getName();
+  if (n === cfg_().masterTab || n === 'MENCIONES_MASTER') {
+    throw new Error('MASTER_READ_ONLY');
+  }
+  if (n === '08_Ruteo_Menciones' || n === '02_Keywords' || n === '03_Clientes') {
+    throw new Error('CONTROL_PLANE_SOURCE_READ_ONLY:' + n);
+  }
+}
+
 function loadAndValidateRouting_() {
   var c = cfg_();
   var doc = SpreadsheetApp.openById(c.controlPlaneId);
   var sh = doc.getSheetByName(c.routingTab);
   if (!sh) {
-    return { ok: false, routes: [], hash: '', report: { error: 'MISSING_ROUTING_TAB' } };
+    return { ok: false, routes: [], hash: '', keywords: [], report: { error: 'MISSING_ROUTING_TAB' } };
   }
   var values = sh.getDataRange().getDisplayValues();
   if (values.length < 2) {
-    return { ok: false, routes: [], hash: '', report: { error: 'EMPTY_ROUTING' } };
+    return { ok: false, routes: [], hash: '', keywords: [], report: { error: 'EMPTY_ROUTING' } };
   }
   var headers = values[0];
   var idx = headerIndex_(headers);
   var required = ['route_id', 'keyword_id', 'detection_scope_id', 'vista_tipo', 'vista_nombre', 'activo', 'prioridad', 'notas'];
   for (var r = 0; r < required.length; r++) {
     if (idx[required[r]] == null) {
-      return { ok: false, routes: [], hash: '', report: { error: 'MISSING_HEADER', header: required[r] } };
+      return { ok: false, routes: [], hash: '', keywords: [], report: { error: 'MISSING_HEADER', header: required[r] } };
     }
   }
   var routes = [];
@@ -243,29 +368,77 @@ function loadAndValidateRouting_() {
   Object.keys(keyCounts).forEach(function (k) {
     if (keyCounts[k] > 1) issues.push('DUPLICATE_ROUTE_KEY:' + k);
   });
+
+  var catalog = readCatalog_(doc);
+  var inactiveInfo = [];
+  routes.forEach(function (rec) {
+    var kw = catalog.keywords[rec.keyword_id.toUpperCase()];
+    if (!kw) {
+      issues.push('UNKNOWN_KEYWORD_ID:' + rec.route_id + ':' + rec.keyword_id);
+      return;
+    }
+    if (!catalog.clientes[rec.detection_scope_id]) {
+      issues.push('UNKNOWN_DETECTION_SCOPE_ID:' + rec.route_id + ':' + rec.detection_scope_id);
+    }
+    if (kw.cliente_id && rec.detection_scope_id && kw.cliente_id !== rec.detection_scope_id) {
+      issues.push('KEYWORD_SCOPE_MISMATCH:' + rec.route_id);
+    }
+    if (rec.activo && !kw.activa) inactiveInfo.push(rec.route_id);
+  });
+
   var hash = sha256Hex_(JSON.stringify(routes.map(function (x) {
     return [x.route_id, x.keyword_id, x.detection_scope_id, x.vista_tipo, x.vista_nombre, x.activo, x.prioridad, x.notas];
   }).sort(function (a, b) { return String(a[0]).localeCompare(String(b[0])); })));
 
-  var kwWithout = activeKeywordsWithoutRoute_(doc, routes, c.includeInternal);
+  var kwWithout = activeKeywordsWithoutRoute_(catalog, routes, c.includeInternal);
   return {
     ok: issues.length === 0,
     routes: routes,
     hash: hash,
+    keywords: catalog.list,
     report: {
       issues: issues,
       routes: routes.length,
       active_keywords_without_route: kwWithout,
+      route_for_inactive_keyword: inactiveInfo,
     },
   };
 }
 
-function activeKeywordsWithoutRoute_(controlDoc, routes, includeInternal) {
-  var sh = controlDoc.getSheetByName('02_Keywords');
-  if (!sh) return [];
-  var values = sh.getDataRange().getDisplayValues();
-  if (values.length < 2) return [];
-  var idx = headerIndex_(values[0]);
+function readCatalog_(controlDoc) {
+  var keywords = {};
+  var list = [];
+  var clientes = {};
+  var kwSh = controlDoc.getSheetByName('02_Keywords');
+  if (kwSh) {
+    var kv = kwSh.getDataRange().getDisplayValues();
+    var ki = headerIndex_(kv[0] || []);
+    for (var i = 1; i < kv.length; i++) {
+      var id = String(kv[i][ki.keyword_id] || '').trim();
+      if (!id) continue;
+      var rec = {
+        keyword_id: id,
+        cliente_id: String(kv[i][ki.cliente_id] || '').trim(),
+        activa: parseBoolCell_(kv[i][ki.activa]),
+        keyword: String(kv[i][ki.keyword] || '').trim(),
+      };
+      keywords[id.toUpperCase()] = rec;
+      list.push(rec);
+    }
+  }
+  var clSh = controlDoc.getSheetByName('03_Clientes');
+  if (clSh) {
+    var cv = clSh.getDataRange().getDisplayValues();
+    var ci = headerIndex_(cv[0] || []);
+    for (var j = 1; j < cv.length; j++) {
+      var cid = String(cv[j][ci.cliente_id] || '').trim();
+      if (cid) clientes[cid] = true;
+    }
+  }
+  return { keywords: keywords, list: list, clientes: clientes };
+}
+
+function activeKeywordsWithoutRoute_(catalog, routes, includeInternal) {
   var covered = {};
   routes.forEach(function (r) {
     if (!r.activo) return;
@@ -273,15 +446,11 @@ function activeKeywordsWithoutRoute_(controlDoc, routes, includeInternal) {
     covered[r.keyword_id.toUpperCase()] = true;
   });
   var missing = [];
-  for (var i = 1; i < values.length; i++) {
-    var id = String(values[i][idx.keyword_id] || '').trim();
-    if (!id) continue;
-    var activa = parseBoolCell_(values[i][idx.activa]);
-    if (!activa) continue;
-    var cliente = String(values[i][idx.cliente_id] || '').trim();
-    if (cliente === 'CLI-PRUEBA') continue;
-    if (!covered[id.toUpperCase()]) missing.push(id);
-  }
+  catalog.list.forEach(function (k) {
+    if (!k.activa) return;
+    if (k.cliente_id === 'CLI-PRUEBA') return;
+    if (!covered[k.keyword_id.toUpperCase()]) missing.push(k.keyword_id);
+  });
   return missing;
 }
 
@@ -329,11 +498,15 @@ function masterDedupeKey_(row) {
   return '';
 }
 
-function routeMasterRows_(rows, headers, routes, includeInternal) {
+function routeMasterRows_(rows, routes, includeInternal) {
   var byKw = {};
+  var skippedInternal = {};
   routes.forEach(function (r) {
     if (!r.activo) return;
-    if (!includeInternal && r.vista_tipo === 'INTERNO') return;
+    if (!includeInternal && r.vista_tipo === 'INTERNO') {
+      skippedInternal[r.keyword_id.toUpperCase()] = true;
+      return;
+    }
     var k = r.keyword_id.toUpperCase();
     if (!byKw[k]) byKw[k] = [];
     byKw[k].push(r);
@@ -358,7 +531,12 @@ function routeMasterRows_(rows, headers, routes, includeInternal) {
     });
     var masterKey = masterDedupeKey_(source.values) || ('row:' + source.sheetRow);
     if (!dests.length) {
-      unrouted.push({ source: source, keyword_ids: ids, reason: ids.length ? 'UNKNOWN_KEYWORD_ROUTE' : 'NO_KEYWORD_ID' });
+      var excluded = ids.some(function (id) { return skippedInternal[id.toUpperCase()]; });
+      unrouted.push({
+        source: source,
+        keyword_ids: ids,
+        reason: excluded ? 'EXCLUDED_INTERNAL' : (ids.length ? 'UNKNOWN_KEYWORD_ROUTE' : 'NO_KEYWORD_ID'),
+      });
       return;
     }
     if (!viewsByMaster[masterKey]) viewsByMaster[masterKey] = {};
@@ -391,6 +569,16 @@ function routeMasterRows_(rows, headers, routes, includeInternal) {
   };
 }
 
+function activeViewNames_(routes, includeInternal) {
+  var names = {};
+  routes.forEach(function (r) {
+    if (!r.activo) return;
+    if (!includeInternal && r.vista_tipo === 'INTERNO') return;
+    names[r.vista_tipo + ' · ' + r.vista_nombre] = true;
+  });
+  return Object.keys(names).sort();
+}
+
 function orderViewHeaders_(masterHeaders) {
   var byNorm = {};
   masterHeaders.forEach(function (h) { byNorm[String(h).trim().toLowerCase()] = h; });
@@ -409,75 +597,107 @@ function orderViewHeaders_(masterHeaders) {
   return out;
 }
 
-function groupByView_(routed, viewHeaders) {
-  var by = {};
-  routed.forEach(function (r) {
-    if (!by[r.view_name]) by[r.view_name] = [];
-    var line = [];
-    for (var i = 0; i < viewHeaders.length; i++) {
-      line.push(r.source.values[viewHeaders[i]] || '');
+function writeFullViews_(activeNames, plan, viewHeaders, startIndex, started) {
+  var processed = [];
+  var next = startIndex;
+  for (var i = startIndex; i < activeNames.length; i++) {
+    if (Date.now() - started > MAX_MS) {
+      return {
+        completed: false,
+        processed_views: processed,
+        remaining_views: activeNames.slice(i),
+        next_view_index: i,
+      };
     }
-    by[r.view_name].push({ line: line, values: r.source.values, dedupe_key: r.dedupe_key });
-  });
-  Object.keys(by).forEach(function (name) {
-    by[name].sort(function (a, b) {
+    var name = activeNames[i];
+    var lines = [];
+    plan.routed.forEach(function (r) {
+      if (r.view_name !== name) return;
+      var line = [];
+      for (var c = 0; c < viewHeaders.length; c++) line.push(r.source.values[viewHeaders[c]] || '');
+      lines.push({ line: line, values: r.source.values, dedupe_key: r.dedupe_key });
+    });
+    var uniq = [];
+    var seen = {};
+    lines.forEach(function (item) {
+      if (seen[item.dedupe_key]) return;
+      seen[item.dedupe_key] = true;
+      uniq.push(item);
+    });
+    uniq.sort(function (a, b) {
       var ka = String(a.values.fecha_publicacion || '') + '\t' + String(a.values.fecha_captura || '') + '\t' + String(a.values.matched_at || '');
       var kb = String(b.values.fecha_publicacion || '') + '\t' + String(b.values.fecha_captura || '') + '\t' + String(b.values.matched_at || '');
       return kb.localeCompare(ka);
     });
-  });
-  return by;
-}
-
-function writeFullViews_(byView, viewHeaders, activeViews, started) {
-  var names = Object.keys(byView);
-  for (var i = 0; i < names.length; i++) {
-    if (Date.now() - started > MAX_MS) {
-      Logger.log('FULL_REBUILD_CHECKPOINT ' + names[i]);
-      return;
-    }
-    writeViewSheet_(names[i], viewHeaders, byView[names[i]].map(function (x) { return x.line; }), true);
+    writeViewSheet_(name, viewHeaders, uniq.map(function (x) { return x.line; }), true);
+    processed.push(name);
+    next = i + 1;
   }
+  return {
+    completed: true,
+    processed_views: processed,
+    remaining_views: [],
+    next_view_index: next,
+  };
 }
 
-function writeIncremental_(pack, plan, viewHeaders, lastProcessed, started) {
+function writeIncremental_(pack, routes, viewHeaders, lastProcessed, started) {
   var startRow = Math.max(2, lastProcessed - OVERLAP_ROWS + 1);
   var subset = pack.rows.filter(function (r) { return r.sheetRow >= startRow; });
-  var subPlan = routeMasterRows_(subset, pack.headers, loadAndValidateRouting_().routes, cfg_().includeInternal);
-  var byView = groupByView_(subPlan.routed, viewHeaders);
+  var subPlan = routeMasterRows_(subset, routes, cfg_().includeInternal);
+  var byView = {};
+  subPlan.routed.forEach(function (r) {
+    if (!byView[r.view_name]) byView[r.view_name] = [];
+    byView[r.view_name].push(r);
+  });
   Object.keys(byView).forEach(function (name) {
     if (Date.now() - started > MAX_MS) return;
-    var sh = ensureViewSheet_(name, viewHeaders);
-    var existing = existingDedupe_(sh, viewHeaders);
-    var add = [];
-    byView[name].forEach(function (item) {
-      if (!existing[item.dedupe_key]) add.push(item.line);
-    });
-    if (!add.length) return;
-    appendValues_(sh, add);
-    formatView_(sh, viewHeaders, false);
+    upsertRewriteView_(name, viewHeaders, byView[name]);
   });
 }
 
-function existingDedupe_(sh, viewHeaders) {
-  var map = {};
+function upsertRewriteView_(name, viewHeaders, incoming) {
+  var sh = ensureViewSheet_(name, viewHeaders);
+  var existing = readDerivedRows_(sh, viewHeaders);
+  var byKey = {};
+  existing.forEach(function (item) {
+    if (item.dedupe_key) byKey[item.dedupe_key] = item;
+  });
+  incoming.forEach(function (r) {
+    var values = r.source.values;
+    byKey[r.dedupe_key] = { dedupe_key: r.dedupe_key, values: values };
+  });
+  var rows = Object.keys(byKey).map(function (k) { return byKey[k]; });
+  rows.sort(function (a, b) {
+    var ka = String(a.values.fecha_publicacion || '') + '\t' + String(a.values.fecha_captura || '') + '\t' + String(a.values.matched_at || '');
+    var kb = String(b.values.fecha_publicacion || '') + '\t' + String(b.values.fecha_captura || '') + '\t' + String(b.values.matched_at || '');
+    return kb.localeCompare(ka);
+  });
+  var lines = rows.map(function (item) {
+    return viewHeaders.map(function (h) { return item.values[h] || ''; });
+  });
+  writeViewSheet_(name, viewHeaders, lines, true);
+}
+
+function readDerivedRows_(sh, viewHeaders) {
+  assertDerivedSheet_(sh);
   var last = sh.getLastRow();
-  if (last < 2) return map;
+  if (last < 2) return [];
+  var vals = sh.getRange(2, 1, last - 1, viewHeaders.length).getDisplayValues();
   var di = -1;
   for (var i = 0; i < viewHeaders.length; i++) {
     if (String(viewHeaders[i]).toLowerCase() === 'dedupe_key') di = i;
   }
-  if (di < 0) return map;
-  var vals = sh.getRange(2, di + 1, last - 1, 1).getDisplayValues();
-  for (var r = 0; r < vals.length; r++) {
-    var k = String(vals[r][0] || '').trim();
-    if (k) map[k] = true;
-  }
-  return map;
+  return vals.map(function (line) {
+    var values = {};
+    for (var c = 0; c < viewHeaders.length; c++) values[viewHeaders[c]] = line[c];
+    return { dedupe_key: di >= 0 ? String(line[di] || '').trim() : '', values: values };
+  });
 }
 
 function writeViewSheet_(name, headers, lines, rebuild) {
   var sh = ensureViewSheet_(name, headers);
+  assertDerivedSheet_(sh);
   if (rebuild) {
     var last = Math.max(sh.getLastRow(), 2);
     var cols = Math.max(sh.getLastColumn(), headers.length);
@@ -487,8 +707,7 @@ function writeViewSheet_(name, headers, lines, rebuild) {
     var chunk = 400;
     for (var i = 0; i < lines.length; i += chunk) {
       var part = lines.slice(i, i + chunk);
-      var start = sh.getLastRow() + 1;
-      if (start < 2) start = 2;
+      var start = Math.max(sh.getLastRow() + 1, 2);
       sh.getRange(start, 1, part.length, headers.length).setValues(part);
     }
   }
@@ -496,14 +715,13 @@ function writeViewSheet_(name, headers, lines, rebuild) {
 }
 
 function ensureViewSheet_(name, headers) {
+  if (name === cfg_().masterTab || name === 'MENCIONES_MASTER') {
+    throw new Error('MASTER_READ_ONLY');
+  }
   var ss = masterSpreadsheet_();
   var sh = ss.getSheetByName(name);
   if (!sh) sh = ss.insertSheet(name);
-  var needHeader = sh.getLastRow() < 1;
-  if (!needHeader) {
-    var h = sh.getRange(1, 1, 1, Math.max(headers.length, sh.getLastColumn())).getDisplayValues()[0];
-    if (!h[0]) needHeader = true;
-  }
+  assertDerivedSheet_(sh);
   if (sh.getMaxColumns() < headers.length) {
     sh.insertColumnsAfter(sh.getMaxColumns(), headers.length - sh.getMaxColumns());
   }
@@ -511,13 +729,8 @@ function ensureViewSheet_(name, headers) {
   return sh;
 }
 
-function appendValues_(sh, lines) {
-  if (!lines.length) return;
-  var start = Math.max(sh.getLastRow() + 1, 2);
-  sh.getRange(start, 1, lines.length, lines[0].length).setValues(lines);
-}
-
 function formatView_(sh, headers, resetFilter) {
+  assertDerivedSheet_(sh);
   var lastCol = headers.length;
   var lastRow = Math.max(sh.getLastRow(), 1);
   sh.setFrozenRows(1);
@@ -542,16 +755,73 @@ function formatView_(sh, headers, resetFilter) {
   }
 }
 
-function markStaleViews_(activeViews) {
+function markStaleViews_(activeNames) {
+  var active = {};
+  activeNames.forEach(function (n) { active[n] = true; });
   var ss = masterSpreadsheet_();
-  var sheets = ss.getSheets();
-  sheets.forEach(function (sh) {
+  ss.getSheets().forEach(function (sh) {
     var name = sh.getName();
+    if (name === cfg_().masterTab) return;
     var managed = MANAGED_PREFIXES.some(function (p) { return name.indexOf(p) === 0; });
     if (!managed) return;
-    if (activeViews[name]) return;
+    if (active[name]) return;
+    assertDerivedSheet_(sh);
     sh.getRange(1, 1).setNote(STALE_NOTE + ' — ' + VIEW_NOTE);
   });
+}
+
+function buildPending_(plan, v) {
+  var agg = {};
+  plan.unrouted.forEach(function (u) {
+    var kid = (u.keyword_ids[0] || String(u.source.values.keyword_id || '')).trim();
+    if (!agg[kid]) {
+      agg[kid] = {
+        keyword_id: kid,
+        keyword: String(u.source.values.palabra || u.source.values.keywords_matched || ''),
+        cliente_id: String(u.source.values.cliente_id || ''),
+        count_master: 0,
+        reason: u.reason,
+      };
+    }
+    agg[kid].count_master++;
+  });
+  (v.report.active_keywords_without_route || []).forEach(function (id) {
+    if (!agg[id]) {
+      agg[id] = {
+        keyword_id: id,
+        keyword: '',
+        cliente_id: '',
+        count_master: 0,
+        reason: 'ACTIVE_KEYWORD_WITHOUT_ROUTE',
+      };
+    }
+  });
+  return Object.keys(agg).sort().map(function (k) { return agg[k]; });
+}
+
+function refreshPendingTab_(v, pendingOpt) {
+  try {
+    var doc = SpreadsheetApp.openById(cfg_().controlPlaneId);
+    var sh = doc.getSheetByName(PENDING_TAB);
+    if (!sh) sh = doc.insertSheet(PENDING_TAB);
+    var headers = ['keyword_id', 'keyword', 'cliente_id', 'count_master', 'reason'];
+    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+    var last = Math.max(sh.getLastRow(), 2);
+    if (last >= 2) sh.getRange(2, 1, last - 1, headers.length).clearContent();
+    var pending = pendingOpt;
+    if (!pending) {
+      var pack = readMaster_();
+      var plan = routeMasterRows_(pack.rows, v.routes, cfg_().includeInternal);
+      pending = buildPending_(plan, v);
+    }
+    if (!pending.length) return;
+    var lines = pending.map(function (p) {
+      return [p.keyword_id, p.keyword, p.cliente_id, p.count_master, p.reason];
+    });
+    sh.getRange(2, 1, lines.length, headers.length).setValues(lines);
+  } catch (err) {
+    Logger.log('PENDING_TAB_SKIP ' + err);
+  }
 }
 
 function headerIndex_(headers) {

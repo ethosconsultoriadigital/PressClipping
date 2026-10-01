@@ -212,15 +212,82 @@ export function computeRoutingHash(routes: MentionRoute[]): string {
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
+export type RouterRequestedMode = 'incremental' | 'full';
+export type RouterRunMode = 'full' | 'incremental' | 'resume_full';
+
+export interface RouterRunDecision {
+  mode: RouterRunMode;
+  needFull: boolean;
+  reason: string | null;
+}
+
+/**
+ * LAST_PROCESSED_MASTER_ROW y masterLastRow son filas absolutas de Sheet
+ * (1 = header). Nunca comparar data-row-count (lastRow-1) con lastProcessed.
+ *
+ * Rebuild en progreso: si el hash cambia o MASTER retrocede vs snapshot, se
+ * reinicia. Si MASTER crece, se termina el snapshot y el incremental posterior
+ * cubre las filas nuevas (LAST_PROCESSED queda en el snapshot, no en lastRow actual).
+ */
+export function decideRouterRun(input: {
+  requestedMode: RouterRequestedMode;
+  routingHashNow: string;
+  routingHashApplied: string | null;
+  masterLastRow: number;
+  lastProcessedMasterRow: number;
+  fullRebuildInProgress: boolean;
+  fullRebuildTargetHash: string | null;
+  fullRebuildMasterLastRow: number | null;
+}): RouterRunDecision {
+  const lastProcessed = Number.isFinite(input.lastProcessedMasterRow)
+    ? input.lastProcessedMasterRow
+    : 1;
+  if (input.fullRebuildInProgress) {
+    if (input.fullRebuildTargetHash && input.fullRebuildTargetHash !== input.routingHashNow) {
+      return { mode: 'full', needFull: true, reason: 'HASH_CHANGED_DURING_REBUILD' };
+    }
+    const snap = input.fullRebuildMasterLastRow ?? 0;
+    if (snap > 0 && input.masterLastRow < snap) {
+      return { mode: 'full', needFull: true, reason: 'MASTER_SHRANK_DURING_REBUILD' };
+    }
+    return { mode: 'resume_full', needFull: true, reason: 'RESUME_FULL_REBUILD' };
+  }
+  if (input.requestedMode === 'full') {
+    return { mode: 'full', needFull: true, reason: 'REQUESTED_FULL' };
+  }
+  if (!input.routingHashApplied) {
+    return { mode: 'full', needFull: true, reason: 'FIRST_RUN' };
+  }
+  if (input.routingHashApplied !== input.routingHashNow) {
+    return { mode: 'full', needFull: true, reason: 'ROUTING_HASH_CHANGED' };
+  }
+  if (input.masterLastRow < lastProcessed) {
+    return { mode: 'full', needFull: true, reason: 'MASTER_SHRANK' };
+  }
+  if (lastProcessed <= 1) {
+    return { mode: 'full', needFull: true, reason: 'FIRST_RUN' };
+  }
+  return { mode: 'incremental', needFull: false, reason: null };
+}
+
 export function shouldFullRebuild(opts: {
   routingHashNow: string;
   routingHashPrev: string | null;
-  masterRowCount: number;
+  /** Fila absoluta de Sheet (header=1). */
+  masterLastRow: number;
+  /** Última fila absoluta de MASTER ya procesada. */
   lastProcessedMasterRow: number;
 }): boolean {
-  if (!opts.routingHashPrev || opts.routingHashPrev !== opts.routingHashNow) return true;
-  if (opts.masterRowCount < opts.lastProcessedMasterRow) return true;
-  return false;
+  return decideRouterRun({
+    requestedMode: 'incremental',
+    routingHashNow: opts.routingHashNow,
+    routingHashApplied: opts.routingHashPrev,
+    masterLastRow: opts.masterLastRow,
+    lastProcessedMasterRow: opts.lastProcessedMasterRow,
+    fullRebuildInProgress: false,
+    fullRebuildTargetHash: null,
+    fullRebuildMasterLastRow: null,
+  }).needFull;
 }
 
 export function incrementalStartRow(
@@ -238,9 +305,13 @@ export function routeMasterRows(
 ): RoutePlan {
   const includeInternal = opts.includeInternal === true;
   const byKw = new Map<string, MentionRoute[]>();
+  const skippedInternal = new Set<string>();
   for (const r of routes) {
     if (!r.activo) continue;
-    if (!includeInternal && r.vista_tipo === 'INTERNO') continue;
+    if (!includeInternal && r.vista_tipo === 'INTERNO') {
+      skippedInternal.add(r.keyword_id.toUpperCase());
+      continue;
+    }
     const k = r.keyword_id.toUpperCase();
     const list = byKw.get(k) ?? [];
     list.push(r);
@@ -271,10 +342,15 @@ export function routeMasterRows(
     }
     const masterKey = masterDedupeKey(source.values) || `row:${source.sheetRow ?? routed.length}`;
     if (dests.length === 0) {
+      const excluded = ids.some((id) => skippedInternal.has(id.toUpperCase()));
       unrouted.push({
         source,
         keyword_ids: ids,
-        reason: ids.length === 0 ? 'NO_KEYWORD_ID' : 'UNKNOWN_KEYWORD_ROUTE',
+        reason: excluded
+          ? 'EXCLUDED_INTERNAL'
+          : ids.length === 0
+            ? 'NO_KEYWORD_ID'
+            : 'UNKNOWN_KEYWORD_ROUTE',
       });
       continue;
     }
