@@ -116,6 +116,12 @@ export function shouldRejectCrawlUrl(medioId: string, url: string): boolean {
         if (p === '/') return true;
         return /^\/(clima|resultados|tag)(\/|$)/i.test(path);
       }
+    case 'MED-0518': // Cocina Vital — sitemap mezcló academia branded, video hub y /test
+      {
+        const p = path.replace(/\/+$/, '') || '/';
+        if (p === '/' || p === '/video' || p === '/videoteca' || p === '/get-videoteca' || p === '/test') return true;
+        return /^\/academia-cocina-vital(\/|$)/i.test(path);
+      }
     default:
       return false;
   }

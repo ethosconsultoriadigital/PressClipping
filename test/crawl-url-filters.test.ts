@@ -366,4 +366,18 @@ describe('Wave 2 URL filters — print/archive, medio-scoped', () => {
     ).toBe(false);
     expect(shouldRejectCrawlUrl('MED-0008', 'https://elcongresista.mx/clima/mexicali')).toBe(false);
   });
+
+  it('Cocina Vital academia/video hubs rejected; recipe article kept', () => {
+    expect(shouldRejectCrawlUrl('MED-0518', 'https://www.cocinavital.mx/academia-cocina-vital/enfrenta-la-cuesta-de-enero-con-oxxo/')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0518', 'https://www.cocinavital.mx/videoteca/')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0518', 'https://www.cocinavital.mx/video/')).toBe(true);
+    expect(shouldRejectCrawlUrl('MED-0518', 'https://www.cocinavital.mx/test/')).toBe(true);
+    expect(
+      shouldRejectCrawlUrl(
+        'MED-0518',
+        'https://www.cocinavital.mx/tips-de-salud/mascarilla-jitomate-fortalecer-hidratar-cabello-2/2020/08/',
+      ),
+    ).toBe(false);
+    expect(shouldRejectCrawlUrl('MED-0008', 'https://www.cocinavital.mx/videoteca/')).toBe(false);
+  });
 });
