@@ -29,16 +29,16 @@ function normHeader(h: string): string {
     .replace(/[^a-z0-9]+/g, '_');
 }
 
-const NAME_KEYS = ['name', 'nombre', 'canonical_name', 'medio', 'fuente', 'display_name'];
+const NAME_KEYS = ['name', 'nombre_fuente', 'nombre', 'canonical_name', 'medio', 'fuente', 'display_name'];
 const URL_KEYS = ['url', 'url_base', 'canonical_url', 'sitio', 'website'];
 const DOMAIN_KEYS = ['domain', 'dominio', 'host', 'hostname'];
 const ESTADO_KEYS = ['estado', 'entidad', 'state'];
-const MUN_KEYS = ['municipio', 'alcaldia', 'city'];
+const MUN_KEYS = ['municipios_o_cobertura', 'municipio', 'alcaldia', 'city'];
 const CAT_KEYS = ['categoria', 'category', 'vertical', 'tipo'];
 const KIND_KEYS = ['source_kind', 'kind', 'tipo_fuente'];
 const FB_KEYS = ['facebook', 'facebook_url', 'fb'];
 const NOTES_KEYS = ['notes', 'notas', 'observaciones'];
-const RECENT_KEYS = ['sample_30d', 'muestra_30d', 'within_30d', 'reciente'];
+const RECENT_KEYS = ['sample_30d', 'muestra_30d', 'within_30d', 'reciente', 'actividad_documentada'];
 
 function pick(row: Record<string, string>, keys: string[]): string | null {
   for (const k of keys) {
@@ -50,7 +50,7 @@ function pick(row: Record<string, string>, keys: string[]): string | null {
 
 function truthy(v: string | null): boolean {
   if (!v) return false;
-  return /^(1|true|si|yes|y|x)$/i.test(v.trim());
+  return /^(1|true|si|yes|y|x|confirmed_30d)$/i.test(v.trim());
 }
 
 function inferTier(fileLabel: string, recent: boolean): EvidenceTier {
