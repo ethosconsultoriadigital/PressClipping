@@ -18,7 +18,8 @@ export type MatchingMode =
   | 'current'
   | 'body_high'
   | 'body_high_plus_clean'
-  | 'body_with_proximity';
+  | 'body_with_proximity'
+  | 'body_v4';
 
 export const MIN_BODY_CHARS = 80;
 
@@ -103,8 +104,11 @@ export function selectTrustedBody(
     };
   }
 
-  if (mode === 'body_high_plus_clean' && limpia.length >= MIN_BODY_CHARS && !limpiaContam) {
-    if (calidad === 'alta' || calidad === 'media') {
+  const allowCleanFallback = mode === 'body_high_plus_clean' || mode === 'body_v4';
+  if (allowCleanFallback && limpia.length >= MIN_BODY_CHARS && !limpiaContam) {
+    const calidadOk =
+      mode === 'body_v4' ? calidad === 'alta' : calidad === 'alta' || calidad === 'media';
+    if (calidadOk) {
       return {
         status: 'BODY_FALLBACK_CLEAN',
         text: limpia,
@@ -150,4 +154,10 @@ export function buildTrustedMatchingFields(
     campos.push({ nombre: body.campo, texto: body.text, peso });
   }
   return { campos, body };
+}
+
+/** MATCHABLE: al menos un campo textual confiable. RAW no cuenta. */
+export function hasTrustedSearchableText(n: ContentLayers): boolean {
+  const fields = [n.titulo, n.subtitulo, n.resumen, n.seccion, n.texto_cuerpo_nota, n.texto_nota_limpia];
+  return fields.some((f) => typeof f === 'string' && f.trim().length > 0);
 }

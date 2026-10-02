@@ -92,6 +92,7 @@
     "mentions-master:fast-lane": "tsx scripts/mentions-master-fast-lane.ts",
     "mentions-matching:shadow-v2": "tsx scripts/shadow-unified-body-matching-v2.ts",
     "mentions-matching:selective-canary-shadow": "tsx scripts/shadow-selective-body-canary.ts",
+    "mentions-matching:zero-loss-v4-dry-run": "tsx scripts/zero-loss-reliability-v4-dry-run.ts",
     "mention-routing:apply-sheet": "tsx scripts/apply-mention-routing-sheet.ts",
     "mention-routing:dry-run": "tsx scripts/mention-routing-dry-run.ts",
     "news-lake:mentions:lab": "tsx scripts/news-lake-mention-backfill-lab.ts",

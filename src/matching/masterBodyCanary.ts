@@ -61,6 +61,18 @@ export function masterBodyAllowlist(env: NodeJS.ProcessEnv = process.env): strin
   return parseKeywordAllowlist(env.MENTIONS_MASTER_BODY_V2_KEYWORD_IDS);
 }
 
+export type MasterBodyPolicy = 'allowlist' | 'general';
+
+export function masterBodyPolicy(env: NodeJS.ProcessEnv = process.env): MasterBodyPolicy {
+  const raw = String(env.MENTIONS_MASTER_BODY_POLICY ?? '').trim().toLowerCase();
+  return raw === 'general' ? 'general' : 'allowlist';
+}
+
+export function isExactPhraseOrContextual(tipoKeyword: string | null | undefined): boolean {
+  const t = String(tipoKeyword ?? '').trim().toLowerCase();
+  return t === 'frase_exacta' || t === 'exacta_contextual';
+}
+
 export function keywordGetsTrustedBody(
   keywordId: string,
   opts: {
@@ -68,6 +80,8 @@ export function keywordGetsTrustedBody(
     bodyMatchingV2?: boolean;
     keywordAllowlist?: Iterable<string>;
     mode?: string;
+    tipoKeyword?: string | null;
+    bodyPolicy?: MasterBodyPolicy;
   } = {},
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
@@ -75,6 +89,10 @@ export function keywordGetsTrustedBody(
     [...(opts.keywordAllowlist ?? masterBodyAllowlist(env))].map((id) => id.trim().toUpperCase()),
   );
   const masterOn = opts.masterBodyV2 ?? isMentionsMasterBodyV2Enabled(env);
+  const policy = opts.bodyPolicy ?? masterBodyPolicy(env);
+  if (masterOn && policy === 'general') {
+    return isExactPhraseOrContextual(opts.tipoKeyword);
+  }
   if (masterOn) return allow.has(keywordId.trim().toUpperCase());
   if (opts.bodyMatchingV2) return true;
   if (opts.mode && opts.mode !== 'current') return true;
@@ -91,13 +109,16 @@ export function describeMasterBodyPolicy(env: NodeJS.ProcessEnv = process.env): 
 } {
   const enabled = isMentionsMasterBodyV2Enabled(env);
   const ids = masterBodyAllowlist(env);
-  const active = enabled && ids.length > 0;
+  const policy = masterBodyPolicy(env);
+  const active = enabled && (policy === 'general' || ids.length > 0);
   return {
     body_v2_enabled: active,
-    body_v2_keyword_count: active ? ids.length : 0,
-    body_v2_keywords: active ? ids : [],
+    body_v2_keyword_count: policy === 'general' ? -1 : active ? ids.length : 0,
+    body_v2_keywords: policy === 'general' ? ['*frase_exacta+exacta_contextual'] : active ? ids : [],
     matching_fields: active
-      ? 'titulo,subtitulo,resumen,seccion + texto_cuerpo_nota(allowlist)'
+      ? policy === 'general'
+        ? 'titulo,subtitulo,resumen,seccion + BODY_TRUSTED(frase_exacta|exacta_contextual)'
+        : 'titulo,subtitulo,resumen,seccion + texto_cuerpo_nota(allowlist)'
       : 'titulo,subtitulo,resumen,seccion',
     body_matching: active,
     detect_mentions_body_v2: isDetectMentionsBodyV2Enabled(env),
