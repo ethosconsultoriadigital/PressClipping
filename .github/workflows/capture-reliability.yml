@@ -1,0 +1,56 @@
+name: capture-reliability
+
+# LIVE + 24h lookback + 72h deep + Google gap auditor.
+# Default dry-run. NO matching. NO alerts. NO Astra ingest.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 24h | 72h | auditor
+        required: false
+        default: '24h'
+      dry_run:
+        description: Sin writes de recovery
+        required: false
+        default: 'true'
+      medio_ids:
+        description: Lista opcional de medio_id
+        required: false
+        default: ''
+  schedule:
+    - cron: '25 * * * *'
+    - cron: '50 11 * * *'
+
+concurrency:
+  group: capture-reliability
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      RUN_BY: github-actions-capture-reliability
+      LOG_FORMAT: json
+      NO_SEND: 'true'
+      NO_EMAIL: 'true'
+      NO_WHATSAPP: 'true'
+      NO_TWILIO: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Reconcile dry-run (URL-first)
+        run: |
+          MODE="${{ github.event.inputs.mode || '24h' }}"
+          if [ "${{ github.event.schedule }}" = "50 11 * * *" ]; then MODE=72h; fi
+          ARGS="--mode=$MODE --limit=12"
+          if [ -n "${{ github.event.inputs.medio_ids }}" ]; then
+            ARGS="$ARGS --medio-ids=${{ github.event.inputs.medio_ids }}"
+          fi
+          npm run capture-reliability:reconcile -- $ARGS

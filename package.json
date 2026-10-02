@@ -132,6 +132,7 @@
     "source-registry:ingest-astra": "tsx scripts/source-registry-ingest-astra.ts",
     "source-health:scan": "tsx scripts/source-health-scan.ts",
     "source-expansion:queue": "tsx scripts/source-expansion-queue.ts",
+    "capture-reliability:reconcile": "tsx scripts/capture-reconcile.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "worker:typecheck": "tsc --noEmit -p worker/tsconfig.json",
