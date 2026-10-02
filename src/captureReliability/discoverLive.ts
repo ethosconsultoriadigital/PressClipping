@@ -122,6 +122,10 @@ export async function discoverLiveSource(
       /* robots ausente o no parseable: no inventar endpoint */
     }
   }
+  if (row.secciones_urls) {
+    surfaces.push('listing');
+  }
+
   const noDiscoverySurface = surfaces.length === 0;
   if (noDiscoverySurface) surfaces.push('NO_DISCOVERY_SURFACE');
 

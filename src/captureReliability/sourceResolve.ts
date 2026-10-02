@@ -50,6 +50,29 @@ export function resolveSourceForUrl(url: string, catalog: ChannelCatalogRow[]): 
   return { kind: 'ambiguous', medioIds: uniqueIds };
 }
 
+/**
+ * Identidad de productor solo se acepta si el catálogo la confirma.
+ * Host duplicado sin medio_id válido sigue AMBIGUOUS: no se elige uno al azar.
+ */
+export function applyProducerSource(
+  url: string,
+  catalog: ChannelCatalogRow[],
+  producerMedioId: string | null,
+): SourceResolveResult {
+  const resolved = resolveSourceForUrl(url, catalog);
+  if (!producerMedioId) return resolved;
+  if (resolved.kind === 'resolved') {
+    if (resolved.medioId === producerMedioId) return resolved;
+    return { kind: 'ambiguous', medioIds: [resolved.medioId, producerMedioId].sort() };
+  }
+  if (resolved.kind === 'ambiguous') {
+    if (resolved.medioIds.includes(producerMedioId)) return { kind: 'resolved', medioId: producerMedioId };
+    return resolved;
+  }
+  if (catalog.some((c) => c.medio_id === producerMedioId)) return { kind: 'resolved', medioId: producerMedioId };
+  return resolved;
+}
+
 export function hostnameIndex(catalog: ChannelCatalogRow[]): Map<string, string[]> {
   const map = new Map<string, string[]>();
   for (const row of catalog) {

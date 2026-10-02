@@ -20,7 +20,8 @@ import { processRecoveryRecord } from '../src/captureReliability/recoveryWorker.
 import { recoveryWritesAllowed } from '../src/captureReliability/writesGuard.js';
 import { baseRecoveryRecord } from '../src/captureReliability/reconcile.js';
 import { shardCatalog } from '../src/captureReliability/catalog.js';
-import type { ChannelCatalogRow, DiscoveredUrl } from '../src/captureReliability/types.js';
+import { gapCandidateFromUrl } from '../src/captureReliability/gapCandidates.js';
+import type { ChannelCatalogRow, DiscoveredUrl, GapCandidate } from '../src/captureReliability/types.js';
 import type { FetchExtractResult } from '../src/extractors/html.js';
 import type { NoticiaInsert } from '../src/normalizers/noticia.js';
 
@@ -112,9 +113,9 @@ async function runEngine(opts: {
   processRecovery?: boolean;
   dryRun?: boolean;
   allowWritesEnv?: string | null;
-  gapCandidates?: { discovered_url: string; publisher_final_url: string | null; hostname: string | null; discovered_via: string; discovered_at: string }[];
+  gapCandidates?: GapCandidate[];
   fetchExtract?: (url: string) => Promise<FetchExtractResult>;
-  persistNews?: (item: NoticiaInsert) => Promise<{ noticiaId: string | null; inserted: boolean }>;
+  persistNews?: (payload: import('../src/captureReliability/recoveryPayload.js').RecoveredNewsPayload) => Promise<{ noticiaId: string | null; outcome: 'inserted' | 'known' }>;
   window?: { start: string; end: string };
   shardIndex?: number;
   shardCount?: number;
@@ -442,7 +443,8 @@ describe('Capture reliability V3', () => {
       writesAllowed: false,
       nowIso: NOW,
     });
-    expect(out.status).toBe('WOULD_PERSIST');
+    expect(out.status).toBe('QUEUED');
+    expect(out.last_dry_run_result).toBe('WOULD_PERSIST');
     expect(admitDiscoveredArticle({ url: ENTORNO, medioId: 'MED-0441', titulo: null, body: 'x'.repeat(100) }).admit).toBe(true);
   });
 
@@ -458,7 +460,8 @@ describe('Capture reliability V3', () => {
       writesAllowed: false,
       nowIso: NOW,
     });
-    expect(out.status).toBe('WOULD_PERSIST');
+    expect(out.status).toBe('QUEUED');
+    expect(out.last_dry_run_result).toBe('WOULD_PERSIST');
   });
 
   it('T21 known URL no duplicate', () => {
@@ -515,9 +518,9 @@ describe('Capture reliability V3', () => {
       dryRun: false,
       allowWritesEnv: 'true',
       fetchExtract: async () => okExtract(),
-      persistNews: async (item) => {
-        news.push(item);
-        return { noticiaId: 'n-6h', inserted: true };
+      persistNews: async (payload) => {
+        news.push(payload.insert);
+        return { noticiaId: 'n-6h', outcome: 'inserted' as const };
       },
       runId: 'b',
     });
@@ -547,9 +550,9 @@ describe('Capture reliability V3', () => {
       dryRun: false,
       allowWritesEnv: 'true',
       fetchExtract: async () => okExtract(),
-      persistNews: async (item) => {
-        news.push(item);
-        return { noticiaId: 'n-26h', inserted: true };
+      persistNews: async (payload) => {
+        news.push(payload.insert);
+        return { noticiaId: 'n-26h', outcome: 'inserted' as const };
       },
     });
     expect(news).toHaveLength(1);
@@ -585,13 +588,14 @@ describe('Capture reliability V3', () => {
       catalog,
       discover: () => discoveryFor([], { surfaces: ['rss'], rssSpanCovered: 'NO', sitemapRuntimeCompletenessInvoked: false }),
       gapCandidates: [
-        {
+        gapCandidateFromUrl({
           discovered_url: ENTORNO,
           publisher_final_url: ENTORNO,
           hostname: 'entornoinformativo.com.mx',
           discovered_via: 'gap_candidate',
           discovered_at: NOW,
-        },
+          medio_id: 'MED-0441',
+        }),
       ],
       processRecovery: true,
       dryRun: true,
@@ -601,7 +605,8 @@ describe('Capture reliability V3', () => {
       },
     });
     const rec = (await store.snapshot()).find((r) => r.discovered_url === ENTORNO);
-    expect(rec?.status).toBe('WOULD_PERSIST');
+    expect(rec?.status).toBe('QUEUED');
+    expect(rec?.last_dry_run_result).toBe('WOULD_PERSIST');
     expect(rec?.medio_id).toBe('MED-0441');
     expect(report.PRODUCTION_RECOVERY_WRITES).toBe(0);
   });

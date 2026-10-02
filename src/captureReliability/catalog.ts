@@ -25,6 +25,14 @@ export function catalogCoverage(opts: {
   };
 }
 
+export function configuredSurfaceKinds(row: ChannelCatalogRow): string[] {
+  const surfaces: string[] = [];
+  if (row.rss_url) surfaces.push('rss');
+  if (row.sitemap_url) surfaces.push('sitemap');
+  if (row.secciones_urls?.trim()) surfaces.push('listing');
+  return surfaces;
+}
+
 export function hasConfiguredDiscoverySurface(row: ChannelCatalogRow): boolean {
-  return Boolean(row.rss_url || row.sitemap_url);
+  return configuredSurfaceKinds(row).length > 0;
 }

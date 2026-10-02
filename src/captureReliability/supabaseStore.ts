@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CaptureReliabilityStore } from './captureRecoveryRepository.js';
+import { emptySourceState } from './checkpoint.js';
 import type { GapCandidate, ReconcileRun, RecoveryRecord, RecoveryStatus, SourceReconcileState } from './types.js';
 
 function recFromRow(r: Record<string, unknown>): RecoveryRecord {
@@ -21,6 +22,10 @@ function recFromRow(r: Record<string, unknown>): RecoveryRecord {
     claimed_by: (r.claimed_by as string | null) ?? null,
     next_retry_at: (r.next_retry_at as string | null) ?? null,
     noticia_id: (r.noticia_id as string | null) ?? null,
+    published_at: (r.published_at as string | null) ?? null,
+    discovered_title: (r.discovered_title as string | null) ?? null,
+    discovered_summary: (r.discovered_summary as string | null) ?? null,
+    last_dry_run_result: (r.last_dry_run_result as string | null) ?? null,
   };
 }
 
@@ -43,6 +48,10 @@ function recToRow(rec: RecoveryRecord): Record<string, unknown> {
     claimed_by: rec.claimed_by,
     next_retry_at: rec.next_retry_at,
     noticia_id: rec.noticia_id,
+    published_at: rec.published_at,
+    discovered_title: rec.discovered_title,
+    discovered_summary: rec.discovered_summary,
+    last_dry_run_result: rec.last_dry_run_result,
     updated_at: new Date().toISOString(),
   };
 }
@@ -76,6 +85,8 @@ function stateFromRow(r: Record<string, unknown>): SourceReconcileState {
     cap_hit: Boolean(r.cap_hit),
     time_budget_hit: Boolean(r.time_budget_hit),
     complete: Boolean(r.complete),
+    coverage_verdict: (r.coverage_verdict as SourceReconcileState['coverage_verdict']) ?? undefined,
+    worker_id: (r.worker_id as string | null) ?? null,
   };
 }
 
@@ -114,23 +125,13 @@ export class SupabaseCaptureReliabilityStore implements CaptureReliabilityStore 
   }
 
   async claimBatch(opts: { workerId: string; limit: number; nowIso: string }): Promise<RecoveryRecord[]> {
-    const { data, error } = await this.sb
-      .from('capture_recovery_queue')
-      .select('*')
-      .in('status', ['QUEUED', 'RETRY'])
-      .is('claimed_at', null)
-      .limit(opts.limit);
+    const { data, error } = await this.sb.rpc('claim_capture_recovery_batch', {
+      p_worker_id: opts.workerId,
+      p_limit: opts.limit,
+      p_now: opts.nowIso,
+    });
     if (error) throw error;
-    const out: RecoveryRecord[] = [];
-    for (const row of data ?? []) {
-      const rec = recFromRow(row as Record<string, unknown>);
-      if (rec.next_retry_at && Date.parse(rec.next_retry_at) > Date.parse(opts.nowIso)) continue;
-      const next = { ...rec, status: 'FETCHING' as const, claimed_at: opts.nowIso, claimed_by: opts.workerId };
-      const { error: uerr } = await this.sb.from('capture_recovery_queue').update(recToRow(next)).eq('hash_url', rec.hash_url);
-      if (uerr) throw uerr;
-      out.push(next);
-    }
-    return out;
+    return (data ?? []).map((row: Record<string, unknown>) => recFromRow(row));
   }
 
   private async patch(hashUrl: string, fn: (r: RecoveryRecord) => RecoveryRecord): Promise<RecoveryRecord | null> {
@@ -256,12 +257,16 @@ export class SupabaseCaptureReliabilityStore implements CaptureReliabilityStore 
   async addGapCandidates(rows: GapCandidate[]): Promise<void> {
     if (!rows.length) return;
     const payload = rows.map((r) => ({
-      candidate_id: r.discovered_url,
+      candidate_id: r.candidate_id,
       discovered_url: r.discovered_url,
       publisher_final_url: r.publisher_final_url,
       hostname: r.hostname,
       discovered_via: r.discovered_via,
       discovered_at: r.discovered_at,
+      canonical_hash: r.canonical_hash,
+      discovered_urls: r.discovered_urls.join('|'),
+      medio_id: r.medio_id,
+      fuente_id: r.fuente_id,
       cliente_ids: r.cliente_ids?.join(',') ?? null,
       keyword_ids: r.keyword_ids?.join(',') ?? null,
     }));
@@ -272,13 +277,102 @@ export class SupabaseCaptureReliabilityStore implements CaptureReliabilityStore 
   async listGapCandidates(): Promise<GapCandidate[]> {
     const { data, error } = await this.sb.from('capture_gap_candidates').select('*').is('consumed_at', null);
     if (error) throw error;
-    return (data ?? []).map((r) => ({
-      discovered_url: String((r as { discovered_url: string }).discovered_url),
-      publisher_final_url: ((r as { publisher_final_url: string | null }).publisher_final_url) ?? null,
-      hostname: ((r as { hostname: string | null }).hostname) ?? null,
-      discovered_via: String((r as { discovered_via: string }).discovered_via),
-      discovered_at: String((r as { discovered_at: string }).discovered_at),
-    }));
+    return (data ?? []).map((r) => {
+      const row = r as Record<string, unknown>;
+      const url = String(row.discovered_url);
+      return {
+        candidate_id: String(row.candidate_id ?? url),
+        discovered_url: url,
+        publisher_final_url: (row.publisher_final_url as string | null) ?? null,
+        hostname: (row.hostname as string | null) ?? null,
+        discovered_via: String(row.discovered_via ?? 'gap_candidate'),
+        discovered_at: String(row.discovered_at),
+        canonical_hash: (row.canonical_hash as string | null) ?? null,
+        discovered_urls: String(row.discovered_urls ?? url).split('|').filter(Boolean),
+        medio_id: (row.medio_id as string | null) ?? null,
+        fuente_id: (row.fuente_id as string | null) ?? null,
+        claimed_at: (row.claimed_at as string | null) ?? null,
+        claimed_by: (row.claimed_by as string | null) ?? null,
+        consumed_at: (row.consumed_at as string | null) ?? null,
+      };
+    });
+  }
+
+  async recordObservation(obs: import('./types.js').RecoveryObservation): Promise<void> {
+    const { error } = await this.sb.from('capture_recovery_observations').upsert(obs, {
+      onConflict: 'run_id,hash_url,window_start',
+    });
+    if (error) throw error;
+  }
+
+  async listObservations(windowStart: string, windowEnd: string) {
+    const { data, error } = await this.sb
+      .from('capture_recovery_observations')
+      .select('*')
+      .eq('window_start', windowStart)
+      .eq('window_end', windowEnd);
+    if (error) throw error;
+    return (data ?? []) as import('./types.js').RecoveryObservation[];
+  }
+
+  async claimGapCandidates(opts: { workerId: string; limit: number; nowIso: string }) {
+    const { data, error } = await this.sb.rpc('claim_capture_gap_batch', {
+      p_worker_id: opts.workerId,
+      p_limit: opts.limit,
+      p_now: opts.nowIso,
+    });
+    if (error) throw error;
+    return this.listGapCandidates().then((rows) => rows.filter((r) => (data ?? []).some((d: { candidate_id: string }) => d.candidate_id === r.candidate_id)));
+  }
+
+  async markGapConsumed(candidateId: string, nowIso: string): Promise<void> {
+    const { error } = await this.sb
+      .from('capture_gap_candidates')
+      .update({ consumed_at: nowIso })
+      .eq('candidate_id', candidateId);
+    if (error) throw error;
+  }
+
+  async releaseStaleGapClaims(staleBeforeIso: string): Promise<number> {
+    const { data, error } = await this.sb
+      .from('capture_gap_candidates')
+      .update({ claimed_at: null, claimed_by: null })
+      .is('consumed_at', null)
+      .lt('claimed_at', staleBeforeIso)
+      .select('candidate_id');
+    if (error) throw error;
+    return data?.length ?? 0;
+  }
+
+  async claimSourceBatch(opts: {
+    workerId: string;
+    windowStart: string;
+    windowEnd: string;
+    medioIds: string[];
+    limit: number;
+    nowIso: string;
+    staleBeforeIso: string;
+  }): Promise<SourceReconcileState[]> {
+    for (const medioId of opts.medioIds) {
+      const existing = await this.getSourceState(medioId, opts.windowStart, opts.windowEnd);
+      if (existing) continue;
+      await this.upsertSourceState({
+        ...emptySourceState({ medioId, windowStart: opts.windowStart, windowEnd: opts.windowEnd }),
+        status: 'PENDING',
+      });
+    }
+    const { data, error } = await this.sb.rpc('claim_capture_source_batch', {
+      p_worker_id: opts.workerId,
+      p_window_start: opts.windowStart,
+      p_window_end: opts.windowEnd,
+      p_medio_ids: opts.medioIds,
+      p_limit: opts.limit,
+      p_now: opts.nowIso,
+    });
+    if (error) throw error;
+    const claimed = ((data ?? []) as Record<string, unknown>[]).map((row) => stateFromRow(row));
+    const wanted = new Set(opts.medioIds);
+    return claimed.filter((s) => wanted.has(s.medio_id)).slice(0, opts.limit);
   }
 }
 

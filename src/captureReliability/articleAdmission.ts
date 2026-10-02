@@ -20,14 +20,33 @@ function pathLooksLikeArticle(url: string): boolean {
   try {
     const p = new URL(url).pathname.replace(/\/+$/, '');
     if (/\/20\d{2}\/\d{2}\/\d{2}\//.test(p)) return true;
+    if (/\/noticia\/\d+/i.test(p)) return true;
+    if (/\/p\/[a-z0-9]{3,}/i.test(p)) return true;
     const segs = p.split('/').filter(Boolean);
-    if (segs.length >= 1 && segs[0] && segs[0].length > 12 && !/^(tag|category|author|seccion|tema)$/i.test(segs[0])) {
+    if (segs.length >= 2 && (segs.at(-1)?.length ?? 0) >= 8) return true;
+    if (segs.length === 1 && segs[0] && segs[0].length > 12 && !/^(tag|category|author|seccion|tema|search|archivo)$/i.test(segs[0])) {
       return true;
     }
     return false;
   } catch {
     return false;
   }
+}
+
+const TRUSTED_DISCOVERY = /rss|sitemap|gap|google|auditor|listing|section/i;
+
+export function classifyPreFetch(input: AdmissionInput, discoveredVia: string): {
+  disposition: 'ADMIT' | 'REJECT' | 'FETCH_TO_CLASSIFY';
+  reason: string;
+} {
+  const admission = admitDiscoveredArticle(input);
+  if (admission.admit) return { disposition: 'ADMIT', reason: admission.reason };
+  const obvious = new Set(['homepage', 'listing_hub', 'taxonomy_or_search', 'host_filter_non_article', 'malformed_url']);
+  if (obvious.has(admission.reason)) return { disposition: 'REJECT', reason: admission.reason };
+  if (TRUSTED_DISCOVERY.test(discoveredVia)) {
+    return { disposition: 'FETCH_TO_CLASSIFY', reason: admission.reason };
+  }
+  return { disposition: 'FETCH_TO_CLASSIFY', reason: admission.reason };
 }
 
 export function admitDiscoveredArticle(input: AdmissionInput): AdmissionResult {

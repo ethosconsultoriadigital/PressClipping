@@ -1,68 +1,38 @@
 ﻿import { admitDiscoveredArticle } from './articleAdmission.js';
 import { decideFetchError } from './reconcile.js';
 import { nextBackoffSeconds } from './retry.js';
-import { captureCanonicalUrl, primaryHash } from './urlIndex.js';
-import { normalizeNoticia } from '../normalizers/noticia.js';
 import type { FetchExtractResult } from '../extractors/html.js';
+import { buildRecoveredNewsPayload, type RecoveredNewsPayload } from './recoveryPayload.js';
 import type { NoticiaInsert } from '../normalizers/noticia.js';
 import type { CaptureReliabilityStore } from './captureRecoveryRepository.js';
-import type { RecoveryRecord } from './types.js';
+import type { RecoveryRecord, RecoveryStatus } from './types.js';
 
 export interface RecoveryFetchExtract {
   (url: string): Promise<FetchExtractResult>;
 }
 
-export interface RecoveryPersist {
-  (item: NoticiaInsert): Promise<{ noticiaId: string | null; inserted: boolean }>;
+export interface RecoveryPersistResult {
+  noticiaId: string | null;
+  outcome: 'inserted' | 'known';
 }
 
+export interface RecoveryPersist {
+  (payload: RecoveredNewsPayload): Promise<RecoveryPersistResult>;
+}
+
+/** Metadata row only. Trusted fields live on payload.enrichment. */
 export function extractToNoticia(opts: {
   url: string;
   medioId: string;
   extract: FetchExtractResult;
   publishedAt?: string | null;
+  discoveredTitle?: string | null;
+  discoveredSummary?: string | null;
 }): NoticiaInsert {
-  const base = normalizeNoticia(
-    {
-      url: opts.url,
-      titulo: opts.extract.titulo,
-      resumen: opts.extract.resumen,
-      autor: opts.extract.autor,
-      fecha: opts.publishedAt ?? null,
-      seccion: opts.extract.seccion,
-      imagen: opts.extract.imagen,
-    },
-    { medio_id: opts.medioId, fuente: 'capture_recovery' },
-  );
-  if (!base) {
-    throw new Error(`normalizeNoticia rejected url ${opts.url}`);
-  }
-  const body = opts.extract.texto_cuerpo_nota || opts.extract.texto_nota_limpia || opts.extract.texto_extraido;
-  const out: NoticiaInsert = {
-    medio_id: opts.medioId,
-    url_original: base.url_original,
-    url_canonica: captureCanonicalUrl(opts.url),
-    titulo: opts.extract.titulo,
-    subtitulo: base.subtitulo,
-    autor: base.autor,
-    fecha_publicacion: base.fecha_publicacion,
-    seccion: base.seccion,
-    texto_extraido: body,
-    resumen: opts.extract.resumen,
-    imagen_principal: base.imagen_principal,
-    idioma: base.idioma,
-    pais: base.pais,
-    estado: base.estado,
-    municipio: base.municipio,
-    hash_url: primaryHash(opts.url),
-    hash_contenido: base.hash_contenido,
-    cluster_id: base.cluster_id,
-    fuente_extraccion: 'capture_recovery',
-    estado_extraccion: base.estado_extraccion,
-    error_extraccion: base.error_extraccion,
-  };
-  return out;
+  return buildRecoveredNewsPayload(opts).insert;
 }
+
+const CLAIMABLE_RESTORE: RecoveryStatus[] = ['QUEUED', 'RETRY', 'FETCH_TO_CLASSIFY'];
 
 export async function processRecoveryRecord(opts: {
   record: RecoveryRecord;
@@ -75,6 +45,7 @@ export async function processRecoveryRecord(opts: {
 }): Promise<RecoveryRecord> {
   const rec = opts.record;
   const maxAttempts = opts.maxAttempts ?? 8;
+  const restore: RecoveryStatus = CLAIMABLE_RESTORE.includes(rec.status) ? rec.status : 'QUEUED';
   await opts.store.markFetching(rec.hash_url, rec.claimed_by ?? 'worker', opts.nowIso);
 
   const extracted = await opts.fetchExtract(rec.discovered_url);
@@ -104,35 +75,46 @@ export async function processRecoveryRecord(opts: {
     );
   }
 
-  await opts.store.markStatus(rec.hash_url, 'FETCHED');
-  const body = extracted.texto_cuerpo_nota || extracted.texto_nota_limpia || extracted.texto_extraido;
+  const body = extracted.texto_cuerpo_nota || extracted.texto_nota_limpia || '';
   const admission = admitDiscoveredArticle({
     url: rec.discovered_url,
     medioId: rec.medio_id,
-    titulo: extracted.titulo,
-    resumen: extracted.resumen,
+    titulo: extracted.titulo ?? rec.discovered_title,
+    resumen: extracted.resumen ?? rec.discovered_summary,
     body,
   });
   if (!admission.admit) {
     return (await opts.store.markRejected(rec.hash_url, admission.reason)) ?? rec;
   }
-  await opts.store.markStatus(rec.hash_url, 'EXTRACTED');
   if (!rec.medio_id) {
     return (await opts.store.markStatus(rec.hash_url, 'UNKNOWN_SOURCE')) ?? rec;
   }
 
-  const item = extractToNoticia({
+  const payload = buildRecoveredNewsPayload({
     url: rec.discovered_url,
     medioId: rec.medio_id,
     extract: extracted,
+    publishedAt: rec.published_at,
+    discoveredTitle: rec.discovered_title,
+    discoveredSummary: rec.discovered_summary,
   });
 
-  if (!opts.writesAllowed) {
-    return (await opts.store.markWouldPersist(rec.hash_url)) ?? rec;
+  if (!opts.writesAllowed || !opts.persistNews) {
+    return (
+      (await opts.store.markStatus(rec.hash_url, restore, {
+        last_dry_run_result: 'WOULD_PERSIST',
+        claimed_at: null,
+        claimed_by: null,
+      })) ?? rec
+    );
   }
-  if (!opts.persistNews) {
-    return (await opts.store.markWouldPersist(rec.hash_url)) ?? rec;
+
+  const persisted = await opts.persistNews(payload);
+  if (persisted.outcome === 'known') {
+    return (await opts.store.markKnown(rec.hash_url, persisted.noticiaId)) ?? rec;
   }
-  const persisted = await opts.persistNews(item);
+  if (!persisted.noticiaId) {
+    return (await opts.store.markStatus(rec.hash_url, 'MANUAL_REVIEW', { last_error: 'persist_without_noticia_id' })) ?? rec;
+  }
   return (await opts.store.markPersisted(rec.hash_url, persisted.noticiaId, opts.nowIso)) ?? rec;
 }

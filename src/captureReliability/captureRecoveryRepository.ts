@@ -1,15 +1,17 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { sourceJobKey } from './catalog.js';
+import { emptySourceState } from './checkpoint.js';
 import type {
   GapCandidate,
   ReconcileRun,
+  RecoveryObservation,
   RecoveryRecord,
   RecoveryStatus,
   SourceReconcileState,
 } from './types.js';
 
-const CLAIMABLE: RecoveryStatus[] = ['QUEUED', 'RETRY'];
+const CLAIMABLE: RecoveryStatus[] = ['QUEUED', 'RETRY', 'FETCH_TO_CLASSIFY'];
 
 export interface CaptureReliabilityStore {
   upsertDiscovered(rec: RecoveryRecord): Promise<RecoveryRecord>;
@@ -34,6 +36,20 @@ export interface CaptureReliabilityStore {
   getRun(runId: string): Promise<ReconcileRun | null>;
   addGapCandidates(rows: GapCandidate[]): Promise<void>;
   listGapCandidates(): Promise<GapCandidate[]>;
+  recordObservation(obs: RecoveryObservation): Promise<void>;
+  listObservations(windowStart: string, windowEnd: string): Promise<RecoveryObservation[]>;
+  claimGapCandidates(opts: { workerId: string; limit: number; nowIso: string }): Promise<GapCandidate[]>;
+  markGapConsumed(candidateId: string, nowIso: string): Promise<void>;
+  releaseStaleGapClaims(staleBeforeIso: string): Promise<number>;
+  claimSourceBatch(opts: {
+    workerId: string;
+    windowStart: string;
+    windowEnd: string;
+    medioIds: string[];
+    limit: number;
+    nowIso: string;
+    staleBeforeIso: string;
+  }): Promise<SourceReconcileState[]>;
   persist?(): void;
 }
 
@@ -61,6 +77,8 @@ export class MemoryCaptureReliabilityStore implements CaptureReliabilityStore {
   readonly sourceState = new Map<string, SourceReconcileState>();
   readonly runs = new Map<string, ReconcileRun>();
   gapCandidates: GapCandidate[] = [];
+  readonly observations: RecoveryObservation[] = [];
+  private claimTail: Promise<unknown> = Promise.resolve();
 
   async upsertDiscovered(rec: RecoveryRecord): Promise<RecoveryRecord> {
     const merged = mergeDiscovered(this.queue.get(rec.hash_url), rec);
@@ -81,6 +99,15 @@ export class MemoryCaptureReliabilityStore implements CaptureReliabilityStore {
   }
 
   async claimBatch(opts: { workerId: string; limit: number; nowIso: string }): Promise<RecoveryRecord[]> {
+    const run = this.claimTail.then(() => this.claimBatchUnlocked(opts));
+    this.claimTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private async claimBatchUnlocked(opts: { workerId: string; limit: number; nowIso: string }): Promise<RecoveryRecord[]> {
     const now = Date.parse(opts.nowIso);
     const out: RecoveryRecord[] = [];
     for (const rec of this.queue.values()) {
@@ -232,6 +259,98 @@ export class MemoryCaptureReliabilityStore implements CaptureReliabilityStore {
   async listGapCandidates(): Promise<GapCandidate[]> {
     return [...this.gapCandidates];
   }
+
+  async recordObservation(obs: RecoveryObservation): Promise<void> {
+    const idx = this.observations.findIndex(
+      (o) => o.run_id === obs.run_id && o.hash_url === obs.hash_url && o.window_start === obs.window_start,
+    );
+    if (idx >= 0) this.observations[idx] = obs;
+    else this.observations.push(obs);
+  }
+
+  async listObservations(windowStart: string, windowEnd: string): Promise<RecoveryObservation[]> {
+    return this.observations.filter((o) => o.window_start === windowStart && o.window_end === windowEnd);
+  }
+
+  async claimGapCandidates(opts: { workerId: string; limit: number; nowIso: string }): Promise<GapCandidate[]> {
+    const out: GapCandidate[] = [];
+    for (const g of this.gapCandidates) {
+      if (out.length >= opts.limit) break;
+      if (g.consumed_at || g.claimed_at) continue;
+      g.claimed_at = opts.nowIso;
+      g.claimed_by = opts.workerId;
+      out.push({ ...g });
+    }
+    return out;
+  }
+
+  async markGapConsumed(candidateId: string, nowIso: string): Promise<void> {
+    const g = this.gapCandidates.find((c) => c.candidate_id === candidateId);
+    if (g) g.consumed_at = nowIso;
+  }
+
+  async releaseStaleGapClaims(staleBeforeIso: string): Promise<number> {
+    const cut = Date.parse(staleBeforeIso);
+    let n = 0;
+    for (const g of this.gapCandidates) {
+      if (!g.claimed_at || g.consumed_at) continue;
+      if (Date.parse(g.claimed_at) > cut) continue;
+      g.claimed_at = null;
+      g.claimed_by = null;
+      n += 1;
+    }
+    return n;
+  }
+
+  async claimSourceBatch(opts: {
+    workerId: string;
+    windowStart: string;
+    windowEnd: string;
+    medioIds: string[];
+    limit: number;
+    nowIso: string;
+    staleBeforeIso: string;
+  }): Promise<SourceReconcileState[]> {
+    const run = this.claimTail.then(() => this.claimSourceUnlocked(opts));
+    this.claimTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private async claimSourceUnlocked(opts: {
+    workerId: string;
+    windowStart: string;
+    windowEnd: string;
+    medioIds: string[];
+    limit: number;
+    nowIso: string;
+    staleBeforeIso: string;
+  }): Promise<SourceReconcileState[]> {
+    const staleCut = Date.parse(opts.staleBeforeIso);
+    const out: SourceReconcileState[] = [];
+    for (const medioId of opts.medioIds) {
+      if (out.length >= opts.limit) break;
+      const key = sourceJobKey(medioId, opts.windowStart, opts.windowEnd);
+      const prev =
+        this.sourceState.get(key) ??
+        emptySourceState({ medioId, windowStart: opts.windowStart, windowEnd: opts.windowEnd });
+      const owned = prev.worker_id === opts.workerId && prev.status === 'IN_PROGRESS';
+      const stale = prev.status === 'IN_PROGRESS' && prev.started_at != null && Date.parse(prev.started_at) <= staleCut;
+      const free = prev.status === 'PENDING';
+      if (!owned && !stale && !free) continue;
+      const next: SourceReconcileState = {
+        ...prev,
+        status: 'IN_PROGRESS',
+        worker_id: opts.workerId,
+        started_at: owned ? prev.started_at : opts.nowIso,
+      };
+      this.sourceState.set(key, next);
+      out.push(next);
+    }
+    return out;
+  }
 }
 
 interface JsonDump {
@@ -239,6 +358,7 @@ interface JsonDump {
   sourceState: SourceReconcileState[];
   runs: ReconcileRun[];
   gapCandidates: GapCandidate[];
+  observations?: RecoveryObservation[];
 }
 
 export class JsonCaptureReliabilityStore extends MemoryCaptureReliabilityStore {
@@ -256,6 +376,7 @@ export class JsonCaptureReliabilityStore extends MemoryCaptureReliabilityStore {
     }
     for (const run of raw.runs ?? []) this.runs.set(run.run_id, run);
     this.gapCandidates = raw.gapCandidates ?? [];
+    for (const obs of raw.observations ?? []) this.observations.push(obs);
   }
 
   persist(): void {
@@ -265,6 +386,7 @@ export class JsonCaptureReliabilityStore extends MemoryCaptureReliabilityStore {
       sourceState: [...this.sourceState.values()],
       runs: [...this.runs.values()],
       gapCandidates: this.gapCandidates,
+      observations: this.observations,
     };
     writeFileSync(this.filePath, JSON.stringify(dump, null, 2));
   }
@@ -333,6 +455,30 @@ export class JsonCaptureReliabilityStore extends MemoryCaptureReliabilityStore {
     const out = await super.markStatus(hashUrl, status, patch);
     this.persist();
     return out;
+  }
+
+  override async recordObservation(obs: RecoveryObservation): Promise<void> {
+    await super.recordObservation(obs);
+    this.persist();
+  }
+
+  override async claimSourceBatch(opts: {
+    workerId: string;
+    windowStart: string;
+    windowEnd: string;
+    medioIds: string[];
+    limit: number;
+    nowIso: string;
+    staleBeforeIso: string;
+  }): Promise<SourceReconcileState[]> {
+    const out = await super.claimSourceBatch(opts);
+    this.persist();
+    return out;
+  }
+
+  override async markGapConsumed(candidateId: string, nowIso: string): Promise<void> {
+    await super.markGapConsumed(candidateId, nowIso);
+    this.persist();
   }
 }
 

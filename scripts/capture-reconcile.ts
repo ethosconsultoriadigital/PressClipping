@@ -5,7 +5,9 @@
 import 'dotenv/config';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { getSupabase } from '../src/supabase/client.js';
-import { ingestNoticias } from '../src/supabase/repositories.js';
+import { captureReliabilitySchemaReady } from '../src/captureReliability/schemaReady.js';
+import { ingestNoticias, updateNoticiaEnriquecida } from '../src/supabase/repositories.js';
+import type { RecoveredNewsPayload } from '../src/captureReliability/recoveryPayload.js';
 import { logger } from '../src/utils/logger.js';
 import { hostnameOf } from '../src/sourceRegistry/identity.js';
 import { fetchAndExtract } from '../src/extractors/html.js';
@@ -13,14 +15,13 @@ import {
   createJsonCaptureRecoveryRepository,
   type CaptureReliabilityStore,
 } from '../src/captureReliability/captureRecoveryRepository.js';
-import { captureRecoveryQueueTableExists, SupabaseCaptureReliabilityStore } from '../src/captureReliability/supabaseStore.js';
+import { SupabaseCaptureReliabilityStore } from '../src/captureReliability/supabaseStore.js';
 import { runReconcileEngine } from '../src/captureReliability/engine.js';
 import { discoverLiveSource } from '../src/captureReliability/discoverLive.js';
 import { loadGapCandidatesFromFile } from '../src/captureReliability/gapCandidates.js';
 import { recoveryWritesAllowed } from '../src/captureReliability/writesGuard.js';
 import type { ChannelCatalogRow } from '../src/captureReliability/types.js';
 import type { LakeRow } from '../src/captureReliability/lakeLookup.js';
-import type { NoticiaInsert } from '../src/normalizers/noticia.js';
 
 function arg(name: string): string | null {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -42,7 +43,7 @@ async function loadActiveCatalog(medioIds: string[]): Promise<ChannelCatalogRow[
   while (true) {
     let q = sb
       .from('medios')
-      .select('medio_id,url_base,activo,rss_url,sitemap_url')
+      .select('medio_id,url_base,activo,rss_url,sitemap_url,metodo_extraccion,secciones_urls')
       .eq('activo', true)
       .order('medio_id')
       .range(from, from + page - 1);
@@ -57,6 +58,8 @@ async function loadActiveCatalog(medioIds: string[]): Promise<ChannelCatalogRow[
         rss_url: (m.rss_url as string | null) ?? null,
         sitemap_url: (m.sitemap_url as string | null) ?? null,
         hostname: hostnameOf(m.url_base as string | null) ?? hostnameOf(m.rss_url as string | null),
+        metodo_extraccion: (m.metodo_extraccion as string | null) ?? null,
+        secciones_urls: (m.secciones_urls as string | null) ?? null,
       });
     }
     if (batch.length < page) break;
@@ -70,25 +73,39 @@ async function queryLakeHashes(hashes: string[]): Promise<LakeRow[]> {
   const sb = getSupabase();
   const { data, error } = await sb
     .from('noticias')
-    .select('hash_url,url_original,url_canonica,texto_cuerpo_nota,texto_nota_limpia')
+    .select('noticia_id,hash_url,url_original,url_canonica,texto_cuerpo_nota,texto_nota_limpia')
     .in('hash_url', hashes);
   if (error) throw error;
   return (data ?? []) as LakeRow[];
 }
 
-async function persistViaNewsLake(item: NoticiaInsert): Promise<{ noticiaId: string | null; inserted: boolean }> {
+async function persistViaNewsLake(payload: RecoveredNewsPayload): Promise<{ noticiaId: string | null; outcome: 'inserted' | 'known' }> {
+  const item = payload.insert;
+  const before = await queryLakeHashes([item.hash_url]);
+  if (before.length) return { noticiaId: before[0]?.noticia_id ?? null, outcome: 'known' };
   await ingestNoticias([item]);
-  return { noticiaId: null, inserted: true };
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from('noticias')
+    .select('noticia_id,medio_id,url_canonica,hash_url')
+    .eq('hash_url', item.hash_url)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data?.noticia_id) {
+    throw new Error(`persist verification failed for ${item.hash_url}`);
+  }
+  await updateNoticiaEnriquecida(data.noticia_id as string, payload.enrichment);
+  return { noticiaId: data.noticia_id as string, outcome: 'inserted' };
 }
 
 async function openStore(jsonPath: string): Promise<{ store: CaptureReliabilityStore; backend: 'supabase' | 'json' }> {
-  try {
-    const sb = getSupabase();
-    if (await captureRecoveryQueueTableExists(sb)) {
-      return { store: new SupabaseCaptureReliabilityStore(sb), backend: 'supabase' };
-    }
-  } catch {
-    /* tables not LIVE — JSON durable fallback */
+  const sb = getSupabase();
+  const ready = await captureReliabilitySchemaReady(sb);
+  if (ready === 'PARTIAL_SCHEMA') {
+    throw new Error('PARTIAL_SCHEMA: capture reliability tables/RPCs are incomplete. Fail closed. No JSON fallback.');
+  }
+  if (ready === 'FULLY_READY') {
+    return { store: new SupabaseCaptureReliabilityStore(sb), backend: 'supabase' };
   }
   return { store: createJsonCaptureRecoveryRepository(jsonPath), backend: 'json' };
 }

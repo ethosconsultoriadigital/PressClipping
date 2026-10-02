@@ -4,6 +4,7 @@ export const RECOVERY_STATUSES = [
   'DISCOVERED',
   'KNOWN_IN_LAKE',
   'QUEUED',
+  'FETCH_TO_CLASSIFY',
   'FETCHING',
   'FETCHED',
   'EXTRACTED',
@@ -76,6 +77,10 @@ export interface RecoveryRecord {
   claimed_by: string | null;
   next_retry_at: string | null;
   noticia_id: string | null;
+  published_at: string | null;
+  discovered_title: string | null;
+  discovered_summary: string | null;
+  last_dry_run_result: string | null;
 }
 
 export interface SourceReconcileState {
@@ -103,6 +108,8 @@ export interface SourceReconcileState {
   cap_hit: boolean;
   time_budget_hit: boolean;
   complete: boolean;
+  coverage_verdict?: CoverageVerdict;
+  worker_id?: string | null;
 }
 
 export interface ReconcileRun {
@@ -118,13 +125,21 @@ export interface ReconcileRun {
 }
 
 export interface GapCandidate {
+  candidate_id: string;
   discovered_url: string;
   publisher_final_url: string | null;
   hostname: string | null;
   discovered_via: string;
   discovered_at: string;
+  canonical_hash: string | null;
+  discovered_urls: string[];
+  medio_id: string | null;
+  fuente_id: string | null;
   cliente_ids?: string[] | null;
   keyword_ids?: string[] | null;
+  claimed_at?: string | null;
+  claimed_by?: string | null;
+  consumed_at?: string | null;
 }
 
 export interface ReconcileDecision {
@@ -146,6 +161,8 @@ export interface ChannelCatalogRow {
   rss_url: string | null;
   sitemap_url: string | null;
   hostname: string | null;
+  metodo_extraccion?: string | null;
+  secciones_urls?: string | null;
 }
 
 /** Vista de corrida para reportes. El estado durable vive en SourceReconcileState. */
@@ -176,9 +193,24 @@ export const TERMINAL_RECOVERY: RecoveryStatus[] = [
 export const EXPLAINED_RECOVERY: RecoveryStatus[] = [
   ...TERMINAL_RECOVERY,
   'QUEUED',
+  'FETCH_TO_CLASSIFY',
   'RETRY',
   'FETCHING',
   'FETCHED',
   'EXTRACTED',
   'NEEDS_ENRICH',
 ];
+
+export type CoverageVerdict = 'COVERAGE_CONFIRMED' | 'COVERAGE_PARTIAL' | 'COVERAGE_UNKNOWN';
+
+export interface RecoveryObservation {
+  run_id: string;
+  hash_url: string;
+  medio_id: string | null;
+  window_start: string;
+  window_end: string;
+  discovered_via: string;
+  observed_status: RecoveryStatus;
+  observed_at: string;
+  reject_reason: string | null;
+}

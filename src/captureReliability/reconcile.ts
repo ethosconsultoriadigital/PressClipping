@@ -1,7 +1,7 @@
-import { admitDiscoveredArticle } from './articleAdmission.js';
+import { classifyPreFetch } from './articleAdmission.js';
 import { lakeRowNeedsEnrich, type LakeRow } from './lakeLookup.js';
 import { classifyFetchFailure } from './retry.js';
-import { resolveSourceForUrl } from './sourceResolve.js';
+import { applyProducerSource } from './sourceResolve.js';
 import { captureCanonicalUrl, hostOf, primaryHash } from './urlIndex.js';
 import type { ChannelCatalogRow, DiscoveredUrl, ReconcileDecision, RecoveryRecord, RootCause } from './types.js';
 
@@ -33,23 +33,17 @@ export function baseRecoveryRecord(item: DiscoveredUrl, nowIso: string): Recover
     claimed_by: null,
     next_retry_at: null,
     noticia_id: null,
+    published_at: item.publishedAt,
+    discovered_title: item.titulo,
+    discovered_summary: item.resumen,
+    last_dry_run_result: null,
   };
 }
 
 export function decideDiscoveredUrl(item: DiscoveredUrl, opts: ReconcileOpts): ReconcileDecision {
   const canonical = captureCanonicalUrl(item.url);
-  const resolved = item.medioId
-    ? { kind: 'resolved' as const, medioId: item.medioId }
-    : resolveSourceForUrl(item.url, opts.catalog);
+  const resolved = applyProducerSource(item.url, opts.catalog, item.medioId);
   const medioId = resolved.kind === 'resolved' ? resolved.medioId : item.medioId;
-  const admission = admitDiscoveredArticle({
-    url: item.url,
-    medioId,
-    titulo: item.titulo,
-    resumen: item.resumen,
-    body: item.body,
-    publishedAt: item.publishedAt,
-  });
 
   const base = baseRecoveryRecord({ ...item, medioId: medioId ?? item.medioId }, opts.nowIso);
 
@@ -70,10 +64,27 @@ export function decideDiscoveredUrl(item: DiscoveredUrl, opts: ReconcileOpts): R
       record: { ...base, status: 'UNKNOWN_SOURCE', root_cause: 'SOURCE_NOT_IN_PLAN' },
     };
   }
-  if (!admission.admit) {
+  const pre = classifyPreFetch(
+    {
+      url: item.url,
+      medioId,
+      titulo: item.titulo,
+      resumen: item.resumen,
+      body: item.body,
+      publishedAt: item.publishedAt,
+    },
+    item.discoveredVia,
+  );
+  if (pre.disposition === 'REJECT') {
     return {
       action: 'WOULD_REJECT',
-      record: { ...base, status: 'REJECTED_NON_ARTICLE', last_error: admission.reason },
+      record: { ...base, status: 'REJECTED_NON_ARTICLE', last_error: pre.reason },
+    };
+  }
+  if (pre.disposition === 'FETCH_TO_CLASSIFY') {
+    return {
+      action: 'WOULD_INSERT',
+      record: { ...base, status: 'FETCH_TO_CLASSIFY', last_error: pre.reason },
     };
   }
 
