@@ -1,9 +1,11 @@
+/** Fail-closed: missing/false/empty secret never writes. */
 export function recoveryWritesEnabled(
   dryRun: boolean,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   if (dryRun) return false;
-  return String(env.ALLOW_MENTIONS_RECOVERY_WRITES ?? '').trim().toLowerCase() === 'true';
+  const raw = String(env.ALLOW_MENTIONS_RECOVERY_WRITES ?? '').trim().toLowerCase();
+  return raw === 'true' || raw === '1';
 }
 
 /** Fail-closed: sin flag, un job de recovery nunca escribe aunque --no-dry-run. */

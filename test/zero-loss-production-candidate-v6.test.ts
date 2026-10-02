@@ -253,7 +253,7 @@ describe('V6 24h job wiring', () => {
     const wf = readFileSync(join(ROOT, '.github/workflows/mentions-master-reconciliation-24h.yml'), 'utf8');
     expect(wf).toContain('--hours=24');
     expect(wf).toContain("MENTIONS_MASTER_BODY_POLICY: 'allowlist'");
-    expect(wf).toContain("ALLOW_MENTIONS_RECOVERY_WRITES: 'false'");
+    expect(wf).toContain('secrets.ALLOW_MENTIONS_RECOVERY_WRITES');
     expect(wf).toContain('mentions-master:reconciliation');
     expect(wf).not.toContain('news-lake:capture');
   });

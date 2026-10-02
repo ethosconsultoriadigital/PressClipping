@@ -1,9 +1,11 @@
 name: mentions-master-reconciliation-24h
 
-# Match-only 24h. No crawl. No Google unwind. BODY allowlist.
-# Primera etapa: workflow_dispatch, dry_run=true. Fail-closed writes.
+# Match-only 24h. No crawl. No Google. BODY allowlist.
+# Schedule prepared; writes fail-closed until secret + dispatch dry_run=false.
 
 on:
+  schedule:
+    - cron: '07 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -13,7 +15,7 @@ on:
         type: boolean
 
 concurrency:
-  group: mentions-master-reconciliation-24h
+  group: ethos-mentions-master-writer
   cancel-in-progress: false
 
 jobs:
@@ -38,7 +40,7 @@ jobs:
       MENTIONS_MASTER_BODY_V2: 'true'
       MENTIONS_MASTER_BODY_POLICY: 'allowlist'
       MENTIONS_MASTER_BODY_V2_KEYWORD_IDS: 'KEY-0040,KEY-0041,KEY-0042,KEY-0043,KEY-0044,KEY-0045,KEY-0046,KEY-0047,KEY-0076,KEY-0077'
-      ALLOW_MENTIONS_RECOVERY_WRITES: 'false'
+      ALLOW_MENTIONS_RECOVERY_WRITES: ${{ secrets.ALLOW_MENTIONS_RECOVERY_WRITES }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -52,7 +54,7 @@ jobs:
           NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
         run: |
           ARGS=( "--hours=24" )
-          if [ "${{ inputs.dry_run }}" != "false" ]; then
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.dry_run }}" != "false" ]; then
             ARGS+=( "--dry-run" )
           else
             ARGS+=( "--no-dry-run" )

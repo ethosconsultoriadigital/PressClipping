@@ -54,16 +54,26 @@ export function parseReconciliationArgs(argv: string[]): ReconciliationArgs {
 
 export async function runMatchReconciliation(args: ReconciliationArgs): Promise<{
   hours: number;
+  window_start: string;
+  window_end: string;
   dry_run: boolean;
   fail_closed: boolean;
   writes_enabled: boolean;
   news_scanned: number;
   pages_scanned: number;
   cap_hit: boolean;
+  RECOVERY_INCOMPLETE: boolean;
+  signal_matches: number;
+  allowlist_body_matches: number;
   matches: number;
   would_append: number;
   appended: number;
-  skipped_dedupe: number;
+  dedupe_skipped: number;
+  missing_title: number;
+  missing_summary: number;
+  missing_url: number;
+  recovered_due_to_null_metadata: number;
+  recovered_due_to_window_overlap: number;
   body_policy: 'allowlist';
 }> {
   const gate = effectiveRecoveryDryRun(args.dryRun);
@@ -83,19 +93,63 @@ export async function runMatchReconciliation(args: ReconciliationArgs): Promise<
   const sheet = doc.sheetsByTitle[args.tab];
   if (!sheet) throw new Error(`No existe pestaña ${args.tab}`);
   const existing = await loadExistingKeys(sheet);
+  const existingSnapshot = new Set(existing);
   const write = await appendRows(sheet, rows, existing, gate.dryRun);
+  const signalRows = buildRows(paged.rows, keywordsByClient, clientNames, {
+    masterBodyV2: false,
+    mode: 'current',
+  });
+  const signalKeys = new Set(signalRows.map((r) => String(r['dedupe_key']).toLowerCase()));
+  const allowlistBody = rows.filter((r) => {
+    const campo = String(r['campo_match'] ?? '');
+    return /texto_cuerpo_nota|texto_nota_limpia/i.test(campo) && !signalKeys.has(String(r['dedupe_key']).toLowerCase());
+  });
+  const would = rows.filter((r) => {
+    const k = String(r['dedupe_key'] ?? '').trim().toLowerCase();
+    return k && !existingSnapshot.has(k);
+  });
+  const newsById = new Map(paged.rows.map((n) => [n.noticia_id, n]));
+  let missing_title = 0;
+  let missing_summary = 0;
+  let missing_url = 0;
+  let recovered_due_to_null_metadata = 0;
+  let recovered_due_to_window_overlap = 0;
+  const liveSince = windowSinceHours(2);
+  for (const r of would) {
+    const n = newsById.get(String(r['NOTICIA'] ?? ''));
+    if (!n) continue;
+    const mt = !n.titulo?.trim();
+    const ms = !n.resumen?.trim();
+    const mu = !n.url_original?.trim();
+    if (mt) missing_title += 1;
+    if (ms) missing_summary += 1;
+    if (mu) missing_url += 1;
+    if (mt || ms || mu) recovered_due_to_null_metadata += 1;
+    if ((n.fecha_captura ?? '') < liveSince) recovered_due_to_window_overlap += 1;
+  }
+  const endedAt = new Date();
   const summary = {
     hours: args.hours,
+    window_start: sinceIso,
+    window_end: endedAt.toISOString(),
     dry_run: gate.dryRun,
     fail_closed: gate.fail_closed,
     writes_enabled: gate.writes_enabled,
     news_scanned: paged.rows.length,
     pages_scanned: paged.pagesScanned,
     cap_hit: paged.capHit,
+    RECOVERY_INCOMPLETE: paged.capHit,
+    signal_matches: signalRows.length,
+    allowlist_body_matches: allowlistBody.length,
     matches: rows.length,
     would_append: write.would_append,
     appended: write.appended,
-    skipped_dedupe: write.skipped,
+    dedupe_skipped: write.skipped,
+    missing_title,
+    missing_summary,
+    missing_url,
+    recovered_due_to_null_metadata,
+    recovered_due_to_window_overlap,
     body_policy: 'allowlist' as const,
   };
   logger.info({

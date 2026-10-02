@@ -97,6 +97,7 @@
     "mentions-matching:zero-loss-v4-dry-run": "tsx scripts/zero-loss-reliability-v4-dry-run.ts",
     "mentions-matching:zero-loss-v5-dry-run": "tsx scripts/zero-loss-validation-v5-dry-run.ts",
     "mentions-matching:zero-loss-v6-dry-run": "tsx scripts/zero-loss-production-candidate-v6-dry-run.ts",
+    "mentions-matching:zero-loss-v7-dry-run": "tsx scripts/zero-loss-operational-v7-dry-run.ts",
     "mention-routing:apply-sheet": "tsx scripts/apply-mention-routing-sheet.ts",
     "mention-routing:dry-run": "tsx scripts/mention-routing-dry-run.ts",
     "news-lake:mentions:lab": "tsx scripts/news-lake-mention-backfill-lab.ts",

@@ -28,9 +28,14 @@ export function classifyPublisherIdentity(
   if (!hostname) {
     return { kind: 'UNKNOWN', hostname: null, candidate_medio_ids: [], candidate_fuente_ids: [], medio_id: null };
   }
-  const fuenteIds = fuentes
-    .filter((f) => hostMatches(hostname, f.url_base) || (f.hostname && (hostname === f.hostname || hostname.endsWith(`.${f.hostname}`))))
-    .map((f) => f.fuente_id);
+  const fuenteIds = [...new Set(fuentes
+    .filter((f) => {
+      if (f.hostname && (hostname === f.hostname.replace(/^www\./, '') || hostname.endsWith(`.${f.hostname.replace(/^www\./, '')}`))) {
+        return true;
+      }
+      return hostMatches(hostname, f.url_base);
+    })
+    .map((f) => f.fuente_id))];
   const medioIds = [...new Set(medios.filter((m) => hostMatches(hostname, m.url_base)).map((m) => m.medio_id))];
   if (fuenteIds.length === 1 && medioIds.length <= 1) {
     return {

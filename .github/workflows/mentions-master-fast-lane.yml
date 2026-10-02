@@ -9,10 +9,9 @@ name: mentions-master-fast-lane
 # y exporta a MENCIONES_MASTER inmediatamente después de cada chunk exitoso,
 # sin esperar al siguiente ciclo.
 #
-# Guardrail operacional: no ejecutar canary/write local a MENCIONES_MASTER
-# mientras un Fast Lane GHA (concurrency group mentions-master-fast-lane) esté
-# activo. cancel-in-progress=false encola, no cancela. No se cambia el diseño
-# Supabase/Sheets por carreras locales.
+# Guardrail operacional: Fast Lane, 24h y 72h comparten concurrency group
+# ethos-mentions-master-writer (cancel-in-progress=false) para serializar
+# appends a MENCIONES_MASTER.
 
 on:
   schedule:
@@ -56,7 +55,7 @@ on:
         type: string
 
 concurrency:
-  group: mentions-master-fast-lane
+  group: ethos-mentions-master-writer
   cancel-in-progress: false
 
 jobs:

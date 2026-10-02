@@ -27,11 +27,32 @@ export const BRAND_SPECIFIC_BODY_SHADOW_KEYWORD_IDS = [
   'KEY-0073',
 ] as const;
 
-export const MERY_CONTEXTUAL_EXCLUDED_FROM_CANARY = [
+export const MERY_CONTEXTUAL_BODY_CANDIDATE_IDS = [
   'KEY-0048',
   'KEY-0049',
   'KEY-0050',
   'KEY-0051',
+] as const;
+
+/** @deprecated alias of MERY_CONTEXTUAL_BODY_CANDIDATE_IDS */
+export const MERY_CONTEXTUAL_EXCLUDED_FROM_CANARY = MERY_CONTEXTUAL_BODY_CANDIDATE_IDS;
+
+/** Propuesta V7. NO activar en workflows de producción. */
+export const MERY_BODY_ALLOWLIST_FULL = [
+  'KEY-0040',
+  'KEY-0041',
+  'KEY-0042',
+  'KEY-0043',
+  'KEY-0044',
+  'KEY-0045',
+  'KEY-0046',
+  'KEY-0047',
+  'KEY-0048',
+  'KEY-0049',
+  'KEY-0050',
+  'KEY-0051',
+  'KEY-0076',
+  'KEY-0077',
 ] as const;
 
 const BODY_CAMPO = new Set(['texto_cuerpo_nota', 'TEXTO_CUERPO_NOTA']);
