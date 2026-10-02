@@ -43,6 +43,18 @@ export function classifySourceKind(input: {
   return { source_kind: 'NEWS_MEDIA', content_origin: 'EDITORIAL' };
 }
 
+export function mapAstraContentOrigin(hint: string | null): ContentOrigin | null {
+  if (!hint) return null;
+  const h = hint.toUpperCase();
+  if (/UGC|ADVOCACY|PETITION/.test(h)) return 'UGC_ADVOCACY';
+  if (/SOCIAL/.test(h)) return 'SOCIAL';
+  if (/INSTITUTIONAL/.test(h)) return 'INSTITUTIONAL';
+  if (/MIX/.test(h)) return 'MIXED';
+  if (/EDITORIAL/.test(h)) return 'EDITORIAL';
+  if (/POR_DETERMINAR|UNKNOWN|PEND/.test(h)) return 'UNKNOWN';
+  return null;
+}
+
 /** Familias editoriales que NO se colapsan; se agrupan con parent. */
 export function editorialGroupKey(name: string, host: string | null): string | null {
   const n = foldName(name);

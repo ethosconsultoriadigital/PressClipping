@@ -131,11 +131,25 @@ export interface AstraCandidateRow {
   municipio: string | null;
   categoria: string | null;
   source_kind_hint: string | null;
+  content_origin_hint: string | null;
   evidence_tier: EvidenceTier;
   astra_batch: string;
   sample_within_30d: boolean;
   notes: string | null;
   facebook_url: string | null;
+  candidate_id: string | null;
+  canonical_key: string | null;
+  sample_url: string | null;
+  sample_date: string | null;
+  evidence_level: string | null;
+  evidence_urls: string | null;
+  estado_revision: string | null;
+  capture_feasibility: string | null;
+  technical_probe_status: string | null;
+  platform_hint: string | null;
+  status: string | null;
+  has_website: boolean | null;
+  social_only: boolean | null;
 }
 
 export const GEO_GAP_P1 = ['Hidalgo', 'Campeche', 'Colima', 'Durango'] as const;
