@@ -13,6 +13,7 @@ dist/
 !tsconfig.json
 !worker/tsconfig.json
 !config/media-validation/calibration-profile-v1.json
+!config/capture-gap-candidates.json
 *-service-account*.json
 
 # Logs

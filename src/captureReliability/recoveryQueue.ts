@@ -1,5 +1,6 @@
 import type { RecoveryRecord, RecoveryStatus } from './types.js';
 
+/** Memory Map SOLO para tests unitarios legacy. Runtime usa captureRecoveryRepository. */
 export class RecoveryQueue {
   private readonly byHash = new Map<string, RecoveryRecord>();
 

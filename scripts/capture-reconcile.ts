@@ -1,19 +1,26 @@
 /**
- * 24h / 72h URL-first reconciliation. Default --dry-run (no inserts).
+ * Capture reliability V3 — scheduler + worker.
+ * Default dry-run. Production writes require --no-dry-run AND ALLOW_CAPTURE_RECOVERY_WRITES=true.
  */
 import 'dotenv/config';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { getSupabase } from '../src/supabase/client.js';
+import { ingestNoticias } from '../src/supabase/repositories.js';
 import { logger } from '../src/utils/logger.js';
-import { fetchRss } from '../src/parsers/rss.js';
-import { fetchSitemap } from '../src/parsers/sitemap.js';
 import { hostnameOf } from '../src/sourceRegistry/identity.js';
-import { emptyCheckpoint, persistProgress, timeBudgetExceeded, resumeFrom } from '../src/captureReliability/checkpoint.js';
-import { decideDiscoveredUrl, unionDiscovery, type LakeRow } from '../src/captureReliability/reconcile.js';
-import { rssWindowCompleteness } from '../src/captureReliability/rssWindow.js';
-import { RecoveryQueue, googleAuditorClassify } from '../src/captureReliability/recoveryQueue.js';
-import { captureCanonicalUrl, captureUrlHashes, primaryHash, hostOf } from '../src/captureReliability/urlIndex.js';
-import type { DiscoveredUrl, CompletenessFlag } from '../src/captureReliability/types.js';
+import { fetchAndExtract } from '../src/extractors/html.js';
+import {
+  createJsonCaptureRecoveryRepository,
+  type CaptureReliabilityStore,
+} from '../src/captureReliability/captureRecoveryRepository.js';
+import { captureRecoveryQueueTableExists, SupabaseCaptureReliabilityStore } from '../src/captureReliability/supabaseStore.js';
+import { runReconcileEngine } from '../src/captureReliability/engine.js';
+import { discoverLiveSource } from '../src/captureReliability/discoverLive.js';
+import { loadGapCandidatesFromFile } from '../src/captureReliability/gapCandidates.js';
+import { recoveryWritesAllowed } from '../src/captureReliability/writesGuard.js';
+import type { ChannelCatalogRow } from '../src/captureReliability/types.js';
+import type { LakeRow } from '../src/captureReliability/lakeLookup.js';
+import type { NoticiaInsert } from '../src/normalizers/noticia.js';
 
 function arg(name: string): string | null {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -22,242 +29,155 @@ function arg(name: string): string | null {
 
 function hoursWindow(hours: number): { start: string; end: string } {
   const end = new Date();
+  end.setUTCMinutes(0, 0, 0);
   const start = new Date(end.getTime() - hours * 3600_000);
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
+async function loadActiveCatalog(medioIds: string[]): Promise<ChannelCatalogRow[]> {
+  const sb = getSupabase();
+  const page = 500;
+  let from = 0;
+  const rows: ChannelCatalogRow[] = [];
+  while (true) {
+    let q = sb
+      .from('medios')
+      .select('medio_id,url_base,activo,rss_url,sitemap_url')
+      .eq('activo', true)
+      .order('medio_id')
+      .range(from, from + page - 1);
+    if (medioIds.length) q = q.in('medio_id', medioIds);
+    const { data, error } = await q;
+    if (error) throw error;
+    const batch = data ?? [];
+    for (const m of batch) {
+      rows.push({
+        medio_id: m.medio_id as string,
+        url_base: (m.url_base as string | null) ?? null,
+        rss_url: (m.rss_url as string | null) ?? null,
+        sitemap_url: (m.sitemap_url as string | null) ?? null,
+        hostname: hostnameOf(m.url_base as string | null) ?? hostnameOf(m.rss_url as string | null),
+      });
+    }
+    if (batch.length < page) break;
+    from += page;
+  }
+  return rows;
+}
+
+async function queryLakeHashes(hashes: string[]): Promise<LakeRow[]> {
+  if (!hashes.length) return [];
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from('noticias')
+    .select('hash_url,url_original,url_canonica,texto_cuerpo_nota,texto_nota_limpia')
+    .in('hash_url', hashes);
+  if (error) throw error;
+  return (data ?? []) as LakeRow[];
+}
+
+async function persistViaNewsLake(item: NoticiaInsert): Promise<{ noticiaId: string | null; inserted: boolean }> {
+  await ingestNoticias([item]);
+  return { noticiaId: null, inserted: true };
+}
+
+async function openStore(jsonPath: string): Promise<{ store: CaptureReliabilityStore; backend: 'supabase' | 'json' }> {
+  try {
+    const sb = getSupabase();
+    if (await captureRecoveryQueueTableExists(sb)) {
+      return { store: new SupabaseCaptureReliabilityStore(sb), backend: 'supabase' };
+    }
+  } catch {
+    /* tables not LIVE — JSON durable fallback */
+  }
+  return { store: createJsonCaptureRecoveryRepository(jsonPath), backend: 'json' };
+}
+
 async function main() {
   const dry = !process.argv.includes('--no-dry-run');
-  const mode = (arg('mode') ?? '24h') as '24h' | '72h';
+  const allowEnv = process.env.ALLOW_CAPTURE_RECOVERY_WRITES ?? null;
+  const writes = recoveryWritesAllowed({ dryRun: dry, allowEnv });
+  const mode = (arg('mode') ?? '24h') as '24h' | '72h' | 'auditor';
   const hours = mode === '72h' ? 72 : 24;
-  const window = hoursWindow(hours);
-  const medioIds = (arg('medio-ids') ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const limit = Number.parseInt(arg('limit') ?? '8', 10);
-  const safetyCap = Number.parseInt(arg('safety-cap') ?? '5000', 10);
-  const budgetMs = Number.parseInt(arg('time-budget-ms') ?? '180000', 10);
-  const runId = `caprel-${mode}-${Date.now()}`;
-  const started = Date.now();
-
-  const sb = getSupabase();
-  let mq = sb
-    .from('medios')
-    .select('medio_id,nombre_medio,url_base,activo,rss_url,sitemap_url,metodo_extraccion')
-    .eq('activo', true)
-    .order('medio_id');
-  if (medioIds.length) mq = mq.in('medio_id', medioIds);
-  const { data: medios, error } = await mq.limit(limit);
-  if (error) throw error;
-  const catalog = medios ?? [];
-
-  const knownHosts = new Map<string, { medioId: string }>();
-  for (const m of catalog) {
-    const h = hostnameOf(m.url_base);
-    if (h) knownHosts.set(h, { medioId: m.medio_id });
-  }
-
-  const incidentHosts = ['afondojalisco.com', 'concienciapublica.com.mx', 'entornoinformativo.com.mx'];
-  const lakeHashes = new Set<string>();
-  const lakeByHash = new Map<string, LakeRow>();
-  for (const h of incidentHosts) {
-    const { data } = await sb
-      .from('noticias')
-      .select('hash_url,url_original,url_canonica,texto_cuerpo_nota,texto_nota_limpia,created_at')
-      .or(`url_original.ilike.%${h}%,url_canonica.ilike.%${h}%`)
-      .limit(500);
-    for (const r of data ?? []) {
-      const row = r as LakeRow;
-      lakeHashes.add(row.hash_url);
-      lakeByHash.set(row.hash_url, row);
-      const extras = [row.url_original, row.url_canonica].filter(Boolean) as string[];
-      for (const u of extras) {
-        for (const hh of captureUrlHashes(u)) {
-          lakeHashes.add(hh);
-          lakeByHash.set(hh, row);
-        }
-      }
-    }
-  }
-
-  let cp = emptyCheckpoint({
-    run_id: runId,
-    mode,
-    window_start: window.start,
-    window_end: window.end,
-  });
-  const queue = new RecoveryQueue();
-  const counts = {
-    URLS_DISCOVERED: 0,
-    URLS_ALREADY_KNOWN: 0,
-    URLS_NEW: 0,
-    WOULD_INSERT_MISSING: 0,
-    WOULD_ENRICH_EXISTING: 0,
-    WOULD_RETRY: 0,
-    WOULD_REJECT_NON_ARTICLE: 0,
-    SOURCE_DISCOVERY_PENDING: 0,
+  const computed = hoursWindow(hours);
+  const window = {
+    start: arg('window-start') ?? computed.start,
+    end: arg('window-end') ?? computed.end,
   };
-  const missingBySource: Record<string, number> = {};
-  const rssFlags: CompletenessFlag[] = [];
-  let capHit = false;
-  let timeBudgetHit = false;
-  const sourcesIncomplete: string[] = [];
+  const medioIds = (arg('medio-ids') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const maxSourcesThisRun = Number.parseInt(arg('max-sources-this-run') ?? arg('limit') ?? '80', 10);
+  const shardIndex = Number.parseInt(arg('shard-index') ?? '0', 10);
+  const shardCount = Number.parseInt(arg('shard-count') ?? '1', 10);
+  const safetyCap = Number.parseInt(arg('safety-cap') ?? '20000', 10);
+  const budgetMs = Number.parseInt(arg('time-budget-ms') ?? '1200000', 10);
+  const processRecovery = !process.argv.includes('--no-recovery');
+  const role = arg('role') ?? 'all';
+  const runId = arg('run-id') ?? `caprel-${mode}-${Date.now()}`;
+  const storePath = arg('store') ?? 'artifacts/capture-reliability-store.json';
+  const gapPath = arg('gap-candidates') ?? 'config/capture-gap-candidates.json';
+  const workerId = process.env.RUN_BY ?? 'capture-reliability-worker';
 
-  const remaining = resumeFrom(cp, catalog.map((m) => m.medio_id));
-  const byId = new Map(catalog.map((m) => [m.medio_id, m]));
+  const catalog = await loadActiveCatalog(medioIds);
+  const { store, backend } = await openStore(storePath);
+  const gapCandidates = loadGapCandidatesFromFile(gapPath);
 
-  for (const id of remaining) {
-    if (timeBudgetExceeded(started, budgetMs, Date.now())) {
-      timeBudgetHit = true;
-      cp = { ...cp, time_budget_hit: true };
-      break;
-    }
-    const m = byId.get(id);
-    if (!m) continue;
-    const layers: DiscoveredUrl[][] = [];
-    let rssComplete: CompletenessFlag = 'UNKNOWN';
-    if (m.rss_url) {
-      try {
-        const items = await fetchRss(m.rss_url);
-        const mapped: DiscoveredUrl[] = items.map((it) => ({
-          url: it.url,
-          canonicalUrl: captureCanonicalUrl(it.url),
-          hashUrl: primaryHash(it.url),
-          medioId: m.medio_id,
-          fuenteId: null,
-          hostname: hostOf(it.url),
-          discoveredVia: 'rss',
-          publishedAt: it.fecha ?? null,
-          titulo: it.titulo ?? null,
-          resumen: it.resumen ?? null,
-          body: null,
-        }));
-        const win = rssWindowCompleteness(
-          mapped.map((x) => ({ publishedAt: x.publishedAt })),
-          window.start,
-          window.end,
-        );
-        rssComplete = win.flag;
-        rssFlags.push(win.flag);
-        if (win.flag === 'NO') sourcesIncomplete.push(m.medio_id);
-        layers.push(mapped.filter((x) => !x.publishedAt || Date.parse(x.publishedAt) >= Date.parse(window.start)));
-      } catch (e) {
-        sourcesIncomplete.push(m.medio_id);
-        logger.warn({ medio_id: m.medio_id, err: e instanceof Error ? e.message : String(e) }, 'rss discovery fail');
-      }
-    } else {
-      rssFlags.push('UNKNOWN');
-    }
-    if (m.sitemap_url) {
-      try {
-        const items = await fetchSitemap(m.sitemap_url, { limit: 400, maxSubSitemaps: 15, maxDepth: 2 });
-        layers.push(
-          items.map((it) => ({
-            url: it.url,
-            canonicalUrl: captureCanonicalUrl(it.url),
-            hashUrl: primaryHash(it.url),
-            medioId: m.medio_id,
-            fuenteId: null,
-            hostname: hostOf(it.url),
-            discoveredVia: 'sitemap',
-            publishedAt: it.fecha ?? null,
-            titulo: it.titulo ?? null,
-            resumen: it.resumen ?? null,
-            body: null,
-          })),
-        );
-      } catch (e) {
-        sourcesIncomplete.push(m.medio_id);
-        logger.warn({ medio_id: m.medio_id, err: e instanceof Error ? e.message : String(e) }, 'sitemap discovery fail');
-      }
-    } else if (rssComplete === 'NO') {
-      sourcesIncomplete.push(`${m.medio_id}:RSS_TRUNCATION+SITEMAP_NOT_SCANNED`);
-    }
-
-    const discovered = unionDiscovery(layers);
-    counts.URLS_DISCOVERED += discovered.length;
-    if (counts.URLS_DISCOVERED > safetyCap) {
-      capHit = true;
-      cp = { ...cp, cap_hit: true };
-      break;
-    }
-    for (const d of discovered) {
-      const dec = decideDiscoveredUrl(d, {
-        nowIso: new Date().toISOString(),
-        lakeHashes,
-        lakeByHash,
-        knownHosts,
-      });
-      queue.upsert(dec.record);
-      if (dec.action === 'SKIP_KNOWN') counts.URLS_ALREADY_KNOWN += 1;
-      if (dec.action === 'WOULD_INSERT') {
-        counts.WOULD_INSERT_MISSING += 1;
-        counts.URLS_NEW += 1;
-        missingBySource[m.medio_id] = (missingBySource[m.medio_id] ?? 0) + 1;
-      }
-      if (dec.action === 'WOULD_ENRICH') counts.WOULD_ENRICH_EXISTING += 1;
-      if (dec.action === 'WOULD_RETRY') counts.WOULD_RETRY += 1;
-      if (dec.action === 'WOULD_REJECT') counts.WOULD_REJECT_NON_ARTICLE += 1;
-      if (dec.action === 'SOURCE_DISCOVERY_PENDING') counts.SOURCE_DISCOVERY_PENDING += 1;
-    }
-    cp = persistProgress(cp, m.medio_id, new Date().toISOString());
-  }
-
-  const googleItems = [
-    'https://afondojalisco.com/monreal-arropa-a-mery-pozos-durante-su-informe-fortalece-su-presencia-rumbo-a-guadalajara/',
-    'https://concienciapublica.com.mx/2026/10/02/monreal-mery-pozos/',
-    'https://entornoinformativo.com.mx/plantea-fortalecer-presupuesto-a-universidades-publicas-la-rectora-de-unison-dena-maria-camarena/',
-  ];
-  const google = googleItems.map((url) => {
-    const host = hostnameOf(url) ?? '';
-    const inLake = [...lakeByHash.values()].some(
-      (r) => (r.url_original && captureCanonicalUrl(r.url_original) === captureCanonicalUrl(url)) ||
-        (r.url_canonica && captureCanonicalUrl(r.url_canonica) === captureCanonicalUrl(url)),
-    );
-    return {
-      url,
-      host,
-      class: googleAuditorClassify({
-        publisherHost: host,
-        knownHosts: new Set(knownHosts.keys()),
-        inLake,
-      }),
+  if (role === 'scheduler') {
+    const { scheduleSourceJobs } = await import('../src/captureReliability/engine.js');
+    const queued = await scheduleSourceJobs(store, catalog, window.start, window.end);
+    const report = {
+      role: 'scheduler',
+      RUN_ID: runId,
+      TOTAL_ACTIVE_SOURCES: catalog.length,
+      SOURCES_QUEUED: queued,
+      STORE_BACKEND: backend,
+      PRODUCTION_RECOVERY_WRITES: 0,
     };
-  });
+    mkdirSync('artifacts', { recursive: true });
+    writeFileSync('artifacts/capture-reliability-24h-dry.json', JSON.stringify(report, null, 2));
+    logger.info(report, 'capture-reliability scheduler');
+    return;
+  }
 
-  const report = {
-    RUN_ID: runId,
-    WINDOW_START: window.start,
-    WINDOW_END: window.end,
-    dry,
-    PRODUCTION_RECOVERY_WRITES: 0,
-    SOURCES_ATTEMPTED: cp.processed_medio_ids.length,
-    SOURCES_INCOMPLETE: [...new Set(sourcesIncomplete)],
-    CAP_HIT: capHit,
-    TIME_BUDGET_HIT: timeBudgetHit,
-    RECONCILIATION_24H_COMPLETE: mode === '24h' && !capHit && !timeBudgetHit && sourcesIncomplete.length === 0,
-    DEEP_72H_COMPLETE: mode === '72h' && !capHit && !timeBudgetHit,
-    RSS_WINDOW_FLAGS: rssFlags,
-    KNOWN_SOURCES_SCANNED: catalog.map((m) => m.medio_id),
-    DISCOVERED_ARTICLES_24H: counts.URLS_DISCOVERED,
-    ALREADY_IN_NEWS_LAKE: counts.URLS_ALREADY_KNOWN,
-    MISSING_FROM_NEWS_LAKE: counts.WOULD_INSERT_MISSING,
-    MISSING_RATE:
-      counts.URLS_DISCOVERED === 0 ? 0 : counts.WOULD_INSERT_MISSING / counts.URLS_DISCOVERED,
-    MISSING_BY_SOURCE: missingBySource,
-    WOULD_RECOVER: counts.WOULD_INSERT_MISSING,
-    WOULD_INSERT_MISSING: counts.WOULD_INSERT_MISSING,
-    WOULD_ENRICH_EXISTING: counts.WOULD_ENRICH_EXISTING,
-    WOULD_RETRY: counts.WOULD_RETRY,
-    WOULD_REJECT_NON_ARTICLE: counts.WOULD_REJECT_NON_ARTICLE,
-    GOOGLE_AUDITOR: google,
-    GOOGLE_MISSING_KNOWN_SOURCE: google.filter((g) => g.class === 'RECOVERY_CANDIDATE').length,
-    checkpoint: cp,
-    sample_queued: queue.byStatus('QUEUED').slice(0, 25),
+  const report = await runReconcileEngine(
+    {
+      runId,
+      mode,
+      windowStart: window.start,
+      windowEnd: window.end,
+      shardIndex,
+      shardCount,
+      workerId,
+      maxSourcesThisRun,
+      safetyCap,
+      timeBudgetMs: budgetMs,
+      processRecovery,
+      dryRun: dry,
+      allowWritesEnv: allowEnv,
+      gapCandidates,
+      nowIso: new Date().toISOString(),
+    },
+    {
+      store,
+      catalog,
+      discoverSource: discoverLiveSource,
+      queryLakeHashes,
+      fetchExtract: (url) => fetchAndExtract(url, { timeoutMs: 12000, maxAttempts: 1 }),
+      persistNews: writes ? persistViaNewsLake : undefined,
+    },
+  );
+
+  const out = {
+    ...report,
+    STORE_BACKEND: backend,
+    LIMIT_12_REMOVED: true,
+    FULL_CATALOG_STRATEGY: 'paginate_medios + durable source jobs + shards',
+    PRODUCTION_RECOVERY_WRITES: writes ? report.PRODUCTION_RECOVERY_WRITES : 0,
+    WRITES_ALLOWED: writes,
+    DRY_RUN: dry,
   };
-  writeFileSync('artifacts/capture-reliability-24h-dry.json', JSON.stringify(report, null, 2));
-  logger.info(report, 'capture-reliability dry-run');
+  mkdirSync('artifacts', { recursive: true });
+  writeFileSync('artifacts/capture-reliability-24h-dry.json', JSON.stringify(out, null, 2));
+  logger.info(out, 'capture-reliability');
 }
 
 main().catch((e) => {

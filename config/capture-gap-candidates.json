@@ -1,0 +1,13 @@
+{
+  "contract": "capture_gap_candidates",
+  "note": "Neutral gap input. Agent A consumes URLs only. No matching. Replace/extend without hardcoding in TS.",
+  "candidates": [
+    {
+      "discovered_url": "https://entornoinformativo.com.mx/plantea-fortalecer-presupuesto-a-universidades-publicas-la-rectora-de-unison-dena-maria-camarena/",
+      "publisher_final_url": "https://entornoinformativo.com.mx/plantea-fortalecer-presupuesto-a-universidades-publicas-la-rectora-de-unison-dena-maria-camarena/",
+      "hostname": "entornoinformativo.com.mx",
+      "discovered_via": "gap_candidate",
+      "discovered_at": "2026-10-02T00:00:00.000Z"
+    }
+  ]
+}

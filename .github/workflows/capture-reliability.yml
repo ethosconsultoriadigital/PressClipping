@@ -1,7 +1,7 @@
 name: capture-reliability
 
-# LIVE + 24h lookback + 72h deep + Google gap auditor.
-# Default dry-run. NO matching. NO alerts. NO Astra ingest.
+# Scheduler (crea jobs) + worker (procesa cola persistente).
+# GitHub NO es la garantía de completeness. Default fail-closed dry-run.
 on:
   workflow_dispatch:
     inputs:
@@ -10,13 +10,25 @@ on:
         required: false
         default: '24h'
       dry_run:
-        description: Sin writes de recovery
+        description: Sin writes de recovery (default true)
         required: false
         default: 'true'
       medio_ids:
         description: Lista opcional de medio_id
         required: false
         default: ''
+      shard_index:
+        description: Shard index (0-based)
+        required: false
+        default: '0'
+      shard_count:
+        description: Shard count
+        required: false
+        default: '1'
+      max_sources_this_run:
+        description: Max sources this worker run (not catalog truncation)
+        required: false
+        default: '80'
   schedule:
     - cron: '25 * * * *'
     - cron: '50 11 * * *'
@@ -32,6 +44,7 @@ jobs:
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      ALLOW_CAPTURE_RECOVERY_WRITES: ${{ secrets.ALLOW_CAPTURE_RECOVERY_WRITES }}
       RUN_BY: github-actions-capture-reliability
       LOG_FORMAT: json
       NO_SEND: 'true'
@@ -45,12 +58,22 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
-      - name: Reconcile dry-run (URL-first)
+      - name: Reconcile (fail-closed dry-run unless dual gate)
         run: |
           MODE="${{ github.event.inputs.mode || '24h' }}"
           if [ "${{ github.event.schedule }}" = "50 11 * * *" ]; then MODE=72h; fi
-          ARGS="--mode=$MODE --limit=12"
+          DRY="${{ github.event.inputs.dry_run || 'true' }}"
+          ARGS="--mode=$MODE --shard-index=${{ github.event.inputs.shard_index || '0' }} --shard-count=${{ github.event.inputs.shard_count || '1' }} --max-sources-this-run=${{ github.event.inputs.max_sources_this_run || '80' }} --gap-candidates=config/capture-gap-candidates.json --store=artifacts/capture-reliability-store.json"
           if [ -n "${{ github.event.inputs.medio_ids }}" ]; then
             ARGS="$ARGS --medio-ids=${{ github.event.inputs.medio_ids }}"
           fi
+          if [ "$DRY" = "false" ]; then
+            ARGS="$ARGS --no-dry-run"
+          fi
           npm run capture-reliability:reconcile -- $ARGS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: capture-reliability-artifacts
+          path: artifacts
+          if-no-files-found: ignore
