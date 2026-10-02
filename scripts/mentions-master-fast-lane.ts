@@ -422,7 +422,7 @@ function bodyRunObservability(metrics?: BodyMatchingCounters, rows: OutRow[] = [
   };
 }
 
-async function loadExistingKeys(sheet: GoogleSpreadsheetWorksheet): Promise<Set<string>> {
+export async function loadExistingKeys(sheet: GoogleSpreadsheetWorksheet): Promise<Set<string>> {
   await withSheetsRetry(() => sheet.loadHeaderRow(), 'master loadHeaderRow');
   const norm = sheet.headerValues.map(normalizeHeader);
   if (!norm.includes(normalizeHeader('dedupe_key'))) {

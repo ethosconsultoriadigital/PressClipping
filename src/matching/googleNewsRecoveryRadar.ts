@@ -1,8 +1,7 @@
-import { canonicalizeUrl } from '../normalizers/url.js';
 import { fetchRss } from '../parsers/rss.js';
-import { fetchTextWithMeta } from '../utils/http.js';
 import { hostnameOfArticleUrl } from '../extractors/transient403Retry.js';
 import type { KeywordActivaRow } from '../supabase/repositories.js';
+import { resolveGoogleNewsUrl } from './googleNewsUrlUnwind.js';
 
 export const GOOGLE_NEWS_RSS_SEARCH =
   'https://news.google.com/rss/search?hl=es-419&gl=MX&ceid=MX:es-419&q=';
@@ -44,20 +43,8 @@ export function recoveryQueriesFromKeywords(keywords: KeywordActivaRow[], maxQue
 }
 
 export async function resolvePublisherUrl(googleOrPublisherUrl: string): Promise<string> {
-  const raw = googleOrPublisherUrl.trim();
-  if (!raw) return raw;
-  try {
-    const host = new URL(raw).hostname.toLowerCase();
-    if (!host.includes('news.google.com')) return canonicalizeUrl(raw);
-  } catch {
-    return raw;
-  }
-  try {
-    const meta = await fetchTextWithMeta(raw, { timeoutMs: 12000, retries: 0, maxAttempts: 1 });
-    return canonicalizeUrl(meta.finalUrl || raw);
-  } catch {
-    return canonicalizeUrl(raw);
-  }
+  const r = await resolveGoogleNewsUrl(googleOrPublisherUrl);
+  return r.publisher_final_url ?? '';
 }
 
 export function classifyPublisher(
