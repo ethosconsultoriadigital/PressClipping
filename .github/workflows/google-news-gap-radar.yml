@@ -1,0 +1,44 @@
+name: google-news-gap-radar
+
+# Safety-net discovery only. No matching. No News Lake writes. No Source Registry writes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      batch_size:
+        description: 'Queries de este ciclo (round-robin)'
+        required: false
+        default: '12'
+        type: string
+
+concurrency:
+  group: google-news-gap-radar
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Google News gap radar (dry)
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      LOG_FORMAT: json
+      RUN_BY: github-actions-google-news-gap-radar
+      NO_SEND: 'true'
+      NO_EMAIL: 'true'
+      NO_WHATSAPP: 'true'
+      NO_TWILIO: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Radar dry-run
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+          GOOGLE_RADAR_BATCH: ${{ inputs.batch_size }}
+        run: npm run mentions-matching:google-gap-radar -- --dry-run --batch=${{ inputs.batch_size }}

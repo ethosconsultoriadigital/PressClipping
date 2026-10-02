@@ -107,78 +107,74 @@ export interface MatchKeywordOpts {
   contextRadius?: number;
 }
 
+export interface KeywordContextPolicyResult {
+  pasa: boolean;
+  razon?: string;
+  skipped_bd_include_exclude: boolean;
+}
+
+function campoTexto(c: CampoBuscable, rule: KeywordRule, opts: MatchKeywordOpts): string {
+  return opts.contextRadius && (c.nombre === 'texto_cuerpo_nota' || c.nombre === 'texto_nota_limpia')
+    ? windowOrFull_(c.texto, rule.terminos, rule.tipo, opts.contextRadius)
+    : c.texto;
+}
+
+/**
+ * Misma política contextual que matchKeyword (BD include/exclude + puertas de código).
+ * El auditor de FPs debe usar esto, no una réplica.
+ */
+export function evaluateKeywordContextPolicy(
+  rule: KeywordRule,
+  campos: CampoBuscable[],
+  opts: MatchKeywordOpts = {},
+): KeywordContextPolicyResult {
+  const foldedFull = foldText(campos.map((c) => campoTexto(c, rule, opts)).join('\n'));
+  const usarGateTequilaCli0002 =
+    rule.cliente_id === 'CLI-0002' && esKeywordTequilaAmpliaCli0002(rule.keyword);
+  const usarGateJumexCli0001 =
+    rule.cliente_id === 'CLI-0001' && esKeywordJumexAmpliaCli0001(rule.keyword);
+  const skippedBd = usarGateTequilaCli0002 || usarGateJumexCli0001;
+
+  if (!skippedBd) {
+    if (rule.contextoExcluir.length > 0 && anyWordPresent(rule.contextoExcluir, foldedFull)) {
+      return { pasa: false, razon: 'contexto_excluir', skipped_bd_include_exclude: false };
+    }
+    if (rule.contextoIncluir.length > 0 && !anyWordPresent(rule.contextoIncluir, foldedFull)) {
+      return { pasa: false, razon: 'contexto_incluir_ausente', skipped_bd_include_exclude: false };
+    }
+  }
+
+  const textoContexto = campos
+    .filter((c) => c.nombre !== 'medio')
+    .map((c) => campoTexto(c, rule, opts))
+    .join('\n');
+  const tituloContexto = campos.find((c) => c.nombre === 'titulo')?.texto ?? '';
+  const cuerpoContexto = campos
+    .filter((c) => CUERPO_CAMPOS.has(c.nombre))
+    .map((c) => campoTexto(c, rule, opts))
+    .join('\n');
+  const puerta = pasaPuertaContextualClienteKeyword({
+    cliente_id: rule.cliente_id,
+    keyword: rule.keyword,
+    texto: textoContexto,
+    titulo: tituloContexto,
+    cuerpo: cuerpoContexto,
+    terminos: rule.terminos,
+  });
+  if (!puerta.pasa) {
+    return { pasa: false, razon: puerta.razon ?? 'puerta_codigo', skipped_bd_include_exclude: skippedBd };
+  }
+  return { pasa: true, skipped_bd_include_exclude: skippedBd };
+}
+
 export function matchKeyword(
   rule: KeywordRule,
   campos: CampoBuscable[],
   opts: MatchKeywordOpts = {},
 ): MatchResultado | null {
-  const foldedFull = foldText(
-    campos
-      .map((c) =>
-        opts.contextRadius && (c.nombre === 'texto_cuerpo_nota' || c.nombre === 'texto_nota_limpia')
-          ? windowOrFull_(c.texto, rule.terminos, rule.tipo, opts.contextRadius)
-          : c.texto,
-      )
-      .join('\n'),
-  );
-
-  // La keyword amplia de tequila (CLI-0002) se rige EXCLUSIVAMENTE por la puerta
-  // contextual de código (política de 3 niveles), no por los contexto_incluir/
-  // excluir rígidos de la BD, que hoy pierden crisis (adulterado/metanol) por
-  // exigir términos industriales. El resto de keywords mantiene sus puertas BD.
-  const usarGateTequilaCli0002 =
-    rule.cliente_id === 'CLI-0002' && esKeywordTequilaAmpliaCli0002(rule.keyword);
-  // Ídem para CLI-0001: keywords AMPLIAS (bebidas azucaradas/jugos/néctares/IEPS)
-  // se rigen por la puerta contextual de 3 niveles. KEYWORD_POLICY_V1: la marca
-  // literal `Jumex` ya NO pasa por esa puerta — matchKeyword exacto de palabra.
-  const usarGateJumexCli0001 =
-    rule.cliente_id === 'CLI-0001' && esKeywordJumexAmpliaCli0001(rule.keyword);
-
-  if (!usarGateTequilaCli0002 && !usarGateJumexCli0001) {
-    // Puerta de exclusión: si aparece algún contexto a excluir, no hay match.
-    if (rule.contextoExcluir.length > 0 && anyWordPresent(rule.contextoExcluir, foldedFull)) {
-      return null;
-    }
-    // Puerta de inclusión: si se exige contexto, al menos uno debe aparecer.
-    const exigeContexto = rule.contextoIncluir.length > 0;
-    if (exigeContexto && !anyWordPresent(rule.contextoIncluir, foldedFull)) {
-      return null;
-    }
-    // exacta_contextual sin contexto definido degrada a exacta (no bloquea).
-  }
-
-  // Puerta contextual cliente/keyword (código): p.ej. keywords comerciales
-  // amplias de CLI-0002 exigen contexto de bebidas. Se evalúa sobre el
-  // título + cuerpo (se excluye el nombre del medio para no contaminar).
-  const textoContexto = campos
-    .filter((c) => c.nombre !== 'medio')
-    .map((c) =>
-      opts.contextRadius && (c.nombre === 'texto_cuerpo_nota' || c.nombre === 'texto_nota_limpia')
-        ? windowOrFull_(c.texto, rule.terminos, rule.tipo, opts.contextRadius)
-        : c.texto,
-    )
-    .join('\n');
-  const tituloContexto = campos.find((c) => c.nombre === 'titulo')?.texto ?? '';
-  const cuerpoContexto = campos
-    .filter((c) => CUERPO_CAMPOS.has(c.nombre))
-    .map((c) =>
-      opts.contextRadius && (c.nombre === 'texto_cuerpo_nota' || c.nombre === 'texto_nota_limpia')
-        ? windowOrFull_(c.texto, rule.terminos, rule.tipo, opts.contextRadius)
-        : c.texto,
-    )
-    .join('\n');
-  if (
-    !pasaPuertaContextualClienteKeyword({
-      cliente_id: rule.cliente_id,
-      keyword: rule.keyword,
-      texto: textoContexto,
-      titulo: tituloContexto,
-      cuerpo: cuerpoContexto,
-      terminos: rule.terminos,
-    }).pasa
-  ) {
-    return null;
-  }
+  const foldedFull = foldText(campos.map((c) => campoTexto(c, rule, opts)).join('\n'));
+  const ctx = evaluateKeywordContextPolicy(rule, campos, opts);
+  if (!ctx.pasa) return null;
 
   // --- Regla booleana: se evalúa sobre el documento completo ----------------
   if (rule.tipo === 'booleana') {

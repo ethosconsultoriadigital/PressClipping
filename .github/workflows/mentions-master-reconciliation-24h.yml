@@ -1,7 +1,7 @@
-name: mentions-master-deep-reconciliation
+name: mentions-master-reconciliation-24h
 
-# Match-only 72h self-healing. No crawl. No Google. BODY allowlist.
-# Write fail-closed: dry_run=false AND ALLOW_MENTIONS_RECOVERY_WRITES=true.
+# Match-only 24h. No crawl. No Google unwind. BODY allowlist.
+# Primera etapa: workflow_dispatch, dry_run=true. Fail-closed writes.
 
 on:
   workflow_dispatch:
@@ -13,12 +13,12 @@ on:
         type: boolean
 
 concurrency:
-  group: mentions-master-reconciliation-72h
+  group: mentions-master-reconciliation-24h
   cancel-in-progress: false
 
 jobs:
   run:
-    name: 72h match-only reconciliation
+    name: 24h match-only reconciliation
     runs-on: ubuntu-latest
     timeout-minutes: 28
     env:
@@ -30,7 +30,7 @@ jobs:
       GOOGLE_MENTIONS_MASTER_SHEET_ID: '1T4-RLnBrK0lp3p-r23hRjrJAmI03QLzBavWM3ZpcmOA'
       GOOGLE_MENTIONS_MASTER_TAB: 'MENCIONES_MASTER'
       LOG_FORMAT: json
-      RUN_BY: github-actions-mentions-deep-reconciliation
+      RUN_BY: github-actions-mentions-reconciliation-24h
       NO_SEND: 'true'
       NO_EMAIL: 'true'
       NO_WHATSAPP: 'true'
@@ -47,11 +47,11 @@ jobs:
           cache: 'npm'
       - name: Instalar dependencias
         run: npm ci
-      - name: Deep reconciliation match-only
+      - name: Reconciliation 24h match-only
         env:
           NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
         run: |
-          ARGS=( "--hours=72" )
+          ARGS=( "--hours=24" )
           if [ "${{ inputs.dry_run }}" != "false" ]; then
             ARGS+=( "--dry-run" )
           else

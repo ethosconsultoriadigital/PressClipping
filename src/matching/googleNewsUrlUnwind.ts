@@ -31,6 +31,24 @@ export interface GoogleUrlResolution {
 
 const BATCH_EXECUTE = 'https://news.google.com/_/DotsSplashUi/data/batchexecute';
 
+const unwindCache = new Map<string, GoogleUrlResolution>();
+
+export function unwindCacheSize(): number {
+  return unwindCache.size;
+}
+
+export function clearUnwindCache(): void {
+  unwindCache.clear();
+}
+
+export function seedUnwindCache(articleId: string, resolution: GoogleUrlResolution): void {
+  unwindCache.set(articleId, { ...resolution, method: resolution.method });
+}
+
+function cacheKey(url: string): string | null {
+  return googleArticleId(url) ?? (isGoogleNewsHost(url) ? url : null);
+}
+
 export function isGoogleNewsHost(urlOrHost: string): boolean {
   try {
     const host = urlOrHost.includes('://')
@@ -230,6 +248,11 @@ export async function resolveGoogleNewsUrl(
   const allowNetwork = opts.allowNetwork !== false;
 
   if (!raw) return unresolved(raw);
+  const cachedKey = cacheKey(raw);
+  if (cachedKey && unwindCache.has(cachedKey)) {
+    const hit = unwindCache.get(cachedKey)!;
+    return { ...hit, google_url: raw };
+  }
   if (!isGoogleNewsHost(raw)) {
     const canonical = canonicalizeUrl(raw);
     return {
@@ -243,29 +266,48 @@ export async function resolveGoogleNewsUrl(
   }
 
   const fromQuery = publisherUrlFromQueryParams(raw);
-  if (fromQuery) return resolutionOf(raw, fromQuery, 'query_param');
+  if (fromQuery) {
+    const r = resolutionOf(raw, fromQuery, 'query_param');
+    if (cachedKey) unwindCache.set(cachedKey, r);
+    return r;
+  }
 
   const id = googleArticleId(raw);
   if (id) {
     const embedded = publisherUrlsFromGoogleToken(id);
-    if (embedded[0]) return resolutionOf(raw, embedded[0], 'token_embedded_url');
+    if (embedded[0]) {
+      const r = resolutionOf(raw, embedded[0], 'token_embedded_url');
+      unwindCache.set(id, r);
+      return r;
+    }
   }
 
   if (!allowNetwork) return unresolved(raw);
 
   const page = await fetchGoogleWrapper(raw, timeoutMs);
   if (page?.finalUrl && !isGoogleNewsHost(page.finalUrl)) {
-    return resolutionOf(raw, page.finalUrl, 'http_redirect');
+    const r = resolutionOf(raw, page.finalUrl, 'http_redirect');
+    if (cachedKey) unwindCache.set(cachedKey, r);
+    return r;
   }
   if (page?.text) {
     const fromHtml = publisherUrlFromHtml(page.text);
-    if (fromHtml) return resolutionOf(raw, fromHtml, 'html_canonical');
+    if (fromHtml) {
+      const r = resolutionOf(raw, fromHtml, 'html_canonical');
+      if (cachedKey) unwindCache.set(cachedKey, r);
+      return r;
+    }
     if (id) {
       const gart = await resolveViaGarturl(id, page.text, timeoutMs);
-      if (gart) return resolutionOf(raw, gart, 'google_garturl');
+      if (gart) {
+        const r = resolutionOf(raw, gart, 'google_garturl');
+        unwindCache.set(id, r);
+        return r;
+      }
     }
   }
-  return unresolved(raw);
+  const miss = unresolved(raw);
+  return miss;
 }
 
 export async function resolveGoogleNewsUrls(
