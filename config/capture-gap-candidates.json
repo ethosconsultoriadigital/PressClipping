@@ -1,0 +1,24 @@
+{
+  "contract": "capture_gap_candidates",
+  "note": "Neutral gap input. Agent A consumes publisher_final_url. Google URLs stay in google_item_urls.",
+  "candidates": [
+    {
+      "publisher_final_url": "https://entornoinformativo.com.mx/plantea-fortalecer-presupuesto-a-universidades-publicas-la-rectora-de-unison-dena-maria-camarena/",
+      "canonical_hash": "",
+      "hostname": "entornoinformativo.com.mx",
+      "medio_id": "MED-0441",
+      "candidate_medio_ids": ["MED-0441"],
+      "fuente_id": null,
+      "candidate_fuente_ids": [],
+      "cliente_ids": [],
+      "keyword_ids": [],
+      "queries": [],
+      "google_item_urls": [],
+      "first_discovered_at": "2026-10-02T00:00:00.000Z",
+      "last_discovered_at": "2026-10-02T00:00:00.000Z",
+      "discovered_via": "GOOGLE_NEWS_RADAR",
+      "discovery_status": "MISSING_KNOWN_SOURCE",
+      "discovered_url": "https://entornoinformativo.com.mx/plantea-fortalecer-presupuesto-a-universidades-publicas-la-rectora-de-unison-dena-maria-camarena/"
+    }
+  ]
+}

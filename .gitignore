@@ -13,6 +13,7 @@ dist/
 !tsconfig.json
 !worker/tsconfig.json
 !config/media-validation/calibration-profile-v1.json
+!config/capture-gap-candidates.json
 *-service-account*.json
 
 # Logs
@@ -40,3 +41,8 @@ Thumbs.db
 # Cobertura / temporales de test
 coverage/
 .vitest/
+
+# Dumps Astra LIVE (no commitear)
+data/source-registry/*.csv
+data/source-registry/*.xlsx
+!data/source-registry/README.md

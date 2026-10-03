@@ -1,0 +1,16 @@
+nombre,url,dominio,estado,municipio,categoria,tipo_fuente,muestra_30d,facebook,notas
+Quadratín Nacional,https://www.quadratin.com.mx,quadratin.com.mx,Nacional,,política,NEWS_MEDIA,1,,
+Quadratín Chiapas,https://chiapas.quadratin.com.mx,chiapas.quadratin.com.mx,Chiapas,,política,REGIONAL_EDITION,1,,
+Quadratín Chihuahua,https://chihuahua.quadratin.com.mx,chihuahua.quadratin.com.mx,Chihuahua,,política,REGIONAL_EDITION,1,,
+Quadratín Veracruz,https://veracruz.quadratin.com.mx,veracruz.quadratin.com.mx,Veracruz,,política,REGIONAL_EDITION,1,,
+Iztapalapa Noticias,https://iztapalapanoticias.mx,iztapalapanoticias.mx,Ciudad de México,Iztapalapa,local,NEWS_MEDIA,1,,cluster
+Noticias Coyoacán,https://noticiasdecoyoacan.mx,noticiasdecoyoacan.mx,Ciudad de México,Coyoacán,local,NEWS_MEDIA,1,,cluster
+Noticias de México,https://noticiasdemexico.com,noticiasdemexico.com,Nacional,,nacional,NEWS_MEDIA,0,,cluster
+Guardia Nocturna,https://guardianocturna.mx,guardianocturna.mx,Jalisco,,local,NEWS_MEDIA,1,,zmg
+Tráfico ZMG,https://traficozmg.com,traficozmg.com,Jalisco,,local,NEWS_MEDIA,1,,zmg
+CitizenGO,https://www.citizengo.org,citizengo.org,Nacional,,advocacy,PETITION_PLATFORM,1,,
+Change.org,https://www.change.org,change.org,Nacional,,advocacy,PETITION,1,,
+El Poder del Consumidor,https://elpoderdelconsumidor.org,elpoderdelconsumidor.org,Nacional,,salud,NGO,0,,
+Milenio,https://www.milenio.com,milenio.com,Nacional,,nacional,NEWS_MEDIA,1,,legacy-dup
+Hidalgo Informa,https://hidalgoinforma.mx,hidalgoinforma.mx,Hidalgo,,política,NEWS_MEDIA,1,,
+Página de Facebook Ejemplo,https://www.facebook.com/noticiaslocal,facebook.com,Puebla,,social,SOCIAL,0,https://www.facebook.com/noticiaslocal,

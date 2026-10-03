@@ -1,0 +1,188 @@
+name: capture-reliability
+
+# GitHub is one caller of the same CLI. Persistent DB/store is the source of truth.
+# Schedule stays fail-closed dry-run unless ALLOW_CAPTURE_RECOVERY_WRITES=true.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 24h | 72h | auditor
+        required: false
+        default: '24h'
+      dry_run:
+        description: Sin writes de recovery (default true)
+        required: false
+        default: 'true'
+      role:
+        description: scheduler | source | recovery | all
+        required: false
+        default: 'all'
+      cycle_id:
+        description: Fixed cycle id (optional)
+        required: false
+        default: ''
+      window_start:
+        description: ISO window start (optional; otherwise cycle-computed)
+        required: false
+        default: ''
+      window_end:
+        description: ISO window end (optional; otherwise cycle-computed)
+        required: false
+        default: ''
+      medio_ids:
+        description: Lista opcional de medio_id
+        required: false
+        default: ''
+      shard_index:
+        description: Shard index (0-based)
+        required: false
+        default: '0'
+      shard_count:
+        description: Shard count
+        required: false
+        default: '8'
+      max_sources_this_run:
+        description: Max sources this source-worker run
+        required: false
+        default: '80'
+      recovery_batch_size:
+        description: Recovery claim batch size
+        required: false
+        default: '50'
+      max_recovery_batches:
+        description: Recovery batches this run
+        required: false
+        default: '20'
+  schedule:
+    - cron: '25 * * * *'
+    - cron: '50 11 * * *'
+
+concurrency:
+  group: capture-reliability-${{ github.event.inputs.role || 'all' }}-${{ github.event.inputs.shard_index || '0' }}
+  cancel-in-progress: false
+
+jobs:
+  scheduler:
+    if: ${{ github.event_name == 'schedule' || github.event.inputs.role == 'scheduler' || github.event.inputs.role == 'all' || github.event.inputs.role == '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      ALLOW_CAPTURE_RECOVERY_WRITES: ${{ secrets.ALLOW_CAPTURE_RECOVERY_WRITES }}
+      RUN_BY: github-actions-capture-reliability
+      LOG_FORMAT: json
+      NO_SEND: 'true'
+      NO_EMAIL: 'true'
+      NO_WHATSAPP: 'true'
+      NO_TWILIO: 'true'
+    outputs:
+      cycle_id: ${{ steps.cycle.outputs.cycle_id }}
+      window_start: ${{ steps.cycle.outputs.window_start }}
+      window_end: ${{ steps.cycle.outputs.window_end }}
+      mode: ${{ steps.cycle.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - id: cycle
+        name: Resolve fixed cycle
+        run: |
+          MODE="${{ github.event.inputs.mode || '24h' }}"
+          if [ "${{ github.event.schedule }}" = "50 11 * * *" ]; then MODE=72h; fi
+          WS="${{ github.event.inputs.window_start }}"
+          WE="${{ github.event.inputs.window_end }}"
+          CID="${{ github.event.inputs.cycle_id }}"
+          if [ -z "$WE" ]; then WE=$(date -u +"%Y-%m-%dT%H:00:00.000Z"); fi
+          if [ -z "$WS" ]; then
+            if [ "$MODE" = "72h" ]; then WS=$(date -u -d "$WE -72 hours" +"%Y-%m-%dT%H:00:00.000Z"); else WS=$(date -u -d "$WE -24 hours" +"%Y-%m-%dT%H:00:00.000Z"); fi
+          fi
+          if [ -z "$CID" ]; then CID="caprel-$MODE-$(echo "$WE" | tr -d '-:' | sed 's/\..*Z/Z/')"; fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "window_start=$WS" >> "$GITHUB_OUTPUT"
+          echo "window_end=$WE" >> "$GITHUB_OUTPUT"
+          echo "cycle_id=$CID" >> "$GITHUB_OUTPUT"
+      - name: Schedule source jobs
+        run: |
+          DRY="${{ github.event.inputs.dry_run || 'true' }}"
+          ARGS="--role=scheduler --mode=${{ steps.cycle.outputs.mode }} --cycle-id=${{ steps.cycle.outputs.cycle_id }} --window-start=${{ steps.cycle.outputs.window_start }} --window-end=${{ steps.cycle.outputs.window_end }} --shard-count=${{ github.event.inputs.shard_count || '8' }} --store=artifacts/capture-reliability-store.json --gap-candidates=config/capture-gap-candidates.json"
+          if [ "$DRY" = "false" ] && [ "${ALLOW_CAPTURE_RECOVERY_WRITES}" = "true" ]; then ARGS="$ARGS --no-dry-run"; fi
+          npm run capture-reliability:reconcile -- $ARGS
+
+  source-worker:
+    needs: scheduler
+    if: ${{ always() && (github.event_name == 'schedule' || github.event.inputs.role == 'source' || github.event.inputs.role == 'all' || github.event.inputs.role == '') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard_index: [0, 1, 2, 3, 4, 5, 6, 7]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      ALLOW_CAPTURE_RECOVERY_WRITES: ${{ secrets.ALLOW_CAPTURE_RECOVERY_WRITES }}
+      RUN_BY: github-actions-capture-source
+      LOG_FORMAT: json
+      NO_SEND: 'true'
+      NO_EMAIL: 'true'
+      NO_WHATSAPP: 'true'
+      NO_TWILIO: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Source worker shard
+        run: |
+          DRY="${{ github.event.inputs.dry_run || 'true' }}"
+          ARGS="--role=source --mode=${{ needs.scheduler.outputs.mode || github.event.inputs.mode || '24h' }} --cycle-id=${{ needs.scheduler.outputs.cycle_id }} --window-start=${{ needs.scheduler.outputs.window_start }} --window-end=${{ needs.scheduler.outputs.window_end }} --shard-index=${{ matrix.shard_index }} --shard-count=8 --max-sources-this-run=${{ github.event.inputs.max_sources_this_run || '80' }} --no-recovery --store=artifacts/capture-reliability-store.json --gap-candidates=config/capture-gap-candidates.json"
+          if [ -n "${{ github.event.inputs.medio_ids }}" ]; then ARGS="$ARGS --medio-ids=${{ github.event.inputs.medio_ids }}"; fi
+          if [ "$DRY" = "false" ] && [ "${ALLOW_CAPTURE_RECOVERY_WRITES}" = "true" ]; then ARGS="$ARGS --no-dry-run"; fi
+          npm run capture-reliability:reconcile -- $ARGS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: capture-reliability-source-${{ matrix.shard_index }}
+          path: artifacts
+          if-no-files-found: ignore
+
+  recovery-worker:
+    needs: [scheduler, source-worker]
+    if: ${{ always() && (github.event_name == 'schedule' || github.event.inputs.role == 'recovery' || github.event.inputs.role == 'all' || github.event.inputs.role == '') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      ALLOW_CAPTURE_RECOVERY_WRITES: ${{ secrets.ALLOW_CAPTURE_RECOVERY_WRITES }}
+      RUN_BY: github-actions-capture-recovery
+      LOG_FORMAT: json
+      NO_SEND: 'true'
+      NO_EMAIL: 'true'
+      NO_WHATSAPP: 'true'
+      NO_TWILIO: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Recovery worker
+        run: |
+          DRY="${{ github.event.inputs.dry_run || 'true' }}"
+          ARGS="--role=recovery --mode=${{ needs.scheduler.outputs.mode || github.event.inputs.mode || '24h' }} --cycle-id=${{ needs.scheduler.outputs.cycle_id }} --window-start=${{ needs.scheduler.outputs.window_start }} --window-end=${{ needs.scheduler.outputs.window_end }} --recovery-batch-size=${{ github.event.inputs.recovery_batch_size || '50' }} --max-recovery-batches=${{ github.event.inputs.max_recovery_batches || '20' }} --recovery-concurrency=4 --global-concurrency=8 --per-host-concurrency=2 --store=artifacts/capture-reliability-store.json"
+          if [ "$DRY" = "false" ] && [ "${ALLOW_CAPTURE_RECOVERY_WRITES}" = "true" ]; then ARGS="$ARGS --no-dry-run"; fi
+          npm run capture-reliability:reconcile -- $ARGS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: capture-reliability-recovery
+          path: artifacts
+          if-no-files-found: ignore
