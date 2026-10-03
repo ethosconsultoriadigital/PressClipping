@@ -11,6 +11,7 @@ import { recoveryTargetUrl } from './gapCandidates.js';
 import { cycleIsDrained } from './cycle.js';
 import { captureCanonicalUrl, hostOf, primaryHash } from './urlIndex.js';
 import { recoveryWritesAllowed } from './writesGuard.js';
+import { gapRecoveryEligible } from '../matching/bGapCandidateToCaptureGapRow.js';
 import type { RecoveryFetchExtract, RecoveryPersist } from './recoveryWorker.js';
 
 export interface SourceDiscovery {
@@ -60,6 +61,7 @@ export interface EngineOpts {
   recoveryTimeBudgetMs?: number;
   globalConcurrency?: number;
   perHostConcurrency?: number;
+  recoveryOnlyHashes?: Set<string>;
 }
 
 export interface EngineReport {
@@ -337,6 +339,7 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
     ? await lookupExistingNewsByHashes(gapUrls, deps.queryLakeHashes)
     : new Map<string, import('./lakeLookup.js').LakeRow | null>();
   for (const g of gaps) {
+    if (!gapRecoveryEligible(g.discovery_status)) continue;
     const url = recoveryTargetUrl(g);
     const fetchUrl = g.discovered_url && hostOf(g.discovered_url) === hostOf(url) ? g.discovered_url : url;
     const hash = g.canonical_hash || primaryHash(url);
@@ -407,6 +410,9 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
       fetchExtract: deps.fetchExtract,
       persistNews: deps.persistNews,
       maxAttempts: opts.maxAttempts,
+      onlyHashes: opts.recoveryOnlyHashes,
+      windowStart: opts.windowStart,
+      windowEnd: opts.windowEnd,
     });
     if (recovery.TIME_BUDGET_HIT) timeBudgetHit = true;
   }

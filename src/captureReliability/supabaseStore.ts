@@ -126,16 +126,19 @@ export class SupabaseCaptureReliabilityStore implements CaptureReliabilityStore 
     return merged;
   }
 
-  async claimBatch(opts: { workerId: string; limit: number; nowIso: string; skipHashes?: Set<string> }): Promise<RecoveryRecord[]> {
-    const { data, error } = await this.sb.rpc('claim_capture_recovery_batch', {
+  async claimBatch(opts: { workerId: string; limit: number; nowIso: string; skipHashes?: Set<string>; onlyHashes?: Set<string> }): Promise<RecoveryRecord[]> {
+    const args: Record<string, unknown> = {
       p_worker_id: opts.workerId,
       p_limit: opts.limit,
       p_now: opts.nowIso,
-    });
+    };
+    if (opts.onlyHashes?.size) args.p_only_hashes = [...opts.onlyHashes];
+    const { data, error } = await this.sb.rpc('claim_capture_recovery_batch', args);
     if (error) throw error;
-    const rows = (data ?? []).map((row: Record<string, unknown>) => recFromRow(row));
-    if (!opts.skipHashes?.size) return rows;
-    return rows.filter((r: RecoveryRecord) => !opts.skipHashes!.has(r.hash_url));
+    let rows = (data ?? []).map((row: Record<string, unknown>) => recFromRow(row));
+    if (opts.onlyHashes?.size) rows = rows.filter((r: RecoveryRecord) => opts.onlyHashes!.has(r.hash_url));
+    if (opts.skipHashes?.size) rows = rows.filter((r: RecoveryRecord) => !opts.skipHashes!.has(r.hash_url));
+    return rows;
   }
 
   private async patch(hashUrl: string, fn: (r: RecoveryRecord) => RecoveryRecord): Promise<RecoveryRecord | null> {

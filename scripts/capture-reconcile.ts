@@ -27,6 +27,7 @@ import { buildCoverageRemediation } from '../src/captureReliability/coverageReme
 import { auditQueuedSample } from '../src/captureReliability/queueAudit.js';
 import type { ChannelCatalogRow } from '../src/captureReliability/types.js';
 import type { LakeRow } from '../src/captureReliability/lakeLookup.js';
+import { primaryHash } from '../src/captureReliability/urlIndex.js';
 
 function arg(name: string): string | null {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -152,6 +153,18 @@ async function main() {
   const storePath = arg('store') ?? 'artifacts/capture-reliability-store.json';
   const gapPath = arg('gap-candidates') ?? 'config/capture-gap-candidates.json';
   const workerId = process.env.RUN_BY ?? 'capture-reliability-worker';
+  const recoveryHashes = new Set(
+    [
+      ...(arg('recovery-hashes') ?? '').split(','),
+      ...(arg('recovery-urls') ?? '')
+        .split(',')
+        .map((u) => u.trim())
+        .filter(Boolean)
+        .map((u) => primaryHash(u)),
+    ]
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
 
   const catalog = await loadActiveCatalog(medioIds);
   const { store, backend } = await openStore(storePath);
@@ -192,6 +205,9 @@ async function main() {
       writesAllowed: writes,
       fetchExtract: (url) => fetchAndExtract(url, { timeoutMs: 12000, maxAttempts: 1 }),
       persistNews: writes ? persistViaNewsLake : undefined,
+      onlyHashes: recoveryHashes.size ? recoveryHashes : undefined,
+      windowStart: cycle.window_start,
+      windowEnd: cycle.window_end,
     });
     const report = {
       role: 'recovery',
@@ -231,6 +247,7 @@ async function main() {
       recoveryTimeBudgetMs,
       globalConcurrency,
       perHostConcurrency,
+      recoveryOnlyHashes: recoveryHashes.size ? recoveryHashes : undefined,
     },
     {
       store,

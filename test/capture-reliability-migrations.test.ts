@@ -26,11 +26,13 @@ describe('Capture reliability migrations package', () => {
     expect(d).toContain('google_item_urls text[]');
     expect(d).toContain('grant select, insert, update, delete on table public.capture_gap_candidates to service_role');
     expect(sql('0019b_capture_reliability_preflight.sql')).toContain('claim_capture_gap_batch');
+    expect(sql('0020_reliability_integration_rc1.sql')).toContain('b_google_radar_cursor');
+    expect(sql('0020_reliability_integration_rc1.sql')).toContain('grant select, insert, update, delete on table public.b_google_radar_cursor to service_role');
   });
 
   it('T66 fresh schema package is ordered 0016→0019', () => {
-    const names = ['0016_capture_recovery_queue.sql', '0017_capture_reconcile_state.sql', '0018_capture_reliability_v4.sql', '0019_capture_gap_contract.sql'];
-    expect(names.join('|')).toBe('0016_capture_recovery_queue.sql|0017_capture_reconcile_state.sql|0018_capture_reliability_v4.sql|0019_capture_gap_contract.sql');
+    const names = ['0016_capture_recovery_queue.sql', '0017_capture_reconcile_state.sql', '0018_capture_reliability_v4.sql', '0019_capture_gap_contract.sql', '0020_reliability_integration_rc1.sql'];
+    expect(names.join('|')).toBe('0016_capture_recovery_queue.sql|0017_capture_reconcile_state.sql|0018_capture_reliability_v4.sql|0019_capture_gap_contract.sql|0020_reliability_integration_rc1.sql');
     const combined = names.map(sql).join('\n');
     expect(combined.indexOf('create table if not exists public.capture_recovery_queue')).toBeLessThan(
       combined.indexOf('create table if not exists public.capture_gap_candidates'),

@@ -77,3 +77,7 @@ export async function captureReliabilitySchemaReady(sb: SupabaseClient): Promise
   const columnsOk = present[0] === true && present[3] === true;
   return classifySchemaPresence(present, rpcOk, columnsOk);
 }
+
+export async function googleRadarCursorSchemaReady(sb: SupabaseClient): Promise<boolean> {
+  return probeTable(sb, 'b_google_radar_cursor', ['id', 'plan_hash', 'offset', 'cycle_started_at', 'updated_at']);
+}

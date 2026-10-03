@@ -6,6 +6,7 @@ import { buildRecoveredNewsPayload, type RecoveredNewsPayload } from './recovery
 import type { NoticiaInsert } from '../normalizers/noticia.js';
 import type { CaptureReliabilityStore } from './captureRecoveryRepository.js';
 import type { RecoveryRecord, RecoveryStatus } from './types.js';
+import { isAutoWriteEligible } from './writeEligibility.js';
 
 export interface RecoveryFetchExtract {
   (url: string): Promise<FetchExtractResult>;
@@ -42,6 +43,8 @@ export async function processRecoveryRecord(opts: {
   writesAllowed: boolean;
   nowIso: string;
   maxAttempts?: number;
+  windowStart?: string;
+  windowEnd?: string;
 }): Promise<RecoveryRecord> {
   const rec = opts.record;
   const maxAttempts = opts.maxAttempts ?? 8;
@@ -98,6 +101,18 @@ export async function processRecoveryRecord(opts: {
     discoveredTitle: rec.discovered_title,
     discoveredSummary: rec.discovered_summary,
   });
+
+  const eligibility = isAutoWriteEligible(rec, { start: opts.windowStart, end: opts.windowEnd }, payload.insert.fecha_publicacion);
+  if (!eligibility.eligible) {
+    return (
+      (await opts.store.markStatus(rec.hash_url, 'MANUAL_REVIEW', {
+        last_error: `NOT_AUTO_WRITE_ELIGIBLE:${eligibility.reason}`,
+        last_dry_run_result: eligibility.reason,
+        claimed_at: null,
+        claimed_by: null,
+      })) ?? rec
+    );
+  }
 
   if (!opts.writesAllowed || !opts.persistNews) {
     return (

@@ -21,7 +21,8 @@ import {
   reconcileCursor,
   toSliceCursor,
 } from '../src/matching/radarCursorStore.js';
-import { ArtifactGapCandidateSink, type GapCandidate } from '../src/matching/gapCandidateSink.js';
+import { createGapCandidateSink, type GapCandidate } from '../src/matching/gapCandidateSink.js';
+import { googleGapDbWritesAllowed } from '../src/matching/googleGapWrites.js';
 import { parseIntOrNull } from '../src/utils/parse.js';
 import { logger } from '../src/utils/logger.js';
 
@@ -29,10 +30,15 @@ const FILE_CURSOR = join(process.cwd(), 'artifacts', 'google-query-plan-cursor.j
 
 async function loadRegistry() {
   const sb = getSupabase();
+  const { count, error: countErr } = await sb.from('fuente_canales').select('fuente_id', { count: 'exact', head: true });
+  if (countErr) {
+    return registryLoadFromQueryResult({ error: countErr.message, rows: [] });
+  }
+  const expected = count ?? 0;
   const page = 1000;
   const rows: unknown[] = [];
   let errorMsg: string | null = null;
-  for (let from = 0; from < 20_000; from += page) {
+  for (let from = 0; from < Math.max(expected, 1) + page; from += page) {
     const { data, error } = await sb
       .from('fuente_canales')
       .select('fuente_id,canonical_url,canonical_domain,hostname,platform,activo')
@@ -44,10 +50,19 @@ async function loadRegistry() {
     rows.push(...(data ?? []));
     if (!data || data.length < page) break;
   }
-  return registryLoadFromQueryResult({
+  const loaded = registryLoadFromQueryResult({
     error: errorMsg,
     rows,
   });
+  if (!errorMsg && expected !== loaded.REGISTRY_CHANNELS_READ) {
+    return {
+      ...loaded,
+      SOURCE_REGISTRY_READY: false,
+      SOURCE_REGISTRY_FALLBACK: true,
+      error: `REGISTRY_CHANNELS_TRUNCATED expected=${expected} read=${loaded.REGISTRY_CHANNELS_READ}`,
+    };
+  }
+  return { ...loaded, REGISTRY_CHANNELS_EXPECTED: expected };
 }
 
 async function lookupLake(url: string): Promise<{ rows: NewsLakeHit[]; error: string | null }> {
@@ -70,19 +85,22 @@ export async function runGoogleGapRadar(opts: { batchSize: number; persistCursor
   const keywords = await getKeywordsActivas();
   const plan = buildGoogleRecoveryQueryPlan(keywords);
   const backend = String(process.env.GOOGLE_RADAR_CURSOR_BACKEND ?? 'file').toLowerCase();
-  let cursorDurable = backend === 'file';
-  let cursorError: string | null = null;
   const fileStore = new FileRadarCursorStore(FILE_CURSOR);
-  let stored = await fileStore.load();
+  let stored = null as Awaited<ReturnType<typeof fileStore.load>>;
+  let cursorDurable = false;
+  let cursorError: string | null = null;
   if (backend === 'supabase') {
     try {
       stored = await new SupabaseRadarCursorStore(getSupabase()).load();
       cursorDurable = true;
     } catch (err) {
-      cursorDurable = false;
-      cursorError = err instanceof Error ? err.message : String(err);
-      stored = await fileStore.load();
+      throw new Error(`GOOGLE_RADAR_CURSOR_UNAVAILABLE: ${err instanceof Error ? err.message : String(err)}`);
     }
+  } else if (backend === 'file') {
+    stored = await fileStore.load();
+    cursorDurable = true;
+  } else {
+    throw new Error(`GOOGLE_RADAR_CURSOR_BACKEND invalid: ${backend}`);
   }
   const reconciled = reconcileCursor(plan, stored);
   const sliced = sliceQueryPlan(plan, toSliceCursor(reconciled), opts.batchSize);
@@ -184,14 +202,10 @@ export async function runGoogleGapRadar(opts: { batchSize: number; persistCursor
     sliced.processed[sliced.processed.length - 1]?.normalized ?? null,
   );
   if (opts.persistCursor) {
-    await fileStore.save(nextCursor);
-    if (backend === 'supabase' && cursorDurable) {
-      try {
-        await new SupabaseRadarCursorStore(getSupabase()).save(nextCursor);
-      } catch (err) {
-        cursorError = err instanceof Error ? err.message : String(err);
-        cursorDurable = false;
-      }
+    if (backend === 'supabase') {
+      await new SupabaseRadarCursorStore(getSupabase()).save(nextCursor);
+    } else {
+      await fileStore.save(nextCursor);
     }
   }
 
@@ -235,6 +249,7 @@ export async function runGoogleGapRadar(opts: { batchSize: number; persistCursor
     SOURCE_REGISTRY_READY: registry.SOURCE_REGISTRY_READY,
     SOURCE_REGISTRY_FALLBACK: registry.SOURCE_REGISTRY_FALLBACK,
     REGISTRY_CHANNELS_READ: registry.REGISTRY_CHANNELS_READ,
+    REGISTRY_CHANNELS_EXPECTED: (registry as { REGISTRY_CHANNELS_EXPECTED?: number }).REGISTRY_CHANNELS_EXPECTED ?? registry.REGISTRY_CHANNELS_READ,
     REGISTRY_IDENTITY_MATCHES: registryMatches,
     registry_error: registry.error,
     lake_lookup_errors: [...new Set(lakeLookupErrors)].slice(0, 5),
@@ -252,10 +267,14 @@ async function main(): Promise<void> {
   const stamp = new Date().toISOString().slice(0, 10);
   const out = join(dir, `google-news-gap-radar-${stamp}.json`);
   writeFileSync(out, JSON.stringify(payload, null, 2));
-  const sink = new ArtifactGapCandidateSink((body) => {
-    writeFileSync(join(dir, `agent-a-gap-handoff-v7-${stamp}.json`), JSON.stringify(body, null, 2));
+  const sink = createGapCandidateSink({
+    artifactWrite: (body) => {
+      writeFileSync(join(dir, `agent-a-gap-handoff-v7-${stamp}.json`), JSON.stringify(body, null, 2));
+    },
+    client: getSupabase(),
   });
-  await sink.emit((payload.gap_candidates ?? []) as GapCandidate[]);
+  await sink.artifact.emit((payload.gap_candidates ?? []) as GapCandidate[]);
+  const dbEmit = await sink.db.emit((payload.gap_candidates ?? []) as GapCandidate[]);
   console.log(JSON.stringify({
     out,
     QUERY_TOTAL: payload.QUERY_TOTAL,
@@ -265,7 +284,12 @@ async function main(): Promise<void> {
     missing: payload.GOOGLE_MISSING_KNOWN,
     SOURCE_REGISTRY_READY: payload.SOURCE_REGISTRY_READY,
     SOURCE_REGISTRY_FALLBACK: payload.SOURCE_REGISTRY_FALLBACK,
+    REGISTRY_CHANNELS_READ: payload.REGISTRY_CHANNELS_READ,
+    REGISTRY_CHANNELS_EXPECTED: payload.REGISTRY_CHANNELS_EXPECTED,
     QUERY_CURSOR_DURABLE: payload.QUERY_CURSOR_DURABLE,
+    GAP_DB_WRITES: dbEmit.written,
+    GAP_DB_BACKEND: dbEmit.backend,
+    ALLOW_GOOGLE_GAP_DB_WRITES: googleGapDbWritesAllowed(),
   }, null, 2));
 }
 

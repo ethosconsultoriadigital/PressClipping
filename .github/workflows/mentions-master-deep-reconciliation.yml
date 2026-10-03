@@ -13,6 +13,11 @@ on:
         required: false
         default: true
         type: boolean
+      noticia_ids:
+        description: 'Optional comma-separated noticia_id filter (scheduled runs leave empty)'
+        required: false
+        default: ''
+        type: string
 
 concurrency:
   group: ethos-mentions-master-writer
@@ -54,9 +59,12 @@ jobs:
           NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
         run: |
           ARGS=( "--hours=72" )
-          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.dry_run }}" != "false" ]; then
-            ARGS+=( "--dry-run" )
-          else
+          if [ -n "${{ inputs.noticia_ids }}" ]; then
+            ARGS+=( "--noticia-ids=${{ inputs.noticia_ids }}" )
+          fi
+          if [ "${ALLOW_MENTIONS_RECOVERY_WRITES}" = "true" ] && { [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.dry_run }}" = "false" ]; }; then
             ARGS+=( "--no-dry-run" )
+          else
+            ARGS+=( "--dry-run" )
           fi
           npm run mentions-master:reconciliation -- "${ARGS[@]}"

@@ -251,6 +251,7 @@ export async function fetchEligibleNewsPaged(
   sinceIso: string,
   medioIds?: string[],
   fetchCap = GLOBAL_FETCH_CAP,
+  noticiaIds?: string[],
 ): Promise<FetchNewsResult> {
   const select =
     'noticia_id, medio_id, titulo, subtitulo, resumen, url_original, fecha_publicacion, fecha_captura,' +
@@ -279,12 +280,13 @@ export async function fetchEligibleNewsPaged(
     let q = getSupabase()
       .from('noticias')
       .select(select)
-      .gte('fecha_captura', sinceIso)
       .neq('origen_cobertura', 'pressclipping_diagnostico')
       .order('fecha_captura', { ascending: true })
       .order('noticia_id', { ascending: true })
       .range(from, to);
+    if (!noticiaIds?.length) q = q.gte('fecha_captura', sinceIso);
     if (medioIds && medioIds.length > 0) q = q.in('medio_id', medioIds);
+    if (noticiaIds && noticiaIds.length > 0) q = q.in('noticia_id', noticiaIds);
     const { data, error } = await q;
     if (error) throw new Error(`No se pudieron leer noticias frescas: ${error.message}`);
     return data ?? [];

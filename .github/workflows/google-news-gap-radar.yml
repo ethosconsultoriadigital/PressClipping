@@ -31,7 +31,8 @@ jobs:
       NO_EMAIL: 'true'
       NO_WHATSAPP: 'true'
       NO_TWILIO: 'true'
-      GOOGLE_RADAR_CURSOR_BACKEND: file
+      GOOGLE_RADAR_CURSOR_BACKEND: supabase
+      ALLOW_GOOGLE_GAP_DB_WRITES: ${{ secrets.ALLOW_GOOGLE_GAP_DB_WRITES }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

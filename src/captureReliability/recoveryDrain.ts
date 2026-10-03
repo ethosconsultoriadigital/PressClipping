@@ -20,6 +20,9 @@ export interface RecoveryDrainOpts {
   fetchExtract: RecoveryFetchExtract;
   persistNews?: RecoveryPersist;
   maxAttempts?: number;
+  onlyHashes?: Set<string>;
+  windowStart?: string;
+  windowEnd?: string;
 }
 
 export interface RecoveryDrainReport {
@@ -75,6 +78,7 @@ export async function drainRecoveryQueue(opts: RecoveryDrainOpts): Promise<Recov
       limit: opts.batchSize,
       nowIso: opts.nowIso,
       skipHashes: seen,
+      onlyHashes: opts.onlyHashes,
     });
     if (!claimed.length) break;
     for (const r of claimed) seen.add(r.hash_url);
@@ -92,6 +96,8 @@ export async function drainRecoveryQueue(opts: RecoveryDrainOpts): Promise<Recov
           writesAllowed: opts.writesAllowed,
           nowIso: opts.nowIso,
           maxAttempts: opts.maxAttempts,
+          windowStart: opts.windowStart,
+          windowEnd: opts.windowEnd,
         }),
       );
     });

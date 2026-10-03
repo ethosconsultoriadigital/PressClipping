@@ -29,6 +29,7 @@ export interface ReconciliationArgs {
   dryRun: boolean;
   sheetId: string;
   tab: string;
+  noticiaIds: string[];
 }
 
 export function parseReconciliationArgs(argv: string[]): ReconciliationArgs {
@@ -37,6 +38,7 @@ export function parseReconciliationArgs(argv: string[]): ReconciliationArgs {
     dryRun: true,
     sheetId: process.env['GOOGLE_MENTIONS_MASTER_SHEET_ID'] || DEFAULT_SHEET,
     tab: process.env['GOOGLE_MENTIONS_MASTER_TAB'] || DEFAULT_TAB,
+    noticiaIds: [],
   };
   for (const arg of argv) {
     if (arg === '--dry-run') { out.dryRun = true; continue; }
@@ -48,6 +50,9 @@ export function parseReconciliationArgs(argv: string[]): ReconciliationArgs {
     if (key === 'sheet-id' && val) out.sheetId = val;
     if (key === 'tab' && val) out.tab = val;
     if (key === 'dry-run') out.dryRun = val === '' || val === 'true' || val === '1';
+    if ((key === 'noticia-ids' || key === 'noticia_ids') && val) {
+      out.noticiaIds = val.split(',').map((s) => s.trim()).filter(Boolean);
+    }
   }
   return out;
 }
@@ -80,7 +85,7 @@ export async function runMatchReconciliation(args: ReconciliationArgs): Promise<
   const sinceIso = windowSinceHours(args.hours);
   const [clients, keywords] = await Promise.all([getAllClientes(), getKeywordsActivas()]);
   const { clientNames, keywordsByClient } = groupKeywordsByActiveClient(clients, keywords);
-  const paged = await fetchEligibleNewsPaged(sinceIso, undefined, RECOVERY_FETCH_CAP);
+  const paged = await fetchEligibleNewsPaged(sinceIso, undefined, RECOVERY_FETCH_CAP, args.noticiaIds);
   const metrics = emptyBodyMatchingCounters();
   const rows = buildRows(paged.rows, keywordsByClient, clientNames, {
     masterBodyV2: true,

@@ -1,3 +1,6 @@
+import { bGapCandidateToCaptureGapRow, shouldInsertGapCandidate } from './bGapCandidateToCaptureGapRow.js';
+import { googleGapDbWritesAllowed } from './googleGapWrites.js';
+
 export interface GapCandidate {
   publisher_final_url: string;
   canonical_hash: string;
@@ -28,7 +31,7 @@ export class ArtifactGapCandidateSink implements GapCandidateSink {
   }
 }
 
-/** Prepared. Disabled until Agent A capture_gap_candidates contract. */
+/** Metadata only. Never writes News Lake. Upserts by candidate_id = canonical_hash. */
 export class SupabaseGapCandidateSink implements GapCandidateSink {
   constructor(
     private readonly enabled: boolean,
@@ -37,8 +40,26 @@ export class SupabaseGapCandidateSink implements GapCandidateSink {
   ) {}
   async emit(rows: GapCandidate[]): Promise<{ written: number; backend: string }> {
     if (!this.enabled || !this.client) return { written: 0, backend: 'supabase_disabled' };
-    const { error } = await this.client.from(this.table).upsert(rows);
+    const payload = rows
+      .filter((r) => shouldInsertGapCandidate(r.discovery_status))
+      .map((r) => bGapCandidateToCaptureGapRow(r))
+      .filter((r): r is NonNullable<typeof r> => r != null);
+    if (!payload.length) return { written: 0, backend: 'supabase' };
+    const { error } = await this.client.from(this.table).upsert(payload, { onConflict: 'candidate_id' });
     if (error) throw new Error(`GAP_SINK_DB: ${error.message}`);
-    return { written: rows.length, backend: 'supabase' };
+    return { written: payload.length, backend: 'supabase' };
   }
+}
+
+export function createGapCandidateSink(opts: {
+  artifactWrite: (payload: unknown) => void;
+  client?: { from: (t: string) => any };
+  env?: NodeJS.ProcessEnv;
+}): { artifact: ArtifactGapCandidateSink; db: SupabaseGapCandidateSink; dbEnabled: boolean } {
+  const dbEnabled = googleGapDbWritesAllowed(opts.env);
+  return {
+    artifact: new ArtifactGapCandidateSink(opts.artifactWrite),
+    db: new SupabaseGapCandidateSink(dbEnabled, opts.client),
+    dbEnabled,
+  };
 }

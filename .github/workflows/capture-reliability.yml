@@ -53,6 +53,14 @@ on:
         description: Recovery batches this run
         required: false
         default: '20'
+      recovery_hashes:
+        description: Optional comma-separated hash_url filter (scheduled runs leave empty)
+        required: false
+        default: ''
+      recovery_urls:
+        description: Optional comma-separated URL filter (scheduled runs leave empty)
+        required: false
+        default: ''
   schedule:
     - cron: '25 * * * *'
     - cron: '50 11 * * *'
@@ -107,9 +115,8 @@ jobs:
           echo "cycle_id=$CID" >> "$GITHUB_OUTPUT"
       - name: Schedule source jobs
         run: |
-          DRY="${{ github.event.inputs.dry_run || 'true' }}"
           ARGS="--role=scheduler --mode=${{ steps.cycle.outputs.mode }} --cycle-id=${{ steps.cycle.outputs.cycle_id }} --window-start=${{ steps.cycle.outputs.window_start }} --window-end=${{ steps.cycle.outputs.window_end }} --shard-count=${{ github.event.inputs.shard_count || '8' }} --store=artifacts/capture-reliability-store.json --gap-candidates=config/capture-gap-candidates.json"
-          if [ "$DRY" = "false" ] && [ "${ALLOW_CAPTURE_RECOVERY_WRITES}" = "true" ]; then ARGS="$ARGS --no-dry-run"; fi
+          if [ "${ALLOW_CAPTURE_RECOVERY_WRITES}" = "true" ] && { [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.dry_run }}" = "false" ]; }; then ARGS="$ARGS --no-dry-run"; fi
           npm run capture-reliability:reconcile -- $ARGS
 
   source-worker:
@@ -140,10 +147,9 @@ jobs:
       - run: npm ci
       - name: Source worker shard
         run: |
-          DRY="${{ github.event.inputs.dry_run || 'true' }}"
           ARGS="--role=source --mode=${{ needs.scheduler.outputs.mode || github.event.inputs.mode || '24h' }} --cycle-id=${{ needs.scheduler.outputs.cycle_id }} --window-start=${{ needs.scheduler.outputs.window_start }} --window-end=${{ needs.scheduler.outputs.window_end }} --shard-index=${{ matrix.shard_index }} --shard-count=8 --max-sources-this-run=${{ github.event.inputs.max_sources_this_run || '80' }} --no-recovery --store=artifacts/capture-reliability-store.json --gap-candidates=config/capture-gap-candidates.json"
           if [ -n "${{ github.event.inputs.medio_ids }}" ]; then ARGS="$ARGS --medio-ids=${{ github.event.inputs.medio_ids }}"; fi
-          if [ "$DRY" = "false" ] && [ "${ALLOW_CAPTURE_RECOVERY_WRITES}" = "true" ]; then ARGS="$ARGS --no-dry-run"; fi
+          if [ "${ALLOW_CAPTURE_RECOVERY_WRITES}" = "true" ] && { [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.dry_run }}" = "false" ]; }; then ARGS="$ARGS --no-dry-run"; fi
           npm run capture-reliability:reconcile -- $ARGS
       - uses: actions/upload-artifact@v4
         if: always()
@@ -176,9 +182,10 @@ jobs:
       - run: npm ci
       - name: Recovery worker
         run: |
-          DRY="${{ github.event.inputs.dry_run || 'true' }}"
           ARGS="--role=recovery --mode=${{ needs.scheduler.outputs.mode || github.event.inputs.mode || '24h' }} --cycle-id=${{ needs.scheduler.outputs.cycle_id }} --window-start=${{ needs.scheduler.outputs.window_start }} --window-end=${{ needs.scheduler.outputs.window_end }} --recovery-batch-size=${{ github.event.inputs.recovery_batch_size || '50' }} --max-recovery-batches=${{ github.event.inputs.max_recovery_batches || '20' }} --recovery-concurrency=4 --global-concurrency=8 --per-host-concurrency=2 --store=artifacts/capture-reliability-store.json"
-          if [ "$DRY" = "false" ] && [ "${ALLOW_CAPTURE_RECOVERY_WRITES}" = "true" ]; then ARGS="$ARGS --no-dry-run"; fi
+          if [ -n "${{ github.event.inputs.recovery_hashes }}" ]; then ARGS="$ARGS --recovery-hashes=${{ github.event.inputs.recovery_hashes }}"; fi
+          if [ -n "${{ github.event.inputs.recovery_urls }}" ]; then ARGS="$ARGS --recovery-urls=${{ github.event.inputs.recovery_urls }}"; fi
+          if [ "${ALLOW_CAPTURE_RECOVERY_WRITES}" = "true" ] && { [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.dry_run }}" = "false" ]; }; then ARGS="$ARGS --no-dry-run"; fi
           npm run capture-reliability:reconcile -- $ARGS
       - uses: actions/upload-artifact@v4
         if: always()
