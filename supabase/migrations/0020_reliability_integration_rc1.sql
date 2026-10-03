@@ -4,7 +4,7 @@
 create table if not exists public.b_google_radar_cursor (
   id text primary key,
   plan_hash text not null,
-  offset integer not null,
+  cursor_offset integer not null,
   cycle_started_at timestamptz not null,
   last_query_normalized text,
   updated_at timestamptz not null

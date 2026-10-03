@@ -65,7 +65,7 @@ export class SupabaseRadarCursorStore implements RadarCursorStore {
     if (!data) return null;
     return {
       plan_hash: String(data.plan_hash ?? ''),
-      offset: Number(data.offset ?? 0),
+      offset: Number(data.cursor_offset ?? 0),
       cycle_started_at: String(data.cycle_started_at ?? ''),
       last_query_normalized: data.last_query_normalized ?? null,
       updated_at: String(data.updated_at ?? ''),
@@ -74,7 +74,11 @@ export class SupabaseRadarCursorStore implements RadarCursorStore {
   async save(cursor: DurableRadarCursor): Promise<void> {
     const { error } = await this.client.from(this.table).upsert({
       id: this.rowId,
-      ...cursor,
+      plan_hash: cursor.plan_hash,
+      cursor_offset: cursor.offset,
+      cycle_started_at: cursor.cycle_started_at,
+      last_query_normalized: cursor.last_query_normalized,
+      updated_at: cursor.updated_at,
     });
     if (error) throw new Error(`GOOGLE_RADAR_CURSOR_DB: ${error.message}`);
   }

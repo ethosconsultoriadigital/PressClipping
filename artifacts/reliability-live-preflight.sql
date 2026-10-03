@@ -1,4 +1,5 @@
-﻿-- ETHOS reliability integration RC1 combined package
+BEGIN;
+-- ETHOS reliability integration RC1 combined package
 -- APPLY ORDER: 0016, 0017, 0018, 0019, 0020
 -- Then run 0019b notices (read-only).
 -- Transactional preflight: wrap in BEGIN; ... ROLLBACK; before persistent apply.
@@ -454,3 +455,90 @@ begin
   end if;
 end $$;
 
+
+-- ============================================================
+-- RC1 TRANSACTIONAL VERIFICATION
+-- ============================================================
+
+select
+  to_regclass('public.capture_recovery_queue') as capture_recovery_queue,
+  to_regclass('public.capture_reconcile_runs') as capture_reconcile_runs,
+  to_regclass('public.capture_source_reconcile_state') as capture_source_reconcile_state,
+  to_regclass('public.capture_gap_candidates') as capture_gap_candidates,
+  to_regclass('public.capture_recovery_observations') as capture_recovery_observations,
+  to_regclass('public.b_google_radar_cursor') as b_google_radar_cursor;
+
+select
+  to_regprocedure('public.claim_capture_recovery_batch(text,integer,timestamp with time zone,text[])') as claim_recovery,
+  to_regprocedure('public.claim_capture_source_batch(text,timestamp with time zone,timestamp with time zone,text[],integer,timestamp with time zone)') as claim_source,
+  to_regprocedure('public.claim_capture_gap_batch(text,integer,timestamp with time zone)') as claim_gap;
+
+select
+  table_name,
+  privilege_type
+from information_schema.role_table_grants
+where grantee = 'service_role'
+  and table_schema = 'public'
+  and table_name in (
+    'capture_recovery_queue',
+    'capture_reconcile_runs',
+    'capture_source_reconcile_state',
+    'capture_gap_candidates',
+    'capture_recovery_observations',
+    'b_google_radar_cursor'
+  )
+order by table_name, privilege_type;
+
+select
+  exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'b_google_radar_cursor'
+      and column_name = 'cursor_offset'
+  ) as cursor_offset_exists,
+  exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'b_google_radar_cursor'
+      and column_name = 'offset'
+  ) as offset_exists;
+
+select
+  column_name,
+  data_type,
+  is_nullable
+from information_schema.columns
+where table_schema = 'public'
+  and table_name = 'b_google_radar_cursor'
+order by ordinal_position;
+
+do $$
+declare
+  has_cursor_offset boolean;
+  has_reserved_offset boolean;
+begin
+  select exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'b_google_radar_cursor'
+      and column_name = 'cursor_offset'
+  ) into has_cursor_offset;
+  select exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'b_google_radar_cursor'
+      and column_name = 'offset'
+  ) into has_reserved_offset;
+  if not has_cursor_offset then
+    raise exception 'PREFLIGHT b_google_radar_cursor missing cursor_offset';
+  end if;
+  if has_reserved_offset then
+    raise exception 'PREFLIGHT b_google_radar_cursor still has reserved offset column';
+  end if;
+end $$;
+
+ROLLBACK;

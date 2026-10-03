@@ -28,6 +28,12 @@ describe('Capture reliability migrations package', () => {
     expect(sql('0019b_capture_reliability_preflight.sql')).toContain('claim_capture_gap_batch');
     expect(sql('0020_reliability_integration_rc1.sql')).toContain('b_google_radar_cursor');
     expect(sql('0020_reliability_integration_rc1.sql')).toContain('grant select, insert, update, delete on table public.b_google_radar_cursor to service_role');
+    expect(sql('0020_reliability_integration_rc1.sql')).toContain('cursor_offset integer not null');
+    const cursorTable = sql('0020_reliability_integration_rc1.sql').match(
+      /create table if not exists public\.b_google_radar_cursor\s*\(([\s\S]*?)\);/,
+    )?.[1] ?? '';
+    expect(cursorTable).toContain('cursor_offset integer not null');
+    expect(cursorTable).not.toMatch(/\boffset\s+integer\s+not\s+null/);
   });
 
   it('T66 fresh schema package is ordered 0016→0019', () => {
