@@ -27,11 +27,32 @@ export const BRAND_SPECIFIC_BODY_SHADOW_KEYWORD_IDS = [
   'KEY-0073',
 ] as const;
 
-export const MERY_CONTEXTUAL_EXCLUDED_FROM_CANARY = [
+export const MERY_CONTEXTUAL_BODY_CANDIDATE_IDS = [
   'KEY-0048',
   'KEY-0049',
   'KEY-0050',
   'KEY-0051',
+] as const;
+
+/** @deprecated alias of MERY_CONTEXTUAL_BODY_CANDIDATE_IDS */
+export const MERY_CONTEXTUAL_EXCLUDED_FROM_CANARY = MERY_CONTEXTUAL_BODY_CANDIDATE_IDS;
+
+/** Propuesta V7. NO activar en workflows de producción. */
+export const MERY_BODY_ALLOWLIST_FULL = [
+  'KEY-0040',
+  'KEY-0041',
+  'KEY-0042',
+  'KEY-0043',
+  'KEY-0044',
+  'KEY-0045',
+  'KEY-0046',
+  'KEY-0047',
+  'KEY-0048',
+  'KEY-0049',
+  'KEY-0050',
+  'KEY-0051',
+  'KEY-0076',
+  'KEY-0077',
 ] as const;
 
 const BODY_CAMPO = new Set(['texto_cuerpo_nota', 'TEXTO_CUERPO_NOTA']);
@@ -61,6 +82,18 @@ export function masterBodyAllowlist(env: NodeJS.ProcessEnv = process.env): strin
   return parseKeywordAllowlist(env.MENTIONS_MASTER_BODY_V2_KEYWORD_IDS);
 }
 
+export type MasterBodyPolicy = 'allowlist' | 'general';
+
+export function masterBodyPolicy(env: NodeJS.ProcessEnv = process.env): MasterBodyPolicy {
+  const raw = String(env.MENTIONS_MASTER_BODY_POLICY ?? '').trim().toLowerCase();
+  return raw === 'general' ? 'general' : 'allowlist';
+}
+
+export function isExactPhraseOrContextual(tipoKeyword: string | null | undefined): boolean {
+  const t = String(tipoKeyword ?? '').trim().toLowerCase();
+  return t === 'frase_exacta' || t === 'exacta_contextual';
+}
+
 export function keywordGetsTrustedBody(
   keywordId: string,
   opts: {
@@ -68,6 +101,8 @@ export function keywordGetsTrustedBody(
     bodyMatchingV2?: boolean;
     keywordAllowlist?: Iterable<string>;
     mode?: string;
+    tipoKeyword?: string | null;
+    bodyPolicy?: MasterBodyPolicy;
   } = {},
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
@@ -75,6 +110,10 @@ export function keywordGetsTrustedBody(
     [...(opts.keywordAllowlist ?? masterBodyAllowlist(env))].map((id) => id.trim().toUpperCase()),
   );
   const masterOn = opts.masterBodyV2 ?? isMentionsMasterBodyV2Enabled(env);
+  const policy = opts.bodyPolicy ?? masterBodyPolicy(env);
+  if (masterOn && policy === 'general') {
+    return isExactPhraseOrContextual(opts.tipoKeyword);
+  }
   if (masterOn) return allow.has(keywordId.trim().toUpperCase());
   if (opts.bodyMatchingV2) return true;
   if (opts.mode && opts.mode !== 'current') return true;
@@ -91,13 +130,16 @@ export function describeMasterBodyPolicy(env: NodeJS.ProcessEnv = process.env): 
 } {
   const enabled = isMentionsMasterBodyV2Enabled(env);
   const ids = masterBodyAllowlist(env);
-  const active = enabled && ids.length > 0;
+  const policy = masterBodyPolicy(env);
+  const active = enabled && (policy === 'general' || ids.length > 0);
   return {
     body_v2_enabled: active,
-    body_v2_keyword_count: active ? ids.length : 0,
-    body_v2_keywords: active ? ids : [],
+    body_v2_keyword_count: policy === 'general' ? -1 : active ? ids.length : 0,
+    body_v2_keywords: policy === 'general' ? ['*frase_exacta+exacta_contextual'] : active ? ids : [],
     matching_fields: active
-      ? 'titulo,subtitulo,resumen,seccion + texto_cuerpo_nota(allowlist)'
+      ? policy === 'general'
+        ? 'titulo,subtitulo,resumen,seccion + BODY_TRUSTED(frase_exacta|exacta_contextual)'
+        : 'titulo,subtitulo,resumen,seccion + texto_cuerpo_nota(allowlist)'
       : 'titulo,subtitulo,resumen,seccion',
     body_matching: active,
     detect_mentions_body_v2: isDetectMentionsBodyV2Enabled(env),

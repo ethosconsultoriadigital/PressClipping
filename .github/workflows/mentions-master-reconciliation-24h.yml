@@ -1,0 +1,62 @@
+name: mentions-master-reconciliation-24h
+
+# Match-only 24h. No crawl. No Google. BODY allowlist.
+# Schedule prepared; writes fail-closed until secret + dispatch dry_run=false.
+
+on:
+  schedule:
+    - cron: '07 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'No escribe MASTER'
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: ethos-mentions-master-writer
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: 24h match-only reconciliation
+    runs-on: ubuntu-latest
+    timeout-minutes: 28
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      GOOGLE_MENTIONS_MASTER_SHEET_ID: '1T4-RLnBrK0lp3p-r23hRjrJAmI03QLzBavWM3ZpcmOA'
+      GOOGLE_MENTIONS_MASTER_TAB: 'MENCIONES_MASTER'
+      LOG_FORMAT: json
+      RUN_BY: github-actions-mentions-reconciliation-24h
+      NO_SEND: 'true'
+      NO_EMAIL: 'true'
+      NO_WHATSAPP: 'true'
+      NO_TWILIO: 'true'
+      MENTIONS_MASTER_BODY_V2: 'true'
+      MENTIONS_MASTER_BODY_POLICY: 'allowlist'
+      MENTIONS_MASTER_BODY_V2_KEYWORD_IDS: 'KEY-0040,KEY-0041,KEY-0042,KEY-0043,KEY-0044,KEY-0045,KEY-0046,KEY-0047,KEY-0076,KEY-0077'
+      ALLOW_MENTIONS_RECOVERY_WRITES: ${{ secrets.ALLOW_MENTIONS_RECOVERY_WRITES }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Reconciliation 24h match-only
+        env:
+          NODE_OPTIONS: --dns-result-order=ipv4first --import=${{ github.workspace }}/scripts/preload-ws.mjs
+        run: |
+          ARGS=( "--hours=24" )
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.dry_run }}" != "false" ]; then
+            ARGS+=( "--dry-run" )
+          else
+            ARGS+=( "--no-dry-run" )
+          fi
+          npm run mentions-master:reconciliation -- "${ARGS[@]}"

@@ -5,8 +5,8 @@
  *   1) selecciona medios activos/seguros con la misma política de news-lake-capture
  *   2) procesa chunks con concurrencia acotada (crawl -> enrich)
  *   3) INMEDIATAMENTE después de cada chunk con crawl exitoso, busca noticias
- *      frescas con mínimo TÍTULO + DESCRIPCIÓN/RESUMEN + URL. Si el enrich ya
- *      produjo cuerpo limpio se aprovecha; si no, la descripción es suficiente.
+ *      MATCHABLE (noticia_id + al menos un campo textual confiable). Título,
+ *      resumen y URL ya no son requisitos. RAW texto_extraido no cuenta.
  *      Aplica TODAS las keywords activas y consolida 1 fila por noticia + cliente
  *   4) Global News Lake sweep (sin crawl): matching sobre noticias recientes
  *      ya existentes, aunque el medio no esté en el capture plan
@@ -35,13 +35,16 @@ import { toKeywordRule } from '../src/matching/detectMentionsCore.js';
 import { buildMentionScope } from '../src/matching/controlPlaneScope.js';
 import {
   buildTrustedMatchingFields,
+  hasTrustedSearchableText,
   type MatchingMode,
 } from '../src/matching/trustedBody.js';
 import {
   describeMasterBodyPolicy,
   isBodyCampo,
   keywordGetsTrustedBody,
+  type MasterBodyPolicy,
 } from '../src/matching/masterBodyCanary.js';
+import { LIVE_WINDOW_HOURS, RECOVERY_WINDOW_HOURS, DEEP_RECOVERY_WINDOW_HOURS } from '../src/matching/matchWindows.js';
 import { emptyBodyMatchingCounters, type BodyMatchingCounters } from '../src/matching/bodyMatchingMetrics.js';
 import { normalizeHeader, parseIntOrNull } from '../src/utils/parse.js';
 import { logger } from '../src/utils/logger.js';
@@ -53,6 +56,9 @@ export const OVERLAP_MINUTES = 60;
 export const MASTER_SNIPPET_CHARS = 3_000;
 /** Tope del sweep global. 48h LIVE supera 8k elegibles. */
 export const GLOBAL_FETCH_CAP = 25_000;
+/** Safety cap para recovery 24h/72h. Si se alcanza, CAP_HIT. */
+export const RECOVERY_FETCH_CAP = 100_000;
+export { LIVE_WINDOW_HOURS, RECOVERY_WINDOW_HOURS, DEEP_RECOVERY_WINDOW_HOURS };
 const APPEND_CHUNK = 100;
 
 interface Args {
@@ -195,6 +201,7 @@ export interface BuildRowsOpts {
   contextRadius?: number;
   keywordAllowlist?: Iterable<string>;
   metrics?: BodyMatchingCounters;
+  bodyPolicy?: MasterBodyPolicy;
 }
 
 export function matchingFields(
@@ -226,11 +233,25 @@ function truncateForSheet(text: string): string {
   return text.slice(0, MASTER_SNIPPET_CHARS - suffix.length) + suffix;
 }
 
+export interface FetchNewsResult {
+  rows: MasterNewsRow[];
+  capHit: boolean;
+  pagesScanned: number;
+}
+
 export async function fetchEligibleNews(
   sinceIso: string,
   medioIds?: string[],
   fetchCap = GLOBAL_FETCH_CAP,
 ): Promise<MasterNewsRow[]> {
+  return (await fetchEligibleNewsPaged(sinceIso, medioIds, fetchCap)).rows;
+}
+
+export async function fetchEligibleNewsPaged(
+  sinceIso: string,
+  medioIds?: string[],
+  fetchCap = GLOBAL_FETCH_CAP,
+): Promise<FetchNewsResult> {
   const select =
     'noticia_id, medio_id, titulo, subtitulo, resumen, url_original, fecha_publicacion, fecha_captura,' +
     ' autor, seccion, texto_extraido, texto_nota_limpia, texto_cuerpo_nota, tipo_nota, calidad_extraccion,' +
@@ -253,19 +274,15 @@ export async function fetchEligibleNews(
     tipo_nota: n.tipo_nota ?? null,
     calidad_extraccion: n.calidad_extraccion ?? null,
   });
-  const eligible = (n: MasterNewsRow) =>
-    Boolean(n.titulo?.trim()) && Boolean(n.resumen?.trim()) && Boolean(n.url_original?.trim());
 
   const runPage = async (from: number, to: number) => {
     let q = getSupabase()
       .from('noticias')
       .select(select)
       .gte('fecha_captura', sinceIso)
-      .not('titulo', 'is', null)
-      .not('resumen', 'is', null)
-      .not('url_original', 'is', null)
       .neq('origen_cobertura', 'pressclipping_diagnostico')
       .order('fecha_captura', { ascending: true })
+      .order('noticia_id', { ascending: true })
       .range(from, to);
     if (medioIds && medioIds.length > 0) q = q.in('medio_id', medioIds);
     const { data, error } = await q;
@@ -273,19 +290,18 @@ export async function fetchEligibleNews(
     return data ?? [];
   };
 
-  if (medioIds && medioIds.length > 0) {
-    const data = await runPage(0, 1999);
-    return data.map(mapRow).filter(eligible);
-  }
-
   const out: MasterNewsRow[] = [];
   const page = 1000;
+  let pagesScanned = 0;
   for (let from = 0; from < fetchCap; from += page) {
     const data = await runPage(from, from + page - 1);
-    out.push(...data.map(mapRow).filter(eligible));
-    if (data.length < page) break;
+    pagesScanned += 1;
+    out.push(...data.map(mapRow).filter((n) => hasTrustedSearchableText(n)));
+    if (data.length < page) {
+      return { rows: out, capHit: false, pagesScanned };
+    }
   }
-  return out;
+  return { rows: out, capHit: true, pagesScanned };
 }
 
 export function buildRows(
@@ -313,7 +329,11 @@ export function buildRows(
       const matches: MatchBundle[] = [];
       let anySignal = false;
       for (const kw of kws) {
-        const useBody = keywordGetsTrustedBody(kw.keyword_id, opts) && bodyUsable;
+        const useBody =
+          keywordGetsTrustedBody(kw.keyword_id, {
+            ...opts,
+            tipoKeyword: kw.tipo_keyword,
+          }) && bodyUsable;
         const rule = toKeywordRule(kw);
         const campos = useBody ? bodyPacked.campos : signalPacked.campos;
         const result = matchKeyword(rule, campos, {
@@ -402,7 +422,7 @@ function bodyRunObservability(metrics?: BodyMatchingCounters, rows: OutRow[] = [
   };
 }
 
-async function loadExistingKeys(sheet: GoogleSpreadsheetWorksheet): Promise<Set<string>> {
+export async function loadExistingKeys(sheet: GoogleSpreadsheetWorksheet): Promise<Set<string>> {
   await withSheetsRetry(() => sheet.loadHeaderRow(), 'master loadHeaderRow');
   const norm = sheet.headerValues.map(normalizeHeader);
   if (!norm.includes(normalizeHeader('dedupe_key'))) {
@@ -503,7 +523,7 @@ async function main(): Promise<void> {
       since_iso: sinceIso,
       sheet_id: args.sheetId.slice(0, 8) + '...',
       tab: args.tab,
-      minimo_export: 'titulo + resumen/descripcion + url',
+      minimo_export: 'any trusted field (titulo|subtitulo|resumen|seccion|trusted body)',
       global_sweep: true,
       ...bodyRunObservability(),
     }, '=== MENTIONS MASTER FAST LANE start (match-only) ===');
@@ -549,7 +569,7 @@ async function main(): Promise<void> {
     since_iso: sinceIso,
     sheet_id: args.sheetId.slice(0, 8) + '...',
     tab: args.tab,
-    minimo_export: 'titulo + resumen/descripcion + url',
+    minimo_export: 'any trusted field (titulo|subtitulo|resumen|seccion|trusted body)',
     global_sweep: true,
     ...bodyRunObservability(),
   }, '=== MENTIONS MASTER FAST LANE start ===');

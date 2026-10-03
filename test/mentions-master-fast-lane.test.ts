@@ -81,9 +81,9 @@ describe('Fast Lane overlap = 60', () => {
     expect(wf).not.toContain("inputs.overlap_minutes || '10'");
     expect(wf).not.toContain("inputs.overlap_minutes || '90'");
     expect(wf).toContain("cron: '17,47 * * * *'");
-    expect(wf).toContain('group: mentions-master-fast-lane');
+    expect(wf).toContain('group: ethos-mentions-master-writer');
     expect(wf).toContain('cancel-in-progress: false');
-    expect(wf).toContain('no ejecutar canary/write local');
+    expect(wf).toContain('ethos-mentions-master-writer');
     expect(wf).toContain("default: '5'");
     expect(wf).toContain("default: '3'");
     expect(wf).toContain("default: '10'");
