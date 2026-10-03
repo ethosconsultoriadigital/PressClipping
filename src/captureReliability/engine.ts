@@ -6,9 +6,12 @@ import { EXPLAINED_RECOVERY, type ChannelCatalogRow, type CompletenessFlag, type
 import { lookupExistingNewsByHashes, type HashQueryFn } from './lakeLookup.js';
 import { decideDiscoveredUrl, unionDiscovery } from './reconcile.js';
 import { googleAuditorClassify } from './recoveryQueue.js';
-import { processRecoveryRecord, type RecoveryFetchExtract, type RecoveryPersist } from './recoveryWorker.js';
+import { drainRecoveryQueue, type RecoveryDrainReport } from './recoveryDrain.js';
+import { recoveryTargetUrl } from './gapCandidates.js';
+import { cycleIsDrained } from './cycle.js';
 import { captureCanonicalUrl, hostOf, primaryHash } from './urlIndex.js';
 import { recoveryWritesAllowed } from './writesGuard.js';
+import type { RecoveryFetchExtract, RecoveryPersist } from './recoveryWorker.js';
 
 export interface SourceDiscovery {
   urls: DiscoveredUrl[];
@@ -50,6 +53,13 @@ export interface EngineOpts {
   startedMs?: number;
   maxAttempts?: number;
   staleClaimMs?: number;
+  cycleId?: string;
+  recoveryBatchSize?: number;
+  recoveryConcurrency?: number;
+  maxRecoveryBatches?: number;
+  recoveryTimeBudgetMs?: number;
+  globalConcurrency?: number;
+  perHostConcurrency?: number;
 }
 
 export interface EngineReport {
@@ -89,6 +99,19 @@ export interface EngineReport {
   checkpoint: ReturnType<typeof asCheckpoint>;
   sourceStates: SourceReconcileState[];
   sample_queued: RecoveryRecord[];
+  CYCLE_ID: string;
+  CYCLE_STATUS: 'OPEN' | 'DRAINED' | 'PAUSED';
+  RECOVERY_QUEUE_TOTAL: number;
+  RECOVERY_QUEUE_CLAIMABLE: number;
+  RECOVERY_PROCESSED_THIS_RUN: number;
+  RECOVERY_PERSISTED: number;
+  RECOVERY_KNOWN: number;
+  RECOVERY_REJECTED: number;
+  RECOVERY_RETRY: number;
+  RECOVERY_BLOCKED: number;
+  RECOVERY_FAILED: number;
+  RECOVERY_REMAINING: number;
+  RECOVERY_WOULD_PERSIST: number;
 }
 
 function provenCause(item: DiscoveredUrl, discovery: SourceDiscovery): RootCause | null {
@@ -136,6 +159,7 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
   await scheduleSourceJobs(deps.store, deps.catalog, opts.windowStart, opts.windowEnd);
   await deps.store.upsertRun({
     run_id: opts.runId,
+    cycle_id: opts.cycleId ?? opts.runId,
     mode: opts.mode,
     window_start: opts.windowStart,
     window_end: opts.windowEnd,
@@ -300,7 +324,7 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
   const seenGap = new Set<string>();
   const gapUrls: string[] = [];
   for (const g of gaps) {
-    const url = g.discovered_url;
+    const url = recoveryTargetUrl(g);
     const hash = g.canonical_hash || primaryHash(url);
     if (seenGap.has(hash)) {
       await deps.store.markGapConsumed(g.candidate_id, opts.nowIso);
@@ -313,12 +337,13 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
     ? await lookupExistingNewsByHashes(gapUrls, deps.queryLakeHashes)
     : new Map<string, import('./lakeLookup.js').LakeRow | null>();
   for (const g of gaps) {
-    const url = g.discovered_url;
+    const url = recoveryTargetUrl(g);
+    const fetchUrl = g.discovered_url && hostOf(g.discovered_url) === hostOf(url) ? g.discovered_url : url;
     const hash = g.canonical_hash || primaryHash(url);
     if (!seenGap.has(hash)) continue;
     seenGap.delete(hash);
     const item: DiscoveredUrl = {
-      url,
+      url: fetchUrl,
       canonicalUrl: captureCanonicalUrl(url),
       hashUrl: hash,
       medioId: g.medio_id,
@@ -351,23 +376,39 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
     await deps.store.markGapConsumed(g.candidate_id, opts.nowIso);
   }
 
+  let recovery: RecoveryDrainReport = {
+    RECOVERY_QUEUE_TOTAL: 0,
+    RECOVERY_QUEUE_CLAIMABLE: 0,
+    RECOVERY_PROCESSED_THIS_RUN: 0,
+    RECOVERY_PERSISTED: 0,
+    RECOVERY_KNOWN: 0,
+    RECOVERY_REJECTED: 0,
+    RECOVERY_RETRY: 0,
+    RECOVERY_BLOCKED: 0,
+    RECOVERY_FAILED: 0,
+    RECOVERY_REMAINING: 0,
+    RECOVERY_WOULD_PERSIST: 0,
+    TIME_BUDGET_HIT: false,
+  };
   if (opts.processRecovery && deps.fetchExtract) {
-    const claimed = await deps.store.claimBatch({
+    recovery = await drainRecoveryQueue({
+      store: deps.store,
       workerId: opts.workerId,
-      limit: 50,
       nowIso: opts.nowIso,
+      nowMs: opts.nowMs,
+      startedMs,
+      batchSize: opts.recoveryBatchSize ?? 50,
+      maxBatches: opts.maxRecoveryBatches ?? 1,
+      concurrency: opts.recoveryConcurrency ?? 4,
+      globalConcurrency: opts.globalConcurrency ?? 8,
+      perHostConcurrency: opts.perHostConcurrency ?? 2,
+      timeBudgetMs: opts.recoveryTimeBudgetMs ?? Math.max(1, opts.timeBudgetMs),
+      writesAllowed,
+      fetchExtract: deps.fetchExtract,
+      persistNews: deps.persistNews,
+      maxAttempts: opts.maxAttempts,
     });
-    for (const rec of claimed) {
-      await processRecoveryRecord({
-        record: rec,
-        store: deps.store,
-        fetchExtract: deps.fetchExtract,
-        persistNews: writesAllowed ? deps.persistNews : undefined,
-        writesAllowed,
-        nowIso: opts.nowIso,
-        maxAttempts: opts.maxAttempts,
-      });
-    }
+    if (recovery.TIME_BUDGET_HIT) timeBudgetHit = true;
   }
 
   const states = await deps.store.listSourceStates(opts.windowStart, opts.windowEnd);
@@ -404,20 +445,24 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
   });
 
   const writes = writesAllowed ? snap.filter((r) => r.status === 'PERSISTED').length : 0;
+  const cycleStatus = cycleIsDrained(cov.SOURCES_PENDING) ? 'DRAINED' : capHit || timeBudgetHit ? 'PAUSED' : 'OPEN';
   await deps.store.upsertRun({
     run_id: opts.runId,
+    cycle_id: opts.cycleId ?? opts.runId,
     mode: opts.mode,
     window_start: opts.windowStart,
     window_end: opts.windowEnd,
     shard_index: opts.shardIndex,
     shard_count: opts.shardCount,
-    status: cov.SOURCES_PENDING > 0 || capHit || timeBudgetHit ? 'PAUSED' : 'DONE',
+    status: cycleStatus === 'DRAINED' ? 'DRAINED' : cov.SOURCES_PENDING > 0 || capHit || timeBudgetHit ? 'PAUSED' : 'DONE',
     created_at: opts.nowIso,
     updated_at: opts.nowIso,
   });
 
   return {
     RUN_ID: opts.runId,
+    CYCLE_ID: opts.cycleId ?? opts.runId,
+    CYCLE_STATUS: cycleStatus,
     WINDOW_START: opts.windowStart,
     WINDOW_END: opts.windowEnd,
     dry: opts.dryRun,
@@ -464,7 +509,18 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
       states,
     }),
     sourceStates: states,
-    sample_queued: snap.filter((r) => r.status === 'QUEUED' || r.status === 'WOULD_PERSIST').slice(0, 25),
+    sample_queued: snap.filter((r) => r.status === 'QUEUED' || r.status === 'WOULD_PERSIST' || r.status === 'FETCH_TO_CLASSIFY').slice(0, 25),
+    RECOVERY_QUEUE_TOTAL: recovery.RECOVERY_QUEUE_TOTAL,
+    RECOVERY_QUEUE_CLAIMABLE: recovery.RECOVERY_QUEUE_CLAIMABLE,
+    RECOVERY_PROCESSED_THIS_RUN: recovery.RECOVERY_PROCESSED_THIS_RUN,
+    RECOVERY_PERSISTED: recovery.RECOVERY_PERSISTED,
+    RECOVERY_KNOWN: recovery.RECOVERY_KNOWN,
+    RECOVERY_REJECTED: recovery.RECOVERY_REJECTED,
+    RECOVERY_RETRY: recovery.RECOVERY_RETRY,
+    RECOVERY_BLOCKED: recovery.RECOVERY_BLOCKED,
+    RECOVERY_FAILED: recovery.RECOVERY_FAILED,
+    RECOVERY_REMAINING: recovery.RECOVERY_REMAINING,
+    RECOVERY_WOULD_PERSIST: recovery.RECOVERY_WOULD_PERSIST,
   };
 }
 export { recoveryWritesAllowed };

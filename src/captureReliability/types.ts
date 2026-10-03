@@ -57,6 +57,7 @@ export interface DiscoveredUrl {
   titulo: string | null;
   resumen: string | null;
   body: string | null;
+  windowMembership?: 'IN_WINDOW' | 'OUT_OF_WINDOW' | 'WINDOW_MEMBERSHIP_UNKNOWN';
 }
 
 export interface RecoveryRecord {
@@ -81,6 +82,7 @@ export interface RecoveryRecord {
   discovered_title: string | null;
   discovered_summary: string | null;
   last_dry_run_result: string | null;
+  window_membership?: 'IN_WINDOW' | 'OUT_OF_WINDOW' | 'WINDOW_MEMBERSHIP_UNKNOWN' | null;
 }
 
 export interface SourceReconcileState {
@@ -114,12 +116,13 @@ export interface SourceReconcileState {
 
 export interface ReconcileRun {
   run_id: string;
+  cycle_id?: string | null;
   mode: '24h' | '72h' | 'auditor';
   window_start: string;
   window_end: string;
   shard_index: number;
   shard_count: number;
-  status: 'PENDING' | 'RUNNING' | 'PAUSED' | 'DONE';
+  status: 'PENDING' | 'RUNNING' | 'PAUSED' | 'DONE' | 'DRAINED';
   created_at: string;
   updated_at: string;
 }
@@ -135,8 +138,15 @@ export interface GapCandidate {
   discovered_urls: string[];
   medio_id: string | null;
   fuente_id: string | null;
+  candidate_medio_ids?: string[] | null;
+  candidate_fuente_ids?: string[] | null;
   cliente_ids?: string[] | null;
   keyword_ids?: string[] | null;
+  queries?: string[] | null;
+  google_item_urls?: string[] | null;
+  first_discovered_at?: string | null;
+  last_discovered_at?: string | null;
+  discovery_status?: string | null;
   claimed_at?: string | null;
   claimed_by?: string | null;
   consumed_at?: string | null;

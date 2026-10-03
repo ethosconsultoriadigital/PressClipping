@@ -182,7 +182,7 @@ describe('Capture reliability V4', () => {
   it('T40 partial schema fails closed', () => {
     expect(classifySchemaPresence([true, false, false, false, false], false)).toBe('PARTIAL_SCHEMA');
     expect(classifySchemaPresence([false, false, false, false, false], false)).toBe('NONE_PRESENT');
-    expect(classifySchemaPresence([true, true, true, true, true], true)).toBe('FULLY_READY');
+    expect(classifySchemaPresence([true, true, true, true, true], true, true)).toBe('FULLY_READY');
   });
 
   it('T41 atomic queue claim two workers no overlap', async () => {

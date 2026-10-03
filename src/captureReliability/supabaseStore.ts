@@ -26,6 +26,7 @@ function recFromRow(r: Record<string, unknown>): RecoveryRecord {
     discovered_title: (r.discovered_title as string | null) ?? null,
     discovered_summary: (r.discovered_summary as string | null) ?? null,
     last_dry_run_result: (r.last_dry_run_result as string | null) ?? null,
+    window_membership: (r.window_membership as RecoveryRecord['window_membership']) ?? null,
   };
 }
 
@@ -52,6 +53,7 @@ function recToRow(rec: RecoveryRecord): Record<string, unknown> {
     discovered_title: rec.discovered_title,
     discovered_summary: rec.discovered_summary,
     last_dry_run_result: rec.last_dry_run_result,
+    window_membership: rec.window_membership ?? null,
     updated_at: new Date().toISOString(),
   };
 }
@@ -124,14 +126,16 @@ export class SupabaseCaptureReliabilityStore implements CaptureReliabilityStore 
     return merged;
   }
 
-  async claimBatch(opts: { workerId: string; limit: number; nowIso: string }): Promise<RecoveryRecord[]> {
+  async claimBatch(opts: { workerId: string; limit: number; nowIso: string; skipHashes?: Set<string> }): Promise<RecoveryRecord[]> {
     const { data, error } = await this.sb.rpc('claim_capture_recovery_batch', {
       p_worker_id: opts.workerId,
       p_limit: opts.limit,
       p_now: opts.nowIso,
     });
     if (error) throw error;
-    return (data ?? []).map((row: Record<string, unknown>) => recFromRow(row));
+    const rows = (data ?? []).map((row: Record<string, unknown>) => recFromRow(row));
+    if (!opts.skipHashes?.size) return rows;
+    return rows.filter((r: RecoveryRecord) => !opts.skipHashes!.has(r.hash_url));
   }
 
   private async patch(hashUrl: string, fn: (r: RecoveryRecord) => RecoveryRecord): Promise<RecoveryRecord | null> {
@@ -264,11 +268,18 @@ export class SupabaseCaptureReliabilityStore implements CaptureReliabilityStore 
       discovered_via: r.discovered_via,
       discovered_at: r.discovered_at,
       canonical_hash: r.canonical_hash,
-      discovered_urls: r.discovered_urls.join('|'),
+      discovered_urls: r.discovered_urls,
       medio_id: r.medio_id,
       fuente_id: r.fuente_id,
-      cliente_ids: r.cliente_ids?.join(',') ?? null,
-      keyword_ids: r.keyword_ids?.join(',') ?? null,
+      candidate_medio_ids: r.candidate_medio_ids ?? [],
+      candidate_fuente_ids: r.candidate_fuente_ids ?? [],
+      cliente_ids: r.cliente_ids ?? [],
+      keyword_ids: r.keyword_ids ?? [],
+      queries: r.queries ?? [],
+      google_item_urls: r.google_item_urls ?? [],
+      first_discovered_at: r.first_discovered_at ?? r.discovered_at,
+      last_discovered_at: r.last_discovered_at ?? r.discovered_at,
+      discovery_status: r.discovery_status ?? null,
     }));
     const { error } = await this.sb.from('capture_gap_candidates').upsert(payload, { onConflict: 'candidate_id' });
     if (error) throw error;
@@ -288,9 +299,20 @@ export class SupabaseCaptureReliabilityStore implements CaptureReliabilityStore 
         discovered_via: String(row.discovered_via ?? 'gap_candidate'),
         discovered_at: String(row.discovered_at),
         canonical_hash: (row.canonical_hash as string | null) ?? null,
-        discovered_urls: String(row.discovered_urls ?? url).split('|').filter(Boolean),
+        discovered_urls: Array.isArray(row.discovered_urls)
+          ? (row.discovered_urls as string[])
+          : String(row.discovered_urls ?? url).split('|').filter(Boolean),
         medio_id: (row.medio_id as string | null) ?? null,
         fuente_id: (row.fuente_id as string | null) ?? null,
+        candidate_medio_ids: Array.isArray(row.candidate_medio_ids) ? (row.candidate_medio_ids as string[]) : [],
+        candidate_fuente_ids: Array.isArray(row.candidate_fuente_ids) ? (row.candidate_fuente_ids as string[]) : [],
+        cliente_ids: Array.isArray(row.cliente_ids) ? (row.cliente_ids as string[]) : [],
+        keyword_ids: Array.isArray(row.keyword_ids) ? (row.keyword_ids as string[]) : [],
+        queries: Array.isArray(row.queries) ? (row.queries as string[]) : [],
+        google_item_urls: Array.isArray(row.google_item_urls) ? (row.google_item_urls as string[]) : [],
+        first_discovered_at: (row.first_discovered_at as string | null) ?? String(row.discovered_at),
+        last_discovered_at: (row.last_discovered_at as string | null) ?? String(row.discovered_at),
+        discovery_status: (row.discovery_status as string | null) ?? null,
         claimed_at: (row.claimed_at as string | null) ?? null,
         claimed_by: (row.claimed_by as string | null) ?? null,
         consumed_at: (row.consumed_at as string | null) ?? null,

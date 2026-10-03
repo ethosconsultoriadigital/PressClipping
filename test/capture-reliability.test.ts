@@ -62,7 +62,7 @@ function row(id: string, host: string, extra: Partial<ChannelCatalogRow> = {}): 
   };
 }
 
-function okExtract(over: Partial<FetchExtractResult> = {}): FetchExtractResult {
+export function okExtract(over: Partial<FetchExtractResult> = {}): FetchExtractResult {
   const body = over.texto_cuerpo_nota ?? 'Cuerpo editorial válido de la nota recuperada. '.repeat(12);
   return {
     error: null,
@@ -142,6 +142,7 @@ async function runEngine(opts: {
       nowIso: NOW,
       nowMs: opts.nowMs,
       startedMs: opts.startedMs,
+      maxRecoveryBatches: 20,
     },
     {
       store,

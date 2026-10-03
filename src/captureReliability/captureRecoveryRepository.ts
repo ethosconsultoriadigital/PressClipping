@@ -15,7 +15,7 @@ const CLAIMABLE: RecoveryStatus[] = ['QUEUED', 'RETRY', 'FETCH_TO_CLASSIFY'];
 
 export interface CaptureReliabilityStore {
   upsertDiscovered(rec: RecoveryRecord): Promise<RecoveryRecord>;
-  claimBatch(opts: { workerId: string; limit: number; nowIso: string }): Promise<RecoveryRecord[]>;
+  claimBatch(opts: { workerId: string; limit: number; nowIso: string; skipHashes?: Set<string> }): Promise<RecoveryRecord[]>;
   markFetching(hashUrl: string, workerId: string, nowIso: string): Promise<RecoveryRecord | null>;
   markPersisted(hashUrl: string, noticiaId: string | null, nowIso: string): Promise<RecoveryRecord | null>;
   markKnown(hashUrl: string, noticiaId?: string | null): Promise<RecoveryRecord | null>;
@@ -98,7 +98,7 @@ export class MemoryCaptureReliabilityStore implements CaptureReliabilityStore {
     return [...this.queue.values()].filter((r) => r.status === status);
   }
 
-  async claimBatch(opts: { workerId: string; limit: number; nowIso: string }): Promise<RecoveryRecord[]> {
+  async claimBatch(opts: { workerId: string; limit: number; nowIso: string; skipHashes?: Set<string> }): Promise<RecoveryRecord[]> {
     const run = this.claimTail.then(() => this.claimBatchUnlocked(opts));
     this.claimTail = run.then(
       () => undefined,
@@ -107,11 +107,12 @@ export class MemoryCaptureReliabilityStore implements CaptureReliabilityStore {
     return run;
   }
 
-  private async claimBatchUnlocked(opts: { workerId: string; limit: number; nowIso: string }): Promise<RecoveryRecord[]> {
+  private async claimBatchUnlocked(opts: { workerId: string; limit: number; nowIso: string; skipHashes?: Set<string> }): Promise<RecoveryRecord[]> {
     const now = Date.parse(opts.nowIso);
     const out: RecoveryRecord[] = [];
     for (const rec of this.queue.values()) {
       if (out.length >= opts.limit) break;
+      if (opts.skipHashes?.has(rec.hash_url)) continue;
       if (!CLAIMABLE.includes(rec.status)) continue;
       if (rec.claimed_at) continue;
       if (rec.next_retry_at && Date.parse(rec.next_retry_at) > now) continue;
@@ -397,7 +398,7 @@ export class JsonCaptureReliabilityStore extends MemoryCaptureReliabilityStore {
     return out;
   }
 
-  override async claimBatch(opts: { workerId: string; limit: number; nowIso: string }): Promise<RecoveryRecord[]> {
+  override async claimBatch(opts: { workerId: string; limit: number; nowIso: string; skipHashes?: Set<string> }): Promise<RecoveryRecord[]> {
     const out = await super.claimBatch(opts);
     this.persist();
     return out;

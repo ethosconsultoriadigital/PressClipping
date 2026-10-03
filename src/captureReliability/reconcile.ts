@@ -37,6 +37,7 @@ export function baseRecoveryRecord(item: DiscoveredUrl, nowIso: string): Recover
     discovered_title: item.titulo,
     discovered_summary: item.resumen,
     last_dry_run_result: null,
+    window_membership: item.windowMembership ?? (item.publishedAt ? 'IN_WINDOW' : 'WINDOW_MEMBERSHIP_UNKNOWN'),
   };
 }
 
@@ -99,6 +100,18 @@ export function decideDiscoveredUrl(item: DiscoveredUrl, opts: ReconcileOpts): R
     return {
       action: 'SKIP_KNOWN',
       record: { ...base, status: 'KNOWN_IN_LAKE', noticia_id: existing.noticia_id ?? null },
+    };
+  }
+
+  if (item.windowMembership === 'WINDOW_MEMBERSHIP_UNKNOWN') {
+    return {
+      action: 'WOULD_INSERT',
+      record: {
+        ...base,
+        status: 'FETCH_TO_CLASSIFY',
+        last_error: 'WINDOW_MEMBERSHIP_UNKNOWN',
+        window_membership: 'WINDOW_MEMBERSHIP_UNKNOWN',
+      },
     };
   }
 

@@ -7,7 +7,15 @@ import { captureCanonicalUrl, hostOf, primaryHash } from './urlIndex.js';
 import type { ChannelCatalogRow, DiscoveredUrl } from './types.js';
 import type { SourceDiscovery } from './engine.js';
 
-function toDiscovered(row: ChannelCatalogRow, url: string, via: string, publishedAt: string | null, titulo: string | null, resumen: string | null): DiscoveredUrl {
+function toDiscovered(
+  row: ChannelCatalogRow,
+  url: string,
+  via: string,
+  publishedAt: string | null,
+  titulo: string | null,
+  resumen: string | null,
+  membership?: DiscoveredUrl['windowMembership'],
+): DiscoveredUrl {
   return {
     url,
     canonicalUrl: captureCanonicalUrl(url),
@@ -20,6 +28,7 @@ function toDiscovered(row: ChannelCatalogRow, url: string, via: string, publishe
     titulo,
     resumen,
     body: null,
+    windowMembership: membership ?? (publishedAt ? 'IN_WINDOW' : 'WINDOW_MEMBERSHIP_UNKNOWN'),
   };
 }
 
@@ -79,7 +88,17 @@ export async function discoverLiveSource(
       urls.push(
         ...windowed.items
           .filter((it) => it.url)
-          .map((it) => toDiscovered(row, it.url, 'sitemap', it.fecha ?? null, it.titulo ?? null, it.resumen ?? null)),
+          .map((it) =>
+            toDiscovered(
+              row,
+              it.url,
+              'sitemap',
+              it.fecha ?? null,
+              it.titulo ?? null,
+              it.resumen ?? null,
+              it.fecha ? 'IN_WINDOW' : 'WINDOW_MEMBERSHIP_UNKNOWN',
+            ),
+          ),
       );
     } catch {
       sitemapSpanCovered = 'NO';
@@ -115,7 +134,17 @@ export async function discoverLiveSource(
         urls.push(
           ...windowed.items
             .filter((it) => it.url)
-            .map((it) => toDiscovered(row, it.url, 'sitemap_robots', it.fecha ?? null, it.titulo ?? null, it.resumen ?? null)),
+            .map((it) =>
+              toDiscovered(
+                row,
+                it.url,
+                'sitemap_robots',
+                it.fecha ?? null,
+                it.titulo ?? null,
+                it.resumen ?? null,
+                it.fecha ? 'IN_WINDOW' : 'WINDOW_MEMBERSHIP_UNKNOWN',
+              ),
+            ),
         );
       }
     } catch {

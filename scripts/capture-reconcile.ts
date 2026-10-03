@@ -1,6 +1,7 @@
 /**
- * Capture reliability V3 — scheduler + worker.
- * Default dry-run. Production writes require --no-dry-run AND ALLOW_CAPTURE_RECOVERY_WRITES=true.
+ * Capture reliability V5 — cycle scheduler + source/recovery workers.
+ * GitHub is one caller. Same CLI works from any scheduler.
+ * Production writes require --no-dry-run AND ALLOW_CAPTURE_RECOVERY_WRITES=true.
  */
 import 'dotenv/config';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -16,10 +17,14 @@ import {
   type CaptureReliabilityStore,
 } from '../src/captureReliability/captureRecoveryRepository.js';
 import { SupabaseCaptureReliabilityStore } from '../src/captureReliability/supabaseStore.js';
-import { runReconcileEngine } from '../src/captureReliability/engine.js';
+import { runReconcileEngine, scheduleSourceJobs } from '../src/captureReliability/engine.js';
 import { discoverLiveSource } from '../src/captureReliability/discoverLive.js';
 import { loadGapCandidatesFromFile } from '../src/captureReliability/gapCandidates.js';
 import { recoveryWritesAllowed } from '../src/captureReliability/writesGuard.js';
+import { computeFixedCycle, DEFAULT_SHARD_COUNT } from '../src/captureReliability/cycle.js';
+import { drainRecoveryQueue } from '../src/captureReliability/recoveryDrain.js';
+import { buildCoverageRemediation } from '../src/captureReliability/coverageRemediation.js';
+import { auditQueuedSample } from '../src/captureReliability/queueAudit.js';
 import type { ChannelCatalogRow } from '../src/captureReliability/types.js';
 import type { LakeRow } from '../src/captureReliability/lakeLookup.js';
 
@@ -28,11 +33,11 @@ function arg(name: string): string | null {
   return hit ? hit.slice(name.length + 3) : null;
 }
 
-function hoursWindow(hours: number): { start: string; end: string } {
-  const end = new Date();
-  end.setUTCMinutes(0, 0, 0);
-  const start = new Date(end.getTime() - hours * 3600_000);
-  return { start: start.toISOString(), end: end.toISOString() };
+function numArg(name: string, fallback: number): number {
+  const raw = arg(name);
+  if (!raw) return fallback;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 async function loadActiveCatalog(medioIds: string[]): Promise<ChannelCatalogRow[]> {
@@ -110,68 +115,122 @@ async function openStore(jsonPath: string): Promise<{ store: CaptureReliabilityS
   return { store: createJsonCaptureRecoveryRepository(jsonPath), backend: 'json' };
 }
 
+function resolveDryRun(): boolean {
+  if (process.argv.includes('--no-dry-run')) {
+    return process.env.ALLOW_CAPTURE_RECOVERY_WRITES === 'true' ? false : true;
+  }
+  return true;
+}
+
 async function main() {
-  const dry = !process.argv.includes('--no-dry-run');
+  const dry = resolveDryRun();
   const allowEnv = process.env.ALLOW_CAPTURE_RECOVERY_WRITES ?? null;
   const writes = recoveryWritesAllowed({ dryRun: dry, allowEnv });
   const mode = (arg('mode') ?? '24h') as '24h' | '72h' | 'auditor';
-  const hours = mode === '72h' ? 72 : 24;
-  const computed = hoursWindow(hours);
-  const window = {
-    start: arg('window-start') ?? computed.start,
-    end: arg('window-end') ?? computed.end,
-  };
+  const shardCount = numArg('shard-count', DEFAULT_SHARD_COUNT);
+  const cycle = computeFixedCycle({
+    mode,
+    windowStart: arg('window-start'),
+    windowEnd: arg('window-end'),
+    cycleId: arg('cycle-id'),
+    shardCount,
+  });
   const medioIds = (arg('medio-ids') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-  const maxSourcesThisRun = Number.parseInt(arg('max-sources-this-run') ?? arg('limit') ?? '80', 10);
-  const shardIndex = Number.parseInt(arg('shard-index') ?? '0', 10);
-  const shardCount = Number.parseInt(arg('shard-count') ?? '1', 10);
-  const safetyCap = Number.parseInt(arg('safety-cap') ?? '20000', 10);
-  const budgetMs = Number.parseInt(arg('time-budget-ms') ?? '1200000', 10);
+  const maxSourcesThisRun = numArg('max-sources-this-run', 80);
+  const shardIndex = numArg('shard-index', 0);
+  const safetyCap = numArg('safety-cap', 20000);
+  const budgetMs = numArg('time-budget-ms', 1_200_000);
+  const recoveryBatchSize = numArg('recovery-batch-size', 50);
+  const recoveryConcurrency = numArg('recovery-concurrency', 4);
+  const maxRecoveryBatches = numArg('max-recovery-batches', 20);
+  const recoveryTimeBudgetMs = numArg('recovery-time-budget-ms', budgetMs);
+  const globalConcurrency = numArg('global-concurrency', 8);
+  const perHostConcurrency = numArg('per-host-concurrency', 2);
   const processRecovery = !process.argv.includes('--no-recovery');
   const role = arg('role') ?? 'all';
-  const runId = arg('run-id') ?? `caprel-${mode}-${Date.now()}`;
+  const runId = arg('run-id') ?? `${cycle.cycle_id}-s${shardIndex}`;
   const storePath = arg('store') ?? 'artifacts/capture-reliability-store.json';
   const gapPath = arg('gap-candidates') ?? 'config/capture-gap-candidates.json';
   const workerId = process.env.RUN_BY ?? 'capture-reliability-worker';
 
   const catalog = await loadActiveCatalog(medioIds);
   const { store, backend } = await openStore(storePath);
-  const gapCandidates = loadGapCandidatesFromFile(gapPath);
+  const gapCandidates = loadGapCandidatesFromFile(gapPath, catalog);
 
-  if (role === 'scheduler') {
-    const { scheduleSourceJobs } = await import('../src/captureReliability/engine.js');
-    const queued = await scheduleSourceJobs(store, catalog, window.start, window.end);
+  mkdirSync('artifacts', { recursive: true });
+
+  if (role === 'scheduler' || role === 'capture-reliability-scheduler') {
+    const queued = await scheduleSourceJobs(store, catalog, cycle.window_start, cycle.window_end);
     const report = {
       role: 'scheduler',
-      RUN_ID: runId,
+      CYCLE_ID: cycle.cycle_id,
+      WINDOW_START: cycle.window_start,
+      WINDOW_END: cycle.window_end,
+      SHARD_COUNT: cycle.shard_count,
       TOTAL_ACTIVE_SOURCES: catalog.length,
       SOURCES_QUEUED: queued,
       STORE_BACKEND: backend,
       PRODUCTION_RECOVERY_WRITES: 0,
+      DRY_RUN: dry,
     };
-    mkdirSync('artifacts', { recursive: true });
     writeFileSync('artifacts/capture-reliability-24h-dry.json', JSON.stringify(report, null, 2));
     logger.info(report, 'capture-reliability scheduler');
+    return;
+  }
+
+  if (role === 'recovery' || role === 'capture-reliability-recovery-worker') {
+    const drain = await drainRecoveryQueue({
+      store,
+      workerId,
+      nowIso: new Date().toISOString(),
+      batchSize: recoveryBatchSize,
+      maxBatches: maxRecoveryBatches,
+      concurrency: recoveryConcurrency,
+      globalConcurrency,
+      perHostConcurrency,
+      timeBudgetMs: recoveryTimeBudgetMs,
+      writesAllowed: writes,
+      fetchExtract: (url) => fetchAndExtract(url, { timeoutMs: 12000, maxAttempts: 1 }),
+      persistNews: writes ? persistViaNewsLake : undefined,
+    });
+    const report = {
+      role: 'recovery',
+      CYCLE_ID: cycle.cycle_id,
+      WINDOW_START: cycle.window_start,
+      WINDOW_END: cycle.window_end,
+      DRY_RUN: dry,
+      PRODUCTION_RECOVERY_WRITES: writes ? drain.RECOVERY_PERSISTED : 0,
+      ...drain,
+    };
+    writeFileSync('artifacts/capture-reliability-24h-dry.json', JSON.stringify(report, null, 2));
+    logger.info(report, 'capture-reliability recovery');
     return;
   }
 
   const report = await runReconcileEngine(
     {
       runId,
+      cycleId: cycle.cycle_id,
       mode,
-      windowStart: window.start,
-      windowEnd: window.end,
+      windowStart: cycle.window_start,
+      windowEnd: cycle.window_end,
       shardIndex,
-      shardCount,
+      shardCount: cycle.shard_count,
       workerId,
       maxSourcesThisRun,
       safetyCap,
       timeBudgetMs: budgetMs,
-      processRecovery,
+      processRecovery: role === 'source' || role === 'capture-reliability-source-worker' ? false : processRecovery,
       dryRun: dry,
       allowWritesEnv: allowEnv,
       gapCandidates,
       nowIso: new Date().toISOString(),
+      recoveryBatchSize,
+      recoveryConcurrency,
+      maxRecoveryBatches,
+      recoveryTimeBudgetMs,
+      globalConcurrency,
+      perHostConcurrency,
     },
     {
       store,
@@ -183,16 +242,31 @@ async function main() {
     },
   );
 
+  const remediation = buildCoverageRemediation({ states: report.sourceStates, catalog });
+  writeFileSync('artifacts/coverage-remediation-v5.json', JSON.stringify({ generated_at: new Date().toISOString(), rows: remediation }, null, 2));
+  const queued = report.sample_queued.filter((r) => r.status === 'QUEUED' || r.status === 'FETCH_TO_CLASSIFY');
+  const snap = await store.snapshot();
+  const audit = auditQueuedSample(
+    snap.filter((r) => r.status === 'QUEUED' || r.status === 'FETCH_TO_CLASSIFY'),
+    { start: cycle.window_start, end: cycle.window_end },
+    40,
+  );
+  writeFileSync('artifacts/queued-sample-audit-v5.json', JSON.stringify(audit, null, 2));
+
   const out = {
     ...report,
     STORE_BACKEND: backend,
-    LIMIT_12_REMOVED: true,
-    FULL_CATALOG_STRATEGY: 'paginate_medios + durable source jobs + shards',
+    FULL_CATALOG_STRATEGY: 'fixed_cycle + deterministic shards',
     PRODUCTION_RECOVERY_WRITES: writes ? report.PRODUCTION_RECOVERY_WRITES : 0,
     WRITES_ALLOWED: writes,
     DRY_RUN: dry,
+    SECRET_ENABLED: allowEnv === 'true',
+    QUEUED_SAMPLE_TOTAL: audit.total,
+    VALID_RECENT_RATE: audit.rates.VALID_ARTICLE_RECENT,
+    WRONG_WINDOW_RATE: audit.rates.WRONG_WINDOW + audit.rates.VALID_ARTICLE_OLD,
+    NON_ARTICLE_RATE: audit.rates.NON_ARTICLE,
+    WINDOW_MEMBERSHIP_UNKNOWN_RATE: audit.rates.WINDOW_MEMBERSHIP_UNKNOWN,
   };
-  mkdirSync('artifacts', { recursive: true });
   writeFileSync('artifacts/capture-reliability-24h-dry.json', JSON.stringify(out, null, 2));
   logger.info(out, 'capture-reliability');
 }

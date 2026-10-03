@@ -140,3 +140,12 @@ revoke all on table public.capture_recovery_observations from anon, authenticate
 revoke all on function public.claim_capture_recovery_batch(text, integer, timestamptz) from public, anon, authenticated;
 revoke all on function public.claim_capture_source_batch(text, timestamptz, timestamptz, text[], integer, timestamptz) from public, anon, authenticated;
 revoke all on function public.claim_capture_gap_batch(text, integer, timestamptz) from public, anon, authenticated;
+
+grant select, insert, update, delete on table public.capture_recovery_queue to service_role;
+grant select, insert, update, delete on table public.capture_reconcile_runs to service_role;
+grant select, insert, update, delete on table public.capture_source_reconcile_state to service_role;
+grant select, insert, update, delete on table public.capture_gap_candidates to service_role;
+grant select, insert, update, delete on table public.capture_recovery_observations to service_role;
+grant execute on function public.claim_capture_recovery_batch(text, integer, timestamptz) to service_role;
+grant execute on function public.claim_capture_source_batch(text, timestamptz, timestamptz, text[], integer, timestamptz) to service_role;
+grant execute on function public.claim_capture_gap_batch(text, integer, timestamptz) to service_role;
