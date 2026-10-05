@@ -33,9 +33,21 @@ export function sitemapWindowCompleteness(opts: {
   datedInWindow: number;
   indexFollowed: boolean;
   capHit: boolean;
+  datedOldestMs?: number | null;
+  windowStartMs?: number | null;
 }): CompletenessFlag {
-  if (opts.capHit) return 'NO';
-  if (!opts.paginationComplete) return 'NO';
+  const windowCovered =
+    opts.datedInWindow > 0 &&
+    opts.datedOldestMs != null &&
+    opts.windowStartMs != null &&
+    Number.isFinite(opts.datedOldestMs) &&
+    Number.isFinite(opts.windowStartMs) &&
+    opts.datedOldestMs <= opts.windowStartMs;
+  if (windowCovered) return 'YES';
+  if (opts.capHit || !opts.paginationComplete) {
+    if (opts.datedInWindow === 0) return 'UNKNOWN';
+    return 'NO';
+  }
   if (!opts.indexFollowed && opts.datedInWindow === 0) return 'UNKNOWN';
   return 'YES';
 }

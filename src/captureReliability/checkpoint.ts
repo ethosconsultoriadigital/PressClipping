@@ -24,6 +24,29 @@ export function timeBudgetExceeded(startedMs: number, budgetMs: number, nowMs: n
   return nowMs - startedMs >= budgetMs;
 }
 
+export class SourceTimeoutError extends Error {
+  constructor(medioId: string, timeoutMs: number) {
+    super(`SOURCE_TIMEOUT:${medioId}:${timeoutMs}`);
+    this.name = 'SourceTimeoutError';
+  }
+}
+
+export function withTimeout<T>(promise: Promise<T>, timeoutMs: number, medioId: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new SourceTimeoutError(medioId, timeoutMs)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 export function resumeFrom(cp: Checkpoint, catalog: string[]): string[] {
   const done = new Set(cp.processed_medio_ids);
   return catalog.filter((id) => !done.has(id));
@@ -75,9 +98,10 @@ export function markSourceTerminal(
   status: SourceJobStatus,
   nowIso: string,
 ): SourceReconcileState {
+  const capAllowsComplete = !state.cap_hit || state.coverage_verdict === 'COVERAGE_CONFIRMED';
   const complete =
     status === 'COMPLETE' &&
-    !state.cap_hit &&
+    capAllowsComplete &&
     !state.time_budget_hit &&
     state.unexplained_missing === 0 &&
     !state.discovery_surfaces.includes('NO_DISCOVERY_SURFACE');

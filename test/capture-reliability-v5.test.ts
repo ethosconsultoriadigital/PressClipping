@@ -205,7 +205,8 @@ describe('Capture reliability V5', () => {
       },
     );
     const queued = (await store.snapshot()).find((r) => r.discovered_url.includes('plantea-fortalecer'));
-    expect(queued?.last_dry_run_result).toBe('WOULD_PERSIST');
+    expect(queued?.status).toBe('MANUAL_REVIEW');
+    expect(queued?.last_dry_run_result).toBe('WINDOW_MEMBERSHIP_UNKNOWN');
     expect(queued?.medio_id).toBe('MED-0441');
     const payload = buildRecoveredNewsPayload({
       url: ENTORNO,

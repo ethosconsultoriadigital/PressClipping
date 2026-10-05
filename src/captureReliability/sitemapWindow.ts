@@ -43,11 +43,16 @@ export function applySitemapWindow(opts: {
   }
   const bound = opts.undatedBound ?? UNDATED_BOUND;
   const undatedKept = undated.slice(0, bound);
+  const datedOldestMs = dated.length
+    ? Math.min(...dated.map((it) => Date.parse(it.fecha!)).filter((n) => Number.isFinite(n)))
+    : null;
   const completeness = sitemapWindowCompleteness({
     paginationComplete: opts.paginationComplete,
     datedInWindow: dated.length,
     indexFollowed: opts.indexFollowed,
     capHit: opts.capHit || undated.length > bound,
+    datedOldestMs,
+    windowStartMs: Number.isFinite(start) ? start : null,
   });
   return {
     items: [...dated, ...undatedKept],

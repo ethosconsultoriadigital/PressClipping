@@ -91,8 +91,8 @@ describe('RC1 A↔B contract', () => {
     expect(gapRecoveryEligible('ALREADY_IN_LAKE')).toBe(false);
   });
 
-  it('Entorno gap is auto-write eligible without published_at', () => {
-    const e = isAutoWriteEligible(rec(), W24, null);
+  it('Entorno gap is auto-write eligible without published_at when targeted', () => {
+    const e = isAutoWriteEligible(rec(), W24, null, { targeted: true });
     expect(e.eligible).toBe(true);
     expect(e.reason).toBe('MISSING_KNOWN_SOURCE');
   });
@@ -103,6 +103,12 @@ describe('RC1 A↔B contract', () => {
       W24,
       null,
     );
+    expect(e.eligible).toBe(false);
+    expect(e.reason).toBe('WINDOW_MEMBERSHIP_UNKNOWN');
+  });
+
+  it('undated MISSING_KNOWN_SOURCE is not bulk-write eligible', () => {
+    const e = isAutoWriteEligible(rec({ window_membership: 'WINDOW_MEMBERSHIP_UNKNOWN', published_at: null }), W24, null);
     expect(e.eligible).toBe(false);
     expect(e.reason).toBe('WINDOW_MEMBERSHIP_UNKNOWN');
   });

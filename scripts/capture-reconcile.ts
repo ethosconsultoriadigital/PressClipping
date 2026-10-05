@@ -147,6 +147,7 @@ async function main() {
   const recoveryTimeBudgetMs = numArg('recovery-time-budget-ms', budgetMs);
   const globalConcurrency = numArg('global-concurrency', 8);
   const perHostConcurrency = numArg('per-host-concurrency', 2);
+  const perSourceTimeoutMs = numArg('per-source-timeout-ms', 40_000);
   const processRecovery = !process.argv.includes('--no-recovery');
   const role = arg('role') ?? 'all';
   const runId = arg('run-id') ?? `${cycle.cycle_id}-s${shardIndex}`;
@@ -248,6 +249,7 @@ async function main() {
       globalConcurrency,
       perHostConcurrency,
       recoveryOnlyHashes: recoveryHashes.size ? recoveryHashes : undefined,
+      perSourceTimeoutMs,
     },
     {
       store,

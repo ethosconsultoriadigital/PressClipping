@@ -16,6 +16,11 @@ export interface WriteEligibility {
   reason: AutoWriteReason | AutoWriteBlockReason;
 }
 
+export interface WriteEligibilityOpts {
+  /** Targeted canary (onlyHashes). Never the default bulk path. */
+  targeted?: boolean;
+}
+
 function inWindow(iso: string, start?: string, end?: string): boolean {
   if (!start || !end) return true;
   const t = Date.parse(iso);
@@ -33,15 +38,13 @@ export function isAutoWriteEligible(
   rec: Pick<RecoveryRecord, 'status' | 'medio_id' | 'discovered_via' | 'window_membership' | 'published_at'>,
   window?: { start?: string; end?: string },
   extractedPublishedAt?: string | null,
+  opts: WriteEligibilityOpts = {},
 ): WriteEligibility {
   if (rec.status === 'UNKNOWN_SOURCE' || !rec.medio_id) {
     return { eligible: false, reason: 'UNKNOWN_SOURCE' };
   }
   if (rec.status === 'AMBIGUOUS_SOURCE') {
     return { eligible: false, reason: 'AMBIGUOUS_SOURCE' };
-  }
-  if (isPublisherGap(rec)) {
-    return { eligible: true, reason: 'MISSING_KNOWN_SOURCE' };
   }
   const published = extractedPublishedAt || rec.published_at;
   if (published && window?.start && window?.end) {
@@ -55,6 +58,9 @@ export function isAutoWriteEligible(
   }
   if (rec.window_membership === 'OUT_OF_WINDOW') {
     return { eligible: false, reason: 'OUTSIDE_WINDOW' };
+  }
+  if (isPublisherGap(rec) && opts.targeted) {
+    return { eligible: true, reason: 'MISSING_KNOWN_SOURCE' };
   }
   return { eligible: false, reason: 'WINDOW_MEMBERSHIP_UNKNOWN' };
 }

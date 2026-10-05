@@ -45,6 +45,7 @@ export async function processRecoveryRecord(opts: {
   maxAttempts?: number;
   windowStart?: string;
   windowEnd?: string;
+  targeted?: boolean;
 }): Promise<RecoveryRecord> {
   const rec = opts.record;
   const maxAttempts = opts.maxAttempts ?? 8;
@@ -102,7 +103,12 @@ export async function processRecoveryRecord(opts: {
     discoveredSummary: rec.discovered_summary,
   });
 
-  const eligibility = isAutoWriteEligible(rec, { start: opts.windowStart, end: opts.windowEnd }, payload.insert.fecha_publicacion);
+  const eligibility = isAutoWriteEligible(
+    rec,
+    { start: opts.windowStart, end: opts.windowEnd },
+    payload.insert.fecha_publicacion,
+    { targeted: opts.targeted === true },
+  );
   if (!eligibility.eligible) {
     return (
       (await opts.store.markStatus(rec.hash_url, 'MANUAL_REVIEW', {

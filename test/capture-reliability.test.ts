@@ -606,8 +606,8 @@ describe('Capture reliability V3', () => {
       },
     });
     const rec = (await store.snapshot()).find((r) => r.discovered_url === ENTORNO);
-    expect(rec?.status).toBe('QUEUED');
-    expect(rec?.last_dry_run_result).toBe('WOULD_PERSIST');
+    expect(rec?.status).toBe('MANUAL_REVIEW');
+    expect(rec?.last_error).toContain('WINDOW_MEMBERSHIP_UNKNOWN');
     expect(rec?.medio_id).toBe('MED-0441');
     expect(report.PRODUCTION_RECOVERY_WRITES).toBe(0);
   });

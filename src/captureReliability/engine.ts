@@ -1,6 +1,6 @@
 ﻿import { configuredSurfaceKinds, hasConfiguredDiscoverySurface, shardCatalog } from './catalog.js';
 import { discoveryCoverageVerdict } from './coverage.js';
-import { asCheckpoint, emptySourceState, markSourceTerminal, timeBudgetExceeded } from './checkpoint.js';
+import { asCheckpoint, emptySourceState, markSourceTerminal, timeBudgetExceeded, withTimeout, SourceTimeoutError } from './checkpoint.js';
 import type { CaptureReliabilityStore } from './captureRecoveryRepository.js';
 import { EXPLAINED_RECOVERY, type ChannelCatalogRow, type CompletenessFlag, type DiscoveredUrl, type GapCandidate, type RecoveryRecord, type RootCause, type SourceReconcileState } from './types.js';
 import { lookupExistingNewsByHashes, type HashQueryFn } from './lakeLookup.js';
@@ -54,6 +54,7 @@ export interface EngineOpts {
   startedMs?: number;
   maxAttempts?: number;
   staleClaimMs?: number;
+  perSourceTimeoutMs?: number;
   cycleId?: string;
   recoveryBatchSize?: number;
   recoveryConcurrency?: number;
@@ -210,7 +211,24 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
     let state = (await deps.store.getSourceState(row.medio_id, opts.windowStart, opts.windowEnd))
       ?? emptySourceState({ medioId: row.medio_id, windowStart: opts.windowStart, windowEnd: opts.windowEnd });
 
-    const discovery = await deps.discoverSource(row, { start: opts.windowStart, end: opts.windowEnd });
+    let discovery: SourceDiscovery;
+    try {
+      discovery = await withTimeout(
+        deps.discoverSource(row, { start: opts.windowStart, end: opts.windowEnd }),
+        opts.perSourceTimeoutMs ?? 40_000,
+        row.medio_id,
+      );
+    } catch (err) {
+      const timeout = err instanceof SourceTimeoutError || /SOURCE_TIMEOUT/i.test(err instanceof Error ? err.message : String(err));
+      state = {
+        ...state,
+        last_error: timeout ? 'SOURCE_TIMEOUT' : (err instanceof Error ? err.message : String(err)),
+        coverage_verdict: 'COVERAGE_PARTIAL',
+        time_budget_hit: false,
+      };
+      await deps.store.upsertSourceState(markSourceTerminal(state, 'INCOMPLETE', opts.nowIso));
+      continue;
+    }
     rssFlags.push(discovery.rssSpanCovered);
     for (const s of discovery.surfaces) surfacesUsed.add(s);
 
@@ -285,7 +303,7 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
       urls_blocked: blocked,
       urls_failed: failed,
       unexplained_missing: unexplained,
-      cap_hit: capHit || discovery.capHit,
+      cap_hit: discovery.capHit,
       time_budget_hit: timeBudgetHit,
     };
 
@@ -294,15 +312,16 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
       sitemapSpanCovered: discovery.sitemapSpanCovered,
       listingSpanCovered: discovery.listingSpanCovered,
       paginationComplete: !discovery.capHit,
-      capHit: discovery.capHit || capHit,
+      capHit: discovery.capHit,
       timeBudgetHit,
       noDiscoverySurface: discovery.noDiscoverySurface,
       surfaces: discovery.surfaces,
     });
     state = { ...state, coverage_verdict: verdict };
 
-    if (discovery.capHit && !capHit) {
-      await deps.store.upsertSourceState(markSourceTerminal({ ...state, cap_hit: true }, 'INCOMPLETE', opts.nowIso));
+    if (discovery.capHit) {
+      const status = verdict === 'COVERAGE_CONFIRMED' ? 'COMPLETE' : 'INCOMPLETE';
+      await deps.store.upsertSourceState(markSourceTerminal({ ...state, cap_hit: true }, status, opts.nowIso));
       continue;
     }
     if (capHit) {

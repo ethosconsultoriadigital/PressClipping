@@ -98,6 +98,7 @@ export async function drainRecoveryQueue(opts: RecoveryDrainOpts): Promise<Recov
           maxAttempts: opts.maxAttempts,
           windowStart: opts.windowStart,
           windowEnd: opts.windowEnd,
+          targeted: Boolean(opts.onlyHashes && opts.onlyHashes.size > 0),
         }),
       );
     });

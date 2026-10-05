@@ -13,15 +13,13 @@ export function discoveryCoverageVerdict(input: {
   if (input.noDiscoverySurface || input.surfaces.includes('NO_DISCOVERY_SURFACE') || input.surfaces.length === 0) {
     return 'COVERAGE_UNKNOWN';
   }
-  if (input.capHit || input.timeBudgetHit || !input.paginationComplete) return 'COVERAGE_PARTIAL';
+  const windowProven = input.sitemapSpanCovered === 'YES' || input.listingSpanCovered === 'YES';
+  if (input.timeBudgetHit) return 'COVERAGE_PARTIAL';
+  if ((input.capHit || !input.paginationComplete) && !windowProven) return 'COVERAGE_PARTIAL';
   const rssOnly = input.surfaces.every((s) => s === 'rss');
   if (rssOnly) return 'COVERAGE_PARTIAL';
   if (input.sitemapSpanCovered === 'NO') return 'COVERAGE_PARTIAL';
-  if (input.rssSpanCovered === 'NO' && input.sitemapSpanCovered === 'YES' && input.paginationComplete) {
-    return 'COVERAGE_CONFIRMED';
-  }
-  if (input.sitemapSpanCovered === 'YES' && input.paginationComplete) return 'COVERAGE_CONFIRMED';
-  if (input.listingSpanCovered === 'YES') return 'COVERAGE_CONFIRMED';
+  if (input.sitemapSpanCovered === 'YES' || input.listingSpanCovered === 'YES') return 'COVERAGE_CONFIRMED';
   if (input.sitemapSpanCovered === 'UNKNOWN' || input.rssSpanCovered === 'UNKNOWN') return 'COVERAGE_UNKNOWN';
   return 'COVERAGE_PARTIAL';
 }
