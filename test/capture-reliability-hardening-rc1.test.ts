@@ -209,7 +209,14 @@ describe('RC1 A News Lake hardening', () => {
 
   it('I: rerun same URL/hash does not duplicate lake row', async () => {
     const url = 'https://medio.example/nota-unica-de-prueba-idempotente/';
-    const lake = [{ noticia_id: 'n-1', hash_url: primaryHash(url), url_original: url, url_canonica: captureCanonicalUrl(url) }];
+    const lake = [{
+      noticia_id: 'n-1',
+      hash_url: primaryHash(url),
+      url_original: url,
+      url_canonica: captureCanonicalUrl(url),
+      texto_cuerpo_nota: 'cuerpo',
+      texto_nota_limpia: 'limpia',
+    }];
     const map1 = await lookupExistingNewsByHashes([url], async () => lake);
     const map2 = await lookupExistingNewsByHashes([url], async () => lake);
     expect(map1.get(url)?.noticia_id).toBe('n-1');

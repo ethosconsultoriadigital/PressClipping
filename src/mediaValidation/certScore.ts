@@ -70,14 +70,21 @@ export function isHomepage(url: string): boolean {
   }
 }
 
+const LISTING_SEG =
+  /^(category|categories|categoria|categorias|tag|tags|author|autor|autores|seccion|secciones|tema|temas|etiqueta|etiquetas|section|search|busca)$/i;
+
 export function isGenericListing(url: string): boolean {
   try {
     const path = new URL(url).pathname;
     const segs = path.split('/').filter(Boolean);
-    if (segs.length > 2) return false;
-    return /\/(?:category|tag|author|seccion|secciones|tema|temas|etiqueta|section|search|busca)(?:\/|$)|\/page\/\d+/i.test(
-      path,
-    );
+    if (/\/page\/\d+/i.test(path)) return true;
+    if (!segs.length) return false;
+    // /busca-slug-de-articulo is not /busca/
+    if (segs.length === 1 && LISTING_SEG.test(segs[0]!)) return true;
+    if (segs.length === 2 && LISTING_SEG.test(segs[0]!)) return true;
+    // /seccion/{hub} two-level section index. Deeper article slugs are not listings here.
+    if (segs.length === 3 && LISTING_SEG.test(segs[0]!) && /^(page-\d+|\d+)$/i.test(segs[2]!)) return true;
+    return false;
   } catch {
     return false;
   }

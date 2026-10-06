@@ -1,5 +1,6 @@
 import { shouldRejectCrawlUrl } from '../crawlers/urlFilters.js';
 import { isGenericListing, isHomepage } from '../mediaValidation/certScore.js';
+import { classifyNonArticle, isNonArticleReason, type NonArticleReason } from './nonArticle.js';
 
 export interface AdmissionInput {
   url: string;
@@ -9,11 +10,19 @@ export interface AdmissionInput {
   body?: string | null;
   publishedAt?: string | null;
   hasStructuredData?: boolean;
+  siteName?: string | null;
 }
 
 export interface AdmissionResult {
   admit: boolean;
   reason: string;
+}
+
+export { isNonArticleReason };
+export type { NonArticleReason };
+
+export function isNonArticleAdmission(reason: string | null | undefined): boolean {
+  return isNonArticleReason(reason) || reason === 'homepage' || reason === 'listing_hub' || reason === 'taxonomy_or_search';
 }
 
 function pathLooksLikeArticle(url: string): boolean {
@@ -35,14 +44,27 @@ function pathLooksLikeArticle(url: string): boolean {
 
 const TRUSTED_DISCOVERY = /rss|sitemap|gap|google|auditor|listing|section/i;
 
+const OBVIOUS_REJECT = new Set([
+  'homepage',
+  'listing_hub',
+  'taxonomy_or_search',
+  'host_filter_non_article',
+  'malformed_url',
+  'NON_ARTICLE_CATEGORY',
+  'NON_ARTICLE_AUTHOR_HUB',
+  'NON_ARTICLE_TEMPLATE',
+  'NON_ARTICLE_DIRECTORY',
+  'NON_ARTICLE_PRINT_COVER',
+  'NON_ARTICLE_GENERIC_LISTING',
+]);
+
 export function classifyPreFetch(input: AdmissionInput, discoveredVia: string): {
   disposition: 'ADMIT' | 'REJECT' | 'FETCH_TO_CLASSIFY';
   reason: string;
 } {
   const admission = admitDiscoveredArticle(input);
   if (admission.admit) return { disposition: 'ADMIT', reason: admission.reason };
-  const obvious = new Set(['homepage', 'listing_hub', 'taxonomy_or_search', 'host_filter_non_article', 'malformed_url']);
-  if (obvious.has(admission.reason)) return { disposition: 'REJECT', reason: admission.reason };
+  if (OBVIOUS_REJECT.has(admission.reason)) return { disposition: 'REJECT', reason: admission.reason };
   if (TRUSTED_DISCOVERY.test(discoveredVia)) {
     return { disposition: 'FETCH_TO_CLASSIFY', reason: admission.reason };
   }
@@ -51,15 +73,31 @@ export function classifyPreFetch(input: AdmissionInput, discoveredVia: string): 
 
 export function admitDiscoveredArticle(input: AdmissionInput): AdmissionResult {
   const url = input.url;
+  try {
+    new URL(url);
+  } catch {
+    return { admit: false, reason: 'malformed_url' };
+  }
   if (input.medioId && shouldRejectCrawlUrl(input.medioId, url)) {
     return { admit: false, reason: 'host_filter_non_article' };
   }
   if (isHomepage(url)) return { admit: false, reason: 'homepage' };
-  if (isGenericListing(url)) return { admit: false, reason: 'listing_hub' };
+
+  const nonArticle = classifyNonArticle({
+    url,
+    titulo: input.titulo,
+    body: input.body,
+    siteName: input.siteName,
+  });
+  if (nonArticle.nonArticle && nonArticle.reason) {
+    return { admit: false, reason: nonArticle.reason };
+  }
+
+  if (isGenericListing(url)) return { admit: false, reason: 'NON_ARTICLE_GENERIC_LISTING' };
   try {
     const path = new URL(url).pathname;
-    if (/\/(tag|category|author|etiqueta|archivo|search|busca)(\/|$)/i.test(path)) {
-      return { admit: false, reason: 'taxonomy_or_search' };
+    if (/\/(tag|tags|category|categoria|author|autor|etiqueta|archivo|search|busca)(\/|$)/i.test(path)) {
+      return { admit: false, reason: 'NON_ARTICLE_CATEGORY' };
     }
   } catch {
     return { admit: false, reason: 'malformed_url' };
