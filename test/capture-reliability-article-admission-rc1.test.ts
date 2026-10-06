@@ -126,6 +126,22 @@ describe('quality gate uses the same admission classifier', () => {
     expect(automatedNonArticleCount(rows)).toBe(1);
   });
 
+  it('short real titles with dated permalink and body are WARN not FAIL', () => {
+    const q = evaluateRecoveryQuality({
+      url: 'https://elvalle.com.mx/2026/10/04/debate-676/',
+      medioId: 'MED-0410',
+      expectedMedioId: 'MED-0410',
+      titulo: 'DEBATE',
+      body: 'x'.repeat(800),
+      fechaPublicacion: '2026-10-05T07:33:02.000Z',
+      windowStart: '2026-10-04T21:00:00.000Z',
+      windowEnd: '2026-10-05T21:00:00.000Z',
+      cuerpoNotaChars: 3552,
+    });
+    expect(q.verdict).toBe('WARN');
+    expect(q.automatedNonArticle).toBe(false);
+  });
+
   it('classifyNonArticle is explicit per class', () => {
     expect(classifyNonArticle({ url: FP.template, titulo: 'Header Template - Default PRO' }).reason).toBe('NON_ARTICLE_TEMPLATE');
     expect(classifyNonArticle({ url: FP.people }).reason).toBe('NON_ARTICLE_DIRECTORY');

@@ -65,8 +65,9 @@ export function evaluateRecoveryQuality(row: RecoveryQualityRow): RecoveryQualit
   if ((row.hashCount ?? 1) > 1) fail.push('duplicate_hash');
   if ((row.canonicalCount ?? 1) > 1) fail.push('duplicate_canonical');
   const title = (row.titulo ?? '').trim();
-  if (title.length < 8 && !nonArticle) fail.push('empty_or_weak_title');
   const body = row.body ?? '';
+  if (!title) fail.push('empty_or_weak_title');
+  else if (title.length < 8) reasons.push('short_title');
   if (/inicio\s*\|\s*contacto|all rights reserved/i.test(body) && body.length < 400) fail.push('garbage_extraction');
   if (row.calidadExtraccion === 'baja' || row.calidadExtraccion === 'fallida') reasons.push(`calidad:${row.calidadExtraccion}`);
   if ((row.cuerpoNotaChars ?? 0) > 0 && (row.cuerpoNotaChars ?? 0) < 200) reasons.push('short_body');
