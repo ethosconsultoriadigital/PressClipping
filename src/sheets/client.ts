@@ -46,9 +46,8 @@ const cachedById = new Map<string, GoogleSpreadsheet>();
 
 /**
  * ¿El error de Google Sheets/googleapis es transitorio y conviene reintentar?
- * Cubre tanto fallos de transporte (CI: "Premature close" / ECONNRESET) como
- * límites de cuota (429 / rateLimitExceeded) y errores de backend (503).
- * Los errores de credenciales/permisos NO entran aquí (no se reintentan).
+ * Cubre transporte (Premature close / ECONNRESET), cuota (429) y backend
+ * 502/503/504. 400/401/403 nunca se reintentan.
  */
 const PATRONES_REINTENTABLES = [
   'premature close',
@@ -62,11 +61,42 @@ const PATRONES_REINTENTABLES = [
   'quota exceeded',
   'ratelimitexceeded',
   'userratelimitexceeded',
+  '502',
   '503',
+  '504',
   'backenderror',
+  'gateway timeout',
+  'bad gateway',
 ] as const;
 
+const FATAL_STATUS = new Set([400, 401, 403]);
+const AMBIGUOUS_WRITE_STATUS = new Set([502, 503, 504]);
+
+export function sheetsHttpStatus(err: unknown): number | null {
+  if (err && typeof err === 'object') {
+    const rec = err as { status?: unknown; code?: unknown; response?: { status?: unknown } };
+    if (typeof rec.status === 'number') return rec.status;
+    if (typeof rec.code === 'number' && rec.code >= 400 && rec.code < 600) return rec.code;
+    if (typeof rec.response?.status === 'number') return rec.response.status;
+  }
+  const msg = err instanceof Error ? err.message : String(err);
+  const m = msg.match(/\b(400|401|403|429|502|503|504)\b/);
+  return m ? Number(m[1]) : null;
+}
+
+export function esErrorSheetsFatal(err: unknown): boolean {
+  const status = sheetsHttpStatus(err);
+  return status !== null && FATAL_STATUS.has(status);
+}
+
+export function esErrorSheetsWriteAmbiguo(err: unknown): boolean {
+  if (esErrorSheetsFatal(err)) return false;
+  const status = sheetsHttpStatus(err);
+  return status !== null && AMBIGUOUS_WRITE_STATUS.has(status);
+}
+
 export function esErrorSheetsReintetnable(err: unknown): boolean {
+  if (esErrorSheetsFatal(err)) return false;
   const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
   return PATRONES_REINTENTABLES.some((p) => msg.includes(p));
 }

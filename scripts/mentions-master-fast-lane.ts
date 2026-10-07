@@ -29,7 +29,13 @@ import type { GoogleSpreadsheetWorksheet } from 'google-spreadsheet';
 import { calcularPlan, procesarChunk, type NewsLakeCaptureArgs } from './news-lake-capture.js';
 import { getSupabase } from '../src/supabase/client.js';
 import { getAllClientes, getKeywordsActivas, type KeywordActivaRow } from '../src/supabase/repositories.js';
-import { getSpreadsheetById, withSheetsRetry } from '../src/sheets/client.js';
+import {
+  getSpreadsheetById,
+  withSheetsRetry,
+  esErrorSheetsReintetnable,
+  esErrorSheetsWriteAmbiguo,
+} from '../src/sheets/client.js';
+import { chunkManifest } from '../src/matching/frozenManifest.js';
 import { matchKeyword, type CampoBuscable, type MatchResultado } from '../src/matchers/keyword.js';
 import { toKeywordRule } from '../src/matching/detectMentionsCore.js';
 import { buildMentionScope } from '../src/matching/controlPlaneScope.js';
@@ -92,6 +98,7 @@ export interface MasterNewsRow {
   texto_cuerpo_nota: string | null;
   tipo_nota: string | null;
   calidad_extraccion: string | null;
+  hash_url?: string | null;
 }
 
 interface MatchBundle {
@@ -247,17 +254,13 @@ export async function fetchEligibleNews(
   return (await fetchEligibleNewsPaged(sinceIso, medioIds, fetchCap)).rows;
 }
 
-export async function fetchEligibleNewsPaged(
-  sinceIso: string,
-  medioIds?: string[],
-  fetchCap = GLOBAL_FETCH_CAP,
-  noticiaIds?: string[],
-): Promise<FetchNewsResult> {
-  const select =
-    'noticia_id, medio_id, titulo, subtitulo, resumen, url_original, fecha_publicacion, fecha_captura,' +
-    ' autor, seccion, texto_extraido, texto_nota_limpia, texto_cuerpo_nota, tipo_nota, calidad_extraccion,' +
-    ' medios(nombre_medio)';
-  const mapRow = (n: any): MasterNewsRow => ({
+const NEWS_SELECT =
+  'noticia_id, hash_url, medio_id, titulo, subtitulo, resumen, url_original, fecha_publicacion, fecha_captura,' +
+  ' autor, seccion, texto_extraido, texto_nota_limpia, texto_cuerpo_nota, tipo_nota, calidad_extraccion,' +
+  ' medios(nombre_medio)';
+
+function mapNewsRow(n: any): MasterNewsRow {
+  return {
     noticia_id: n.noticia_id,
     medio_id: n.medio_id ?? null,
     medio_nombre: n.medios?.nombre_medio ?? null,
@@ -274,19 +277,106 @@ export async function fetchEligibleNewsPaged(
     texto_cuerpo_nota: n.texto_cuerpo_nota ?? null,
     tipo_nota: n.tipo_nota ?? null,
     calidad_extraccion: n.calidad_extraccion ?? null,
-  });
+    hash_url: n.hash_url ?? null,
+  };
+}
+
+export interface FrozenFetchReport {
+  requested: number;
+  found: number;
+  missing: number;
+  duplicate_rows: number;
+  unique_noticia_ids: number;
+  unique_hashes: number;
+  missing_keys: string[];
+}
+
+export async function fetchFrozenNews(opts: {
+  noticiaIds?: string[];
+  hashes?: string[];
+  batchSize?: number;
+}): Promise<{ rows: MasterNewsRow[]; report: FrozenFetchReport; pagesScanned: number }> {
+  const ids = [...new Set((opts.noticiaIds ?? []).map((s) => s.trim().toLowerCase()).filter(Boolean))];
+  const hashes = [...new Set((opts.hashes ?? []).map((s) => s.trim().toLowerCase()).filter(Boolean))];
+  if (!ids.length && !hashes.length) {
+    return {
+      rows: [],
+      report: {
+        requested: 0,
+        found: 0,
+        missing: 0,
+        duplicate_rows: 0,
+        unique_noticia_ids: 0,
+        unique_hashes: 0,
+        missing_keys: [],
+      },
+      pagesScanned: 0,
+    };
+  }
+  const batchSize = opts.batchSize ?? 80;
+  const raw: MasterNewsRow[] = [];
+  let pagesScanned = 0;
+  const runIn = async (column: 'noticia_id' | 'hash_url', keys: string[]) => {
+    for (const batch of chunkManifest(keys, batchSize)) {
+      const { data, error } = await getSupabase()
+        .from('noticias')
+        .select(NEWS_SELECT)
+        .neq('origen_cobertura', 'pressclipping_diagnostico')
+        .in(column, batch)
+        .order('noticia_id', { ascending: true });
+      if (error) throw new Error(`No se pudieron leer noticias del manifiesto: ${error.message}`);
+      pagesScanned += 1;
+      raw.push(...(data ?? []).map(mapNewsRow));
+    }
+  };
+  if (ids.length) await runIn('noticia_id', ids);
+  if (hashes.length) await runIn('hash_url', hashes);
+  const byId = new Map<string, MasterNewsRow>();
+  for (const row of raw) byId.set(row.noticia_id.toLowerCase(), row);
+  const rows = [...byId.values()].filter((n) => hasTrustedSearchableText(n));
+  const foundIds = new Set(raw.map((r) => r.noticia_id.toLowerCase()));
+  const foundHashes = new Set(raw.map((r) => (r.hash_url ?? '').toLowerCase()).filter(Boolean));
+  const missingKeys = [
+    ...ids.filter((id) => !foundIds.has(id)),
+    ...hashes.filter((h) => !foundHashes.has(h)),
+  ];
+  return {
+    rows,
+    report: {
+      requested: ids.length + hashes.length,
+      found: byId.size,
+      missing: missingKeys.length,
+      duplicate_rows: Math.max(0, raw.length - byId.size),
+      unique_noticia_ids: byId.size,
+      unique_hashes: foundHashes.size,
+      missing_keys: missingKeys,
+    },
+    pagesScanned,
+  };
+}
+
+export async function fetchEligibleNewsPaged(
+  sinceIso: string,
+  medioIds?: string[],
+  fetchCap = GLOBAL_FETCH_CAP,
+  noticiaIds?: string[],
+  hashes?: string[],
+): Promise<FetchNewsResult> {
+  if ((noticiaIds && noticiaIds.length > 0) || (hashes && hashes.length > 0)) {
+    const frozen = await fetchFrozenNews({ noticiaIds, hashes });
+    return { rows: frozen.rows, capHit: false, pagesScanned: frozen.pagesScanned };
+  }
 
   const runPage = async (from: number, to: number) => {
     let q = getSupabase()
       .from('noticias')
-      .select(select)
+      .select(NEWS_SELECT)
       .neq('origen_cobertura', 'pressclipping_diagnostico')
+      .gte('fecha_captura', sinceIso)
       .order('fecha_captura', { ascending: true })
       .order('noticia_id', { ascending: true })
       .range(from, to);
-    if (!noticiaIds?.length) q = q.gte('fecha_captura', sinceIso);
     if (medioIds && medioIds.length > 0) q = q.in('medio_id', medioIds);
-    if (noticiaIds && noticiaIds.length > 0) q = q.in('noticia_id', noticiaIds);
     const { data, error } = await q;
     if (error) throw new Error(`No se pudieron leer noticias frescas: ${error.message}`);
     return data ?? [];
@@ -298,7 +388,7 @@ export async function fetchEligibleNewsPaged(
   for (let from = 0; from < fetchCap; from += page) {
     const data = await runPage(from, from + page - 1);
     pagesScanned += 1;
-    out.push(...data.map(mapRow).filter((n) => hasTrustedSearchableText(n)));
+    out.push(...data.map(mapNewsRow).filter((n) => hasTrustedSearchableText(n)));
     if (data.length < page) {
       return { rows: out, capHit: false, pagesScanned };
     }
@@ -460,9 +550,8 @@ export async function appendRows(
   const normToRaw = new Map<string, string>();
   for (const raw of sheet.headerValues) normToRaw.set(normalizeHeader(raw), raw);
 
-  let appended = 0;
-  for (let i = 0; i < unique.length; i += APPEND_CHUNK) {
-    const chunk = unique.slice(i, i + APPEND_CHUNK).map((row) => {
+  const mapChunk = (chunk: OutRow[]) =>
+    chunk.map((row) => {
       const mapped: Record<string, string | number | boolean> = {};
       for (const [key, value] of Object.entries(row)) {
         const header = normToRaw.get(normalizeHeader(key));
@@ -471,8 +560,33 @@ export async function appendRows(
       }
       return mapped;
     });
-    await withSheetsRetry(() => sheet.addRows(chunk as any[]), 'master addRows');
-    appended += chunk.length;
+
+  const keyOf = (row: OutRow) => String(row['dedupe_key'] ?? '').trim().toLowerCase();
+
+  let appended = 0;
+  for (let i = 0; i < unique.length; i += APPEND_CHUNK) {
+    const original = unique.slice(i, i + APPEND_CHUNK);
+    let pending = original;
+    try {
+      await sheet.addRows(mapChunk(pending) as any[]);
+      appended += pending.length;
+    } catch (err) {
+      if (!esErrorSheetsWriteAmbiguo(err) && !esErrorSheetsReintetnable(err)) throw err;
+      const latest = await loadExistingKeys(sheet);
+      pending = pending.filter((row) => {
+        const key = keyOf(row);
+        if (latest.has(key)) {
+          existing.add(key);
+          return false;
+        }
+        return true;
+      });
+      const confirmed = original.length - pending.length;
+      appended += confirmed;
+      if (pending.length === 0) continue;
+      await withSheetsRetry(() => sheet.addRows(mapChunk(pending) as any[]), 'master addRows recheck');
+      appended += pending.length;
+    }
   }
   return { appended, skipped: rows.length - unique.length, would_append: unique.length };
 }

@@ -12,6 +12,21 @@ describe('esErrorSheetsReintetnable', () => {
     expect(esErrorSheetsReintetnable(new Error('[503] backendError'))).toBe(true);
   });
 
+  it('J — reintenta lectura HTTP 502', () => {
+    expect(esErrorSheetsReintetnable(new Error('Request failed with status code 502'))).toBe(true);
+  });
+
+  it('K — reintenta lectura HTTP 504', () => {
+    expect(esErrorSheetsReintetnable(new Error('Request failed with status code 504'))).toBe(true);
+    expect(esErrorSheetsReintetnable(new Error('Gateway Timeout'))).toBe(true);
+  });
+
+  it('M — 400/401/403 no se reintentan', () => {
+    expect(esErrorSheetsReintetnable(new Error('Request failed with status code 400'))).toBe(false);
+    expect(esErrorSheetsReintetnable(new Error('Request failed with status code 401'))).toBe(false);
+    expect(esErrorSheetsReintetnable(new Error('Request failed with status code 403'))).toBe(false);
+  });
+
   it('reintenta ante fallos de transporte', () => {
     expect(esErrorSheetsReintetnable(new Error('Premature close'))).toBe(true);
     expect(esErrorSheetsReintetnable(new Error('read ECONNRESET'))).toBe(true);
@@ -28,6 +43,20 @@ describe('esErrorSheetsReintetnable', () => {
 describe('withSheetsRetry (backoff)', () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('reintenta un 502 de lectura y termina devolviendo el resultado', async () => {
+    vi.useFakeTimers();
+    let intentos = 0;
+    const op = vi.fn(async () => {
+      intentos += 1;
+      if (intentos < 2) throw new Error('Request failed with status code 502');
+      return 'ok';
+    });
+    const p = withSheetsRetry(op, 'test-502');
+    await vi.runAllTimersAsync();
+    await expect(p).resolves.toBe('ok');
+    expect(op).toHaveBeenCalledTimes(2);
   });
 
   it('reintenta un 429 y termina devolviendo el resultado', async () => {

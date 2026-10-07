@@ -8,7 +8,8 @@ import { drainRecoveryQueue } from '../src/captureReliability/recoveryDrain.js';
 import { baseRecoveryRecord } from '../src/captureReliability/reconcile.js';
 import { primaryHash } from '../src/captureReliability/urlIndex.js';
 import { parseReconciliationArgs } from '../scripts/mentions-master-reconciliation.js';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RecoveryRecord } from '../src/captureReliability/types.js';
 import { okExtract } from './capture-reliability.test.js';
@@ -158,6 +159,15 @@ describe('RC1 A↔B contract', () => {
       '--noticia-ids=7a790fdf-49bb-47c9-8153-d341614c14a7,c00957ec-4bb7-4f66-85ba-e4965e02678b,cde2e64c-767d-41a0-ac31-793ea9cff836',
     ]);
     expect(args.noticiaIds).toHaveLength(3);
+    expect(args.dryRun).toBe(true);
+  });
+
+  it('parses hashes-file without a moving window set', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'rc1-h-')), 'hashes.txt');
+    writeFileSync(path, `${'a'.repeat(64)}\n`);
+    const args = parseReconciliationArgs(['--dry-run', `--hashes-file=${path}`]);
+    expect(args.hashesFile).toBe(path);
+    expect(args.hashes).toHaveLength(1);
     expect(args.dryRun).toBe(true);
   });
 

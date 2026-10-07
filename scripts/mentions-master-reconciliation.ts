@@ -15,10 +15,12 @@ import {
   appendRows,
   buildRows,
   fetchEligibleNewsPaged,
+  fetchFrozenNews,
   groupKeywordsByActiveClient,
   loadExistingKeys,
   RECOVERY_FETCH_CAP,
 } from './mentions-master-fast-lane.js';
+import { loadManifestFile } from '../src/matching/frozenManifest.js';
 
 const DEFAULT_SHEET = '1T4-RLnBrK0lp3p-r23hRjrJAmI03QLzBavWM3ZpcmOA';
 const DEFAULT_TAB = 'MENCIONES_MASTER';
@@ -30,6 +32,9 @@ export interface ReconciliationArgs {
   sheetId: string;
   tab: string;
   noticiaIds: string[];
+  hashes: string[];
+  noticiaIdsFile: string | null;
+  hashesFile: string | null;
 }
 
 export function parseReconciliationArgs(argv: string[]): ReconciliationArgs {
@@ -39,6 +44,9 @@ export function parseReconciliationArgs(argv: string[]): ReconciliationArgs {
     sheetId: process.env['GOOGLE_MENTIONS_MASTER_SHEET_ID'] || DEFAULT_SHEET,
     tab: process.env['GOOGLE_MENTIONS_MASTER_TAB'] || DEFAULT_TAB,
     noticiaIds: [],
+    hashes: [],
+    noticiaIdsFile: null,
+    hashesFile: null,
   };
   for (const arg of argv) {
     if (arg === '--dry-run') { out.dryRun = true; continue; }
@@ -52,6 +60,18 @@ export function parseReconciliationArgs(argv: string[]): ReconciliationArgs {
     if (key === 'dry-run') out.dryRun = val === '' || val === 'true' || val === '1';
     if ((key === 'noticia-ids' || key === 'noticia_ids') && val) {
       out.noticiaIds = val.split(',').map((s) => s.trim()).filter(Boolean);
+    }
+    if ((key === 'noticia-ids-file' || key === 'noticia_ids_file') && val) {
+      out.noticiaIdsFile = val;
+      const loaded = loadManifestFile(val);
+      out.noticiaIds = [...new Set([...out.noticiaIds, ...loaded.ids])];
+      out.hashes = [...new Set([...out.hashes, ...loaded.hashes])];
+    }
+    if ((key === 'hashes-file' || key === 'hashes_file') && val) {
+      out.hashesFile = val;
+      const loaded = loadManifestFile(val);
+      out.noticiaIds = [...new Set([...out.noticiaIds, ...loaded.ids])];
+      out.hashes = [...new Set([...out.hashes, ...loaded.hashes])];
     }
   }
   return out;
@@ -80,12 +100,23 @@ export async function runMatchReconciliation(args: ReconciliationArgs): Promise<
   recovered_due_to_null_metadata: number;
   recovered_due_to_window_overlap: number;
   body_policy: 'allowlist';
+  manifest_requested?: number;
+  manifest_found?: number;
+  manifest_missing?: number;
+  manifest_duplicates?: number;
 }> {
   const gate = effectiveRecoveryDryRun(args.dryRun);
   const sinceIso = windowSinceHours(args.hours);
   const [clients, keywords] = await Promise.all([getAllClientes(), getKeywordsActivas()]);
   const { clientNames, keywordsByClient } = groupKeywordsByActiveClient(clients, keywords);
-  const paged = await fetchEligibleNewsPaged(sinceIso, undefined, RECOVERY_FETCH_CAP, args.noticiaIds);
+  const frozen = args.noticiaIds.length > 0 || args.hashes.length > 0;
+  const frozenFetch = frozen
+    ? await fetchFrozenNews({ noticiaIds: args.noticiaIds, hashes: args.hashes })
+    : null;
+  const paged = frozenFetch
+    ? { rows: frozenFetch.rows, capHit: false, pagesScanned: frozenFetch.pagesScanned }
+    : await fetchEligibleNewsPaged(sinceIso, undefined, RECOVERY_FETCH_CAP);
+  const frozenReport = frozenFetch?.report ?? null;
   const metrics = emptyBodyMatchingCounters();
   const rows = buildRows(paged.rows, keywordsByClient, clientNames, {
     masterBodyV2: true,
@@ -156,6 +187,10 @@ export async function runMatchReconciliation(args: ReconciliationArgs): Promise<
     recovered_due_to_null_metadata,
     recovered_due_to_window_overlap,
     body_policy: 'allowlist' as const,
+    manifest_requested: frozenReport?.requested,
+    manifest_found: frozenReport?.found,
+    manifest_missing: frozenReport?.missing,
+    manifest_duplicates: frozenReport?.duplicate_rows,
   };
   logger.info({
     ...summary,
