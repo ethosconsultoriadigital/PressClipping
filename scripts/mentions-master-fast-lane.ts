@@ -32,8 +32,9 @@ import { getAllClientes, getKeywordsActivas, type KeywordActivaRow } from '../sr
 import {
   getSpreadsheetById,
   withSheetsRetry,
+  esErrorSheetsFatal,
   esErrorSheetsReintetnable,
-  esErrorSheetsWriteAmbiguo,
+  SHEETS_BACKOFF_MS,
 } from '../src/sheets/client.js';
 import { chunkManifest } from '../src/matching/frozenManifest.js';
 import { matchKeyword, type CampoBuscable, type MatchResultado } from '../src/matchers/keyword.js';
@@ -529,17 +530,116 @@ export async function loadExistingKeys(sheet: GoogleSpreadsheetWorksheet): Promi
   return set;
 }
 
+export const MASTER_WRITE_ATTEMPTS = 4;
+export const MASTER_WRITE_BACKOFF_MS = SHEETS_BACKOFF_MS;
+
+export interface AppendRowsOpts {
+  maxAttempts?: number;
+  backoffMs?: readonly number[];
+  sleep?: (ms: number) => Promise<void>;
+}
+
+function keyOfRow(row: OutRow): string {
+  return String(row['dedupe_key'] ?? '').trim().toLowerCase();
+}
+
+async function sleepWriteBackoff(ms: number): Promise<void> {
+  await new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Append MASTER rows. After every transient/ambiguous write failure,
+ * reread dedupe_key and retry only missing rows. Never wraps addRows
+ * in a generic retry that can repeat a confirmed payload.
+ */
+export async function appendRowsWithDedupeRecheck(
+  sheet: GoogleSpreadsheetWorksheet,
+  pendingIn: OutRow[],
+  existing: Set<string>,
+  mapChunk: (chunk: OutRow[]) => Array<Record<string, string | number | boolean>>,
+  opts: AppendRowsOpts = {},
+): Promise<number> {
+  const maxAttempts = opts.maxAttempts ?? MASTER_WRITE_ATTEMPTS;
+  const backoff = opts.backoffMs ?? MASTER_WRITE_BACKOFF_MS;
+  const wait = opts.sleep ?? sleepWriteBackoff;
+  let pending = pendingIn.filter((row) => {
+    const key = keyOfRow(row);
+    return key && !existing.has(key);
+  });
+  let appended = 0;
+  let lastErr: unknown = null;
+
+  for (let attempt = 1; attempt <= maxAttempts && pending.length > 0; attempt += 1) {
+    try {
+      await sheet.addRows(mapChunk(pending) as any[]);
+      for (const row of pending) existing.add(keyOfRow(row));
+      appended += pending.length;
+      return appended;
+    } catch (err) {
+      lastErr = err;
+      if (esErrorSheetsFatal(err)) throw err;
+      if (!esErrorSheetsReintetnable(err)) throw err;
+      const latest = await loadExistingKeys(sheet);
+      const stillMissing: OutRow[] = [];
+      for (const row of pending) {
+        const key = keyOfRow(row);
+        if (latest.has(key)) {
+          existing.add(key);
+          appended += 1;
+        } else {
+          stillMissing.push(row);
+        }
+      }
+      pending = stillMissing;
+      if (pending.length === 0) return appended;
+      if (attempt >= maxAttempts) break;
+      const espera = backoff[attempt - 1] ?? backoff[backoff.length - 1] ?? 20000;
+      logger.warn(
+        {
+          etiqueta: 'master addRows dedupe-recheck',
+          intento: attempt,
+          de: maxAttempts,
+          pending: pending.length,
+          espera_ms: espera,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        'Append MASTER ambiguo: relectura por dedupe y retry solo de faltantes',
+      );
+      await wait(espera);
+    }
+  }
+
+  const latest = await loadExistingKeys(sheet);
+  const unexplained: string[] = [];
+  for (const row of pending) {
+    const key = keyOfRow(row);
+    if (latest.has(key)) {
+      existing.add(key);
+      appended += 1;
+    } else {
+      unexplained.push(key);
+    }
+  }
+  if (unexplained.length === 0) return appended;
+  const detail = lastErr instanceof Error ? lastErr.message : String(lastErr);
+  throw new Error(
+    `MASTER append incompleto tras ${maxAttempts} intentos; faltan ${unexplained.length} dedupe_key. Último error: ${detail}`,
+  );
+}
+
 export async function appendRows(
   sheet: GoogleSpreadsheetWorksheet,
   rows: OutRow[],
   existing: Set<string>,
   dryRun: boolean,
+  opts: AppendRowsOpts = {},
 ): Promise<{ appended: number; skipped: number; would_append: number }> {
   const unique: OutRow[] = [];
+  const claimed = new Set<string>();
   for (const row of rows) {
-    const key = String(row['dedupe_key'] ?? '').trim().toLowerCase();
-    if (!key || existing.has(key)) continue;
-    existing.add(key);
+    const key = keyOfRow(row);
+    if (!key || existing.has(key) || claimed.has(key)) continue;
+    claimed.add(key);
     unique.push(row);
   }
   if (dryRun || unique.length === 0) {
@@ -561,32 +661,15 @@ export async function appendRows(
       return mapped;
     });
 
-  const keyOf = (row: OutRow) => String(row['dedupe_key'] ?? '').trim().toLowerCase();
-
   let appended = 0;
   for (let i = 0; i < unique.length; i += APPEND_CHUNK) {
-    const original = unique.slice(i, i + APPEND_CHUNK);
-    let pending = original;
-    try {
-      await sheet.addRows(mapChunk(pending) as any[]);
-      appended += pending.length;
-    } catch (err) {
-      if (!esErrorSheetsWriteAmbiguo(err) && !esErrorSheetsReintetnable(err)) throw err;
-      const latest = await loadExistingKeys(sheet);
-      pending = pending.filter((row) => {
-        const key = keyOf(row);
-        if (latest.has(key)) {
-          existing.add(key);
-          return false;
-        }
-        return true;
-      });
-      const confirmed = original.length - pending.length;
-      appended += confirmed;
-      if (pending.length === 0) continue;
-      await withSheetsRetry(() => sheet.addRows(mapChunk(pending) as any[]), 'master addRows recheck');
-      appended += pending.length;
-    }
+    appended += await appendRowsWithDedupeRecheck(
+      sheet,
+      unique.slice(i, i + APPEND_CHUNK),
+      existing,
+      mapChunk,
+      opts,
+    );
   }
   return { appended, skipped: rows.length - unique.length, would_append: unique.length };
 }
