@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { admitDiscoveredArticle, classifyPreFetch } from '../src/captureReliability/articleAdmission.js';
 import { classifyNonArticle } from '../src/captureReliability/nonArticle.js';
 import { automatedNonArticleCount, evaluateRecoveryQuality } from '../src/captureReliability/recoveryQualityGate.js';
+import { isAutoWriteEligible } from '../src/captureReliability/writeEligibility.js';
+import { isGoogleNewsUrl } from '../src/matching/bGapCandidateToCaptureGapRow.js';
 import { isGenericListing } from '../src/mediaValidation/certScore.js';
 
 const FP = {
@@ -147,6 +149,96 @@ describe('quality gate uses the same admission classifier', () => {
     expect(classifyNonArticle({ url: FP.people }).reason).toBe('NON_ARTICLE_DIRECTORY');
     expect(classifyNonArticle({ url: FP.portada, titulo: 'Portada El Gráfico | Lunes 5 de Octubre de 2026' }).reason).toBe(
       'NON_ARTICLE_PRINT_COVER',
+    );
+  });
+});
+
+const ALCANCE = {
+  u1: 'https://www.alcancediario.mx/portada/que-pasaria-con-economia-puebla-volkswagen-reduce-produccion-enfrenta-huelga/',
+  u2: 'https://www.alcancediario.mx/portada/hallan-sin-vida-doctora-71-anos-dentro-consultorio-puebla-estaba-silla-tenia-disparo/',
+  u3: 'https://www.alcancediario.mx/portada/suspenden-clases-en-5-regiones-de-puebla-por-temporal-de-lluvias-regresan-el-12-de-octubre/',
+} as const;
+
+describe('RC1 article admission — daily print covers vs /portada/ articles', () => {
+  it('A — Notiver daily cover slug is PRINT_COVER without a title', () => {
+    const url = 'https://www.notiver.com/primera/la-portada-miercoles-7-de-octubre-2026/';
+    const r = admitDiscoveredArticle({ url, medioId: 'MED-0241', titulo: null });
+    expect(r.admit).toBe(false);
+    expect(r.reason).toBe('NON_ARTICLE_PRINT_COVER');
+    expect(classifyNonArticle({ url }).reason).toBe('NON_ARTICLE_PRINT_COVER');
+  });
+
+  it('B — generic weekday cover slug is PRINT_COVER', () => {
+    const url = 'https://medio.example/primera/la-portada-lunes-12-de-octubre-2026/';
+    expect(admitDiscoveredArticle({ url, medioId: 'MED-1' }).reason).toBe('NON_ARTICLE_PRINT_COVER');
+  });
+
+  it('C — ISO dated cover slug is PRINT_COVER', () => {
+    const url = 'https://medio.example/edicion/portada-2026-10-07/';
+    expect(admitDiscoveredArticle({ url, medioId: 'MED-1' }).reason).toBe('NON_ARTICLE_PRINT_COVER');
+  });
+
+  it('D — real article under /portada/ stays eligible', () => {
+    const url = 'https://www.alcancediario.mx/portada/que-pasaria-con-economia-puebla-volkswagen-reduce-produccion-enfrenta-huelga/';
+    const r = admitDiscoveredArticle({
+      url,
+      medioId: 'MED-0009',
+      titulo: '¿Qué pasaría con la economía de Puebla si Volkswagen reduce producción?',
+      publishedAt: '2026-10-07T12:00:00.000Z',
+    });
+    expect(r.admit).toBe(true);
+    expect(classifyNonArticle({ url }).nonArticle).toBe(false);
+  });
+
+  it('E — editorial title mentioning portada is not auto-rejected', () => {
+    const url = 'https://medio.example/politica/el-presidente-responde-a-la-portada-del-diario-nacional/';
+    const r = admitDiscoveredArticle({
+      url,
+      medioId: 'MED-1',
+      titulo: 'El presidente responde a la portada del diario nacional',
+      body: 'x'.repeat(400),
+    });
+    expect(r.admit).toBe(true);
+    expect(r.reason).not.toBe('NON_ARTICLE_PRINT_COVER');
+  });
+
+  it('F — three Alcance Diario /portada/ editorials remain eligible', () => {
+    for (const url of Object.values(ALCANCE)) {
+      const r = admitDiscoveredArticle({ url, medioId: 'MED-0009', publishedAt: '2026-10-07T12:00:00.000Z' });
+      expect(r.admit, url).toBe(true);
+      expect(classifyNonArticle({ url }).reason, url).toBeNull();
+    }
+  });
+
+  it('G — category, author hub, listing, Google and unknown window stay fail-closed', () => {
+    expect(admitDiscoveredArticle({ url: FP.categoria, medioId: 'MED-0279' }).reason).toBe('NON_ARTICLE_CATEGORY');
+    expect(admitDiscoveredArticle({ url: FP.afondo1, medioId: 'MED-0202', titulo: 'A Fondo Jalisco' }).reason).toBe(
+      'NON_ARTICLE_AUTHOR_HUB',
+    );
+    expect(isGenericListing('https://example.com/category/sonora/')).toBe(true);
+    expect(isGoogleNewsUrl('https://news.google.com/rss/articles/abc')).toBe(true);
+    const unknown = isAutoWriteEligible(
+      {
+        status: 'QUEUED',
+        medio_id: 'MED-1',
+        discovered_via: 'sitemap',
+        window_membership: 'WINDOW_MEMBERSHIP_UNKNOWN',
+        published_at: null,
+      },
+      { start: '2026-10-06T20:00:00.000Z', end: '2026-10-07T18:00:00.000Z' },
+      null,
+    );
+    expect(unknown.eligible).toBe(false);
+    expect(unknown.reason).toBe('WINDOW_MEMBERSHIP_UNKNOWN');
+  });
+
+  it('H — print-cover classification is idempotent for the same URL', () => {
+    const url = 'https://www.notiver.com/primera/la-portada-miercoles-7-de-octubre-2026/';
+    const a = classifyNonArticle({ url });
+    const b = classifyNonArticle({ url });
+    expect(a).toEqual(b);
+    expect(admitDiscoveredArticle({ url, medioId: 'MED-0241' })).toEqual(
+      admitDiscoveredArticle({ url, medioId: 'MED-0241' }),
     );
   });
 });
