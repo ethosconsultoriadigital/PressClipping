@@ -18,6 +18,7 @@ export interface NonArticleInput {
   titulo?: string | null;
   body?: string | null;
   siteName?: string | null;
+  section?: string | null;
 }
 
 export interface NonArticleVerdict {
@@ -30,7 +31,7 @@ const AUTHOR_SEG = /^(author|authors|autor|autores|columnista|columnistas|colabo
 const DIRECTORY_SEG =
   /^(people-companies|people|companies|directorio|directorio-de|staff|equipo|contributors|authors)$/i;
 const TEMPLATE_SEG = /^(tdb_templates|wp-templates|templates|template)$/i;
-const PRINT_COVER_SEG = /^(portada-impresa|edicion-impresa|version-impresa|impreso)$/i;
+const PRINT_COVER_SEG = /^(portadas?-impresas?|edicion-impresa|version-impresa|impreso)$/i;
 const NAME_STOP = new Set([
   'sobre',
   'para',
@@ -107,21 +108,49 @@ function foldPrintCoverText(value: string): string {
     .toLowerCase();
 }
 
+const COMPACT_COVER_DATE = /\d{1,2}[-./]\d{1,2}[-./](?:\d{2}|\d{4})\b/;
+const PRINT_COVER_SLUG_PREFIX =
+  /^(?:la-|las-)?portadas?(?:-impresas?)?(?:-|$)|^(?:las?-)?primeras?-planas?(?:-|$)|^tapa-(?:del-)?dia(?:-|$)/;
+
+function hasDailyCoverDate(value: string): boolean {
+  const s = foldPrintCoverText(value);
+  if (new RegExp(`(?:${WEEKDAY_TOKEN}).*(?:${MONTH_TOKEN})`).test(s)) return true;
+  if (new RegExp(`(?:${WEEKDAY_TOKEN})-\\d{1,2}`).test(s)) return true;
+  if (/20\d{2}-\d{2}-\d{2}/.test(s)) return true;
+  if (new RegExp(`\\d{1,2}-de-(?:${MONTH_TOKEN})(?:-20\\d{2})?`).test(s)) return true;
+  if (COMPACT_COVER_DATE.test(s)) return true;
+  return false;
+}
+
 function titleLooksPrintCover(titulo: string | null | undefined): boolean {
   const t = foldPrintCoverText((titulo ?? '').trim());
   if (!t) return false;
-  return /^(la\s+)?portada\b/.test(t) && new RegExp(`(?:impresa|${WEEKDAY_TOKEN}|${MONTH_TOKEN}|20\\d{2})`).test(t);
+  if (!/^(la\s+|las\s+)?(portadas?|primeras?\s+planas?|tapa(\s+del\s+dia)?)\b/.test(t)) return false;
+  return (
+    new RegExp(`(?:impresa|${WEEKDAY_TOKEN}|${MONTH_TOKEN}|20\\d{2})`).test(t) || COMPACT_COVER_DATE.test(t)
+  );
+}
+
+function sectionLooksPrintCover(section: string | null | undefined): boolean {
+  const s = foldPrintCoverText((section ?? '').trim());
+  return /^(primeras?\s+planas?|portadas?(\s+impresas?)?|edicion\s+impresa|tapa)$/.test(s);
+}
+
+function textLooksPrintCoverEdition(...parts: Array<string | null | undefined>): boolean {
+  const t = foldPrintCoverText(parts.filter(Boolean).join(' '));
+  if (!t) return false;
+  const coverWord = /portadas?|primeras?\s+planas?|tapa/.test(t);
+  const edition = /edicion\s+impresa|version\s+impresa|primeras?\s+planas?|descarga/.test(t);
+  return coverWord && edition && hasDailyCoverDate(t.replace(/\s+/g, '-'));
 }
 
 /** Daily print/digital cover slug. Does not treat /portada/<article-slug> as a cover. */
 export function lastSlugIsDailyPrintCover(slug: string): boolean {
   const s = foldPrintCoverText(slug).replace(/\/+$/, '');
-  if (!/^(la-)?portada-/.test(s) && !/^tapa-(del-)?dia/.test(s)) return false;
-  if (new RegExp(`(?:${WEEKDAY_TOKEN}).*(?:${MONTH_TOKEN})`).test(s)) return true;
-  if (new RegExp(`(?:${WEEKDAY_TOKEN})-\\d{1,2}(?:-de-(?:${MONTH_TOKEN}))?`).test(s)) return true;
-  if (/^(la-)?portada-20\d{2}-\d{2}-\d{2}$/.test(s)) return true;
-  if (/portada-impresa/.test(s) && (/\d{4}/.test(s) || new RegExp(WEEKDAY_TOKEN).test(s))) return true;
-  return false;
+  if (!PRINT_COVER_SLUG_PREFIX.test(s)) return false;
+  if (hasDailyCoverDate(s)) return true;
+  const rest = s.replace(/^(?:la-|las-)?/, '');
+  return /^(portadas?-impresas?|primeras?-planas?)$/.test(rest);
 }
 
 function titleMatchesSiteName(titulo: string | null | undefined, url: string, siteName?: string | null): boolean {
@@ -159,7 +188,16 @@ export function classifyNonArticle(input: NonArticleInput): NonArticleVerdict {
   if (lastSlugIsDailyPrintCover(last)) {
     return { nonArticle: true, reason: 'NON_ARTICLE_PRINT_COVER' };
   }
-  if (titleLooksPrintCover(titulo) && /portada/i.test(joined) && !looksLikeArticleSlug(last)) {
+  const coverPath = /portadas?|primeras?-planas?|impresa|tapa/i.test(joined);
+  if (titleLooksPrintCover(titulo) && coverPath && !looksLikeArticleSlug(last)) {
+    return { nonArticle: true, reason: 'NON_ARTICLE_PRINT_COVER' };
+  }
+  if (
+    !looksLikeArticleSlug(last) &&
+    coverPath &&
+    (sectionLooksPrintCover(input.section) || textLooksPrintCoverEdition(titulo, input.body, input.section)) &&
+    (titleLooksPrintCover(titulo) || PRINT_COVER_SLUG_PREFIX.test(foldPrintCoverText(last)) || sectionLooksPrintCover(input.section))
+  ) {
     return { nonArticle: true, reason: 'NON_ARTICLE_PRINT_COVER' };
   }
 

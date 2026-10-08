@@ -159,6 +159,13 @@ const ALCANCE = {
   u3: 'https://www.alcancediario.mx/portada/suspenden-clases-en-5-regiones-de-puebla-por-temporal-de-lluvias-regresan-el-12-de-octubre/',
 } as const;
 
+const APOCALIPSIS = [
+  'https://periodicopalacio.com/la-pesada-portada-del-apocalipsis-es-invendible-dice-el-dueno-de-la-obra-de-salvador-dali-robada-en-francia/',
+  'https://frontera.news/la-pesada-portada-del-apocalipsis-es-invendible-dice-el-dueno-de-la-obra-de-salvador-dali-robada-en-francia/',
+  'https://cybermexico.mx/la-pesada-portada-del-apocalipsis-es-invendible-dice-el-dueno-de-la-obra-de-salvador-dali-robada-en-francia/',
+  'https://altiempo.mx/la-pesada-portada-del-apocalipsis-es-invendible-dice-el-dueno-de-la-obra-de-salvador-dali-robada-en-francia/',
+] as const;
+
 describe('RC1 article admission — daily print covers vs /portada/ articles', () => {
   it('A — Notiver daily cover slug is PRINT_COVER without a title', () => {
     const url = 'https://www.notiver.com/primera/la-portada-miercoles-7-de-octubre-2026/';
@@ -240,5 +247,116 @@ describe('RC1 article admission — daily print covers vs /portada/ articles', (
     expect(admitDiscoveredArticle({ url, medioId: 'MED-0241' })).toEqual(
       admitDiscoveredArticle({ url, medioId: 'MED-0241' }),
     );
+  });
+});
+
+describe('RC1 article admission — dated plural print covers', () => {
+  it('A — Notiver singular daily cover stays PRINT_COVER', () => {
+    const url = 'https://www.notiver.com/primera/la-portada-miercoles-7-de-octubre-2026/';
+    expect(admitDiscoveredArticle({ url, medioId: 'MED-0241' }).reason).toBe('NON_ARTICLE_PRINT_COVER');
+  });
+
+  it('B — dated plural /portadas-DD-MM-YY/ is PRINT_COVER', () => {
+    const url = 'https://medio.example/portadas-07-10-26/';
+    const r = admitDiscoveredArticle({
+      url,
+      medioId: 'MED-1',
+      titulo: 'portadas 07-10-26',
+      body: 'Portadas Nacionales 07.10.26 Descarga',
+    });
+    expect(r.admit).toBe(false);
+    expect(r.reason).toBe('NON_ARTICLE_PRINT_COVER');
+    expect(classifyNonArticle({ url }).reason).toBe('NON_ARTICLE_PRINT_COVER');
+  });
+
+  it('C — ISO, primeras-planas and portadas-impresas dated slugs are PRINT_COVER', () => {
+    const urls = [
+      'https://medio.example/portadas-2026-10-07/',
+      'https://medio.example/primeras-planas-7-de-octubre-2026/',
+      'https://medio.example/portadas-impresas-07-10-26/',
+    ];
+    for (const url of urls) {
+      expect(admitDiscoveredArticle({ url, medioId: 'MED-1', titulo: 'Portadas 7 de octubre 2026' }).reason, url).toBe(
+        'NON_ARTICLE_PRINT_COVER',
+      );
+    }
+  });
+
+  it('D — editorial article under /portadas/ stays eligible', () => {
+    const url = 'https://medio.example/portadas/analisis-de-las-primeras-planas-y-su-impacto-politico/';
+    const r = admitDiscoveredArticle({
+      url,
+      medioId: 'MED-1',
+      titulo: 'Análisis de las primeras planas y su impacto político',
+      body: 'x'.repeat(500),
+    });
+    expect(r.admit).toBe(true);
+    expect(
+      classifyNonArticle({
+        url,
+        titulo: 'Análisis de las primeras planas y su impacto político',
+        body: 'x'.repeat(500),
+      }).nonArticle,
+    ).toBe(false);
+  });
+
+  it('E — Alcance Diario /portada/ editorials stay eligible', () => {
+    for (const url of Object.values(ALCANCE)) {
+      expect(admitDiscoveredArticle({ url, medioId: 'MED-0009', publishedAt: '2026-10-07T12:00:00.000Z' }).admit, url).toBe(
+        true,
+      );
+    }
+  });
+
+  it('F — four editorial “pesada portada del apocalipsis” notes stay eligible', () => {
+    for (const url of APOCALIPSIS) {
+      const r = admitDiscoveredArticle({
+        url,
+        medioId: 'MED-1',
+        titulo: 'La pesada portada del Apocalipsis es invendible, dice el dueño de la obra de Salvador Dalí',
+        body: 'x'.repeat(400),
+      });
+      expect(r.admit, url).toBe(true);
+      expect(r.reason, url).not.toBe('NON_ARTICLE_PRINT_COVER');
+    }
+  });
+
+  it('G — real news whose title includes portadas is preserved', () => {
+    const url =
+      'https://oem.com.mx/elsoldemexico/metropoli/iztapalapa-convierte-sus-portadas-florales-en-patrimonio-cultural-inmateride-la-cdmx-32479169';
+    const r = admitDiscoveredArticle({
+      url,
+      medioId: 'MED-1',
+      titulo: 'Iztapalapa convierte sus portadas florales en patrimonio cultural',
+      body: 'x'.repeat(400),
+    });
+    expect(r.admit).toBe(true);
+    expect(r.reason).not.toBe('NON_ARTICLE_PRINT_COVER');
+  });
+
+  it('H — category, author hub, listing, template, Google and unknown window stay fail-closed', () => {
+    expect(admitDiscoveredArticle({ url: FP.categoria, medioId: 'MED-0279' }).reason).toBe('NON_ARTICLE_CATEGORY');
+    expect(admitDiscoveredArticle({ url: FP.afondo1, medioId: 'MED-0202', titulo: 'A Fondo Jalisco' }).reason).toBe(
+      'NON_ARTICLE_AUTHOR_HUB',
+    );
+    expect(admitDiscoveredArticle({ url: FP.people, medioId: 'MED-0574' }).reason).toBe('NON_ARTICLE_DIRECTORY');
+    expect(admitDiscoveredArticle({ url: FP.template, medioId: 'MED-0368', titulo: 'Header Template - Default PRO' }).reason).toBe(
+      'NON_ARTICLE_TEMPLATE',
+    );
+    expect(isGenericListing('https://example.com/category/sonora/')).toBe(true);
+    expect(isGoogleNewsUrl('https://news.google.com/rss/articles/abc')).toBe(true);
+    const unknown = isAutoWriteEligible(
+      {
+        status: 'QUEUED',
+        medio_id: 'MED-1',
+        discovered_via: 'sitemap',
+        window_membership: 'WINDOW_MEMBERSHIP_UNKNOWN',
+        published_at: null,
+      },
+      { start: '2026-10-06T20:00:00.000Z', end: '2026-10-07T18:00:00.000Z' },
+      null,
+    );
+    expect(unknown.eligible).toBe(false);
+    expect(unknown.reason).toBe('WINDOW_MEMBERSHIP_UNKNOWN');
   });
 });
