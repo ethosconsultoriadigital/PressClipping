@@ -38,13 +38,20 @@ describe('0021 source registry security hardening', () => {
     }
   });
 
-  it('C conserva grants de service_role', () => {
-    for (const table of tables) {
-      expect(ops).toContain(
-        `grant select, insert, update, delete on table public.${table} to service_role`,
-      );
+  it('C revoca primero todos los permisos de service_role y reconcede el contrato exacto', () => {
+    for (const rel of [...tables, 'v_fuentes_master']) {
+      const revokeAt = ops.indexOf(`revoke all on table public.${rel} from service_role`);
+      expect(revokeAt, rel).toBeGreaterThanOrEqual(0);
+      const grantNeedle =
+        rel === 'v_fuentes_master'
+          ? 'grant select on table public.v_fuentes_master to service_role'
+          : `grant select, insert, update, delete on table public.${rel} to service_role`;
+      const grantAt = ops.indexOf(grantNeedle);
+      expect(grantAt, rel).toBeGreaterThan(revokeAt);
     }
-    expect(ops).toContain('grant select on table public.v_fuentes_master to service_role');
+    const viewGrants = ops.filter((op) => op.startsWith('grant ') && op.includes('v_fuentes_master'));
+    expect(viewGrants).toEqual(['grant select on table public.v_fuentes_master to service_role']);
+    expect(viewGrants.some((op) => /\b(insert|update|delete)\b/.test(op))).toBe(false);
   });
 
   it('D deja la vista en security_invoker sin redefinirla', () => {
@@ -82,7 +89,7 @@ describe('0021 source registry security hardening', () => {
     expect(ops.length).toBeGreaterThan(0);
     for (const op of ops) {
       expect(op).toMatch(
-        /^(alter table public\.(fuentes|fuente_canales|fuente_aliases) enable row level security|revoke all on table public\.(fuentes|fuente_canales|fuente_aliases|v_fuentes_master) from public, anon, authenticated|grant select, insert, update, delete on table public\.(fuentes|fuente_canales|fuente_aliases) to service_role|grant select on table public\.v_fuentes_master to service_role|alter view public\.v_fuentes_master set \(security_invoker = true\)|alter function public\.set_updated_at\(\) set search_path = public, pg_temp)$/,
+        /^(alter table public\.(fuentes|fuente_canales|fuente_aliases) enable row level security|revoke all on table public\.(fuentes|fuente_canales|fuente_aliases|v_fuentes_master) from (public, anon, authenticated|service_role)|grant select, insert, update, delete on table public\.(fuentes|fuente_canales|fuente_aliases) to service_role|grant select on table public\.v_fuentes_master to service_role|alter view public\.v_fuentes_master set \(security_invoker = true\)|alter function public\.set_updated_at\(\) set search_path = public, pg_temp)$/,
       );
     }
   });
@@ -149,6 +156,28 @@ describe('artefactos source registry security', () => {
     expect(blob).toContain('v_fuentes_master');
     expect(blob).toContain('set local role service_role');
     expect(blob).toContain('pg_get_viewdef');
+  });
+
+  it('el preflight exige grants exactos y ausencia de privilegios extra', () => {
+    const blob = read(preflightPath).toLowerCase();
+    expect(blob).toContain("('select'), ('insert'), ('update'), ('delete'), ('truncate'), ('references'), ('trigger')");
+    expect(blob).toContain("('truncate'), ('references'), ('trigger')");
+    expect(blob).toContain("('insert'), ('update'), ('delete'), ('truncate'), ('references'), ('trigger')");
+    expect(blob).toContain('service_role has extra table privileges');
+    expect(blob).toContain('service_role has extra privileges on v_fuentes_master');
+    expect(blob).toContain('service_role missing required table privileges');
+    expect(blob).toContain('anon still has privileges');
+    expect(blob).toContain('authenticated still has privileges');
+    expect(blob).toMatch(/has_table_privilege\('service_role',\s*'public\.v_fuentes_master',\s*p\.priv\)/);
+  });
+
+  it('migración, live y preflight no recrean la vista ni mutan datos', () => {
+    for (const rel of [migrationPath, livePath, preflightPath]) {
+      const lower = read(rel).toLowerCase();
+      expect(lower).not.toMatch(/create\s+(or\s+replace\s+)?view/);
+      expect(lower).not.toMatch(/drop\s+view/);
+      expect(lower).not.toMatch(/(^|\n)\s*(insert|update|delete|truncate)\s+/);
+    }
   });
 });
 

@@ -33,6 +33,11 @@ revoke all on table public.fuente_canales from public, anon, authenticated;
 revoke all on table public.fuente_aliases from public, anon, authenticated;
 revoke all on table public.v_fuentes_master from public, anon, authenticated;
 
+revoke all on table public.fuentes from service_role;
+revoke all on table public.fuente_canales from service_role;
+revoke all on table public.fuente_aliases from service_role;
+revoke all on table public.v_fuentes_master from service_role;
+
 grant select, insert, update, delete on table public.fuentes to service_role;
 grant select, insert, update, delete on table public.fuente_canales to service_role;
 grant select, insert, update, delete on table public.fuente_aliases to service_role;
@@ -48,6 +53,9 @@ declare
   anon_priv integer;
   auth_priv integer;
   service_missing integer;
+  service_extra integer;
+  view_missing integer;
+  view_extra integer;
   view_invoker boolean;
   path_ok boolean;
   counts_changed integer;
@@ -86,7 +94,9 @@ begin
     ('public.fuente_aliases'),
     ('public.v_fuentes_master')
   ) as t(rel)
-  cross join (values ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) as p(priv)
+  cross join (values
+    ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')
+  ) as p(priv)
   where has_table_privilege('anon', t.rel, p.priv);
   if anon_priv <> 0 then
     raise exception 'PREFLIGHT anon still has privileges';
@@ -99,7 +109,9 @@ begin
     ('public.fuente_aliases'),
     ('public.v_fuentes_master')
   ) as t(rel)
-  cross join (values ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) as p(priv)
+  cross join (values
+    ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')
+  ) as p(priv)
   where has_table_privilege('authenticated', t.rel, p.priv);
   if auth_priv <> 0 then
     raise exception 'PREFLIGHT authenticated still has privileges';
@@ -113,9 +125,36 @@ begin
   ) as t(rel)
   cross join (values ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) as p(priv)
   where not has_table_privilege('service_role', t.rel, p.priv);
-  if service_missing <> 0
-     or not has_table_privilege('service_role', 'public.v_fuentes_master', 'SELECT') then
-    raise exception 'PREFLIGHT service_role missing required privileges';
+  if service_missing <> 0 then
+    raise exception 'PREFLIGHT service_role missing required table privileges';
+  end if;
+
+  select count(*) into service_extra
+  from (values
+    ('public.fuentes'),
+    ('public.fuente_canales'),
+    ('public.fuente_aliases')
+  ) as t(rel)
+  cross join (values ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) as p(priv)
+  where has_table_privilege('service_role', t.rel, p.priv);
+  if service_extra <> 0 then
+    raise exception 'PREFLIGHT service_role has extra table privileges';
+  end if;
+
+  select count(*) into view_missing
+  from (values ('SELECT')) as p(priv)
+  where not has_table_privilege('service_role', 'public.v_fuentes_master', p.priv);
+  if view_missing <> 0 then
+    raise exception 'PREFLIGHT service_role missing SELECT on v_fuentes_master';
+  end if;
+
+  select count(*) into view_extra
+  from (values
+    ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')
+  ) as p(priv)
+  where has_table_privilege('service_role', 'public.v_fuentes_master', p.priv);
+  if view_extra <> 0 then
+    raise exception 'PREFLIGHT service_role has extra privileges on v_fuentes_master';
   end if;
 
   select exists (
