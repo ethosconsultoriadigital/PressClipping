@@ -95,7 +95,13 @@ begin
     ('public.v_fuentes_master')
   ) as t(rel)
   cross join (values
-    ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')
+    ('SELECT'),
+    ('INSERT'),
+    ('UPDATE'),
+    ('DELETE'),
+    ('TRUNCATE'),
+    ('REFERENCES'),
+    ('TRIGGER')
   ) as p(priv)
   where has_table_privilege('anon', t.rel, p.priv);
   if anon_priv <> 0 then
@@ -110,7 +116,13 @@ begin
     ('public.v_fuentes_master')
   ) as t(rel)
   cross join (values
-    ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')
+    ('SELECT'),
+    ('INSERT'),
+    ('UPDATE'),
+    ('DELETE'),
+    ('TRUNCATE'),
+    ('REFERENCES'),
+    ('TRIGGER')
   ) as p(priv)
   where has_table_privilege('authenticated', t.rel, p.priv);
   if auth_priv <> 0 then
@@ -123,7 +135,12 @@ begin
     ('public.fuente_canales'),
     ('public.fuente_aliases')
   ) as t(rel)
-  cross join (values ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) as p(priv)
+  cross join (values
+    ('SELECT'),
+    ('INSERT'),
+    ('UPDATE'),
+    ('DELETE')
+  ) as p(priv)
   where not has_table_privilege('service_role', t.rel, p.priv);
   if service_missing <> 0 then
     raise exception 'PREFLIGHT service_role missing required table privileges';
@@ -135,14 +152,20 @@ begin
     ('public.fuente_canales'),
     ('public.fuente_aliases')
   ) as t(rel)
-  cross join (values ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) as p(priv)
+  cross join (values
+    ('TRUNCATE'),
+    ('REFERENCES'),
+    ('TRIGGER')
+  ) as p(priv)
   where has_table_privilege('service_role', t.rel, p.priv);
   if service_extra <> 0 then
     raise exception 'PREFLIGHT service_role has extra table privileges';
   end if;
 
   select count(*) into view_missing
-  from (values ('SELECT')) as p(priv)
+  from (values
+    ('SELECT')
+  ) as p(priv)
   where not has_table_privilege('service_role', 'public.v_fuentes_master', p.priv);
   if view_missing <> 0 then
     raise exception 'PREFLIGHT service_role missing SELECT on v_fuentes_master';
@@ -150,7 +173,12 @@ begin
 
   select count(*) into view_extra
   from (values
-    ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')
+    ('INSERT'),
+    ('UPDATE'),
+    ('DELETE'),
+    ('TRUNCATE'),
+    ('REFERENCES'),
+    ('TRIGGER')
   ) as p(priv)
   where has_table_privilege('service_role', 'public.v_fuentes_master', p.priv);
   if view_extra <> 0 then

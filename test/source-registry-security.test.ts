@@ -16,6 +16,18 @@ function statements(sql: string): string[] {
     .filter(Boolean);
 }
 
+function checksBody(sql: string): string {
+  const matches = [...sql.matchAll(/do \$checks\$([\s\S]*?)\$checks\$;/gi)];
+  expect(matches).toHaveLength(1);
+  return matches[0]![1] ?? '';
+}
+
+function selectInto(body: string, name: string): string {
+  const matches = [...body.matchAll(new RegExp(`select count\\(\\*\\) into ${name}\\b[\\s\\S]*?;`, 'gi'))];
+  expect(matches, name).toHaveLength(1);
+  return matches[0]![0] ?? '';
+}
+
 const migrationPath = 'supabase/migrations/0021_source_registry_security_hardening.sql';
 const livePath = 'artifacts/source-registry-security-live.sql';
 const preflightPath = 'artifacts/source-registry-security-preflight.sql';
@@ -144,29 +156,41 @@ describe('artefactos source registry security', () => {
     expect(preflight.trimEnd().endsWith('ROLLBACK;')).toBe(true);
   });
 
-  it('el bloque DO $checks$ cierra con END; y delimitadores balanceados', () => {
+  it('el bloque DO $checks$ es único y termina exactamente con END; $checks$;', () => {
     const preflight = read(preflightPath).replace(/^\uFEFF/, '');
+    const body = checksBody(preflight);
+    expect((preflight.match(/do \$checks\$/g) ?? []).length).toBe(1);
+    expect((preflight.match(/\$checks\$;/g) ?? []).length).toBe(1);
+    expect((body.match(/^[ \t]*end;/gim) ?? []).length).toBe(1);
+    expect(body.trimEnd().endsWith('end;')).toBe(true);
+    expect(preflight).toMatch(/^[ \t]*end;[ \t]*\r?\n[ \t]*\$checks\$;/m);
+    expect(preflight).not.toMatch(/^[ \t]*end[ \t]*\r?\n[ \t]*end;/im);
+    expect(preflight).not.toMatch(/^[ \t]*end[ \t]*\r?\n[ \t]*end;[ \t]*\r?\n[ \t]*\$checks\$;/im);
     expect(preflight).not.toMatch(/^[ \t]*end[ \t]*\r?\n[ \t]*\$checks\$;/im);
-    expect(preflight).toMatch(/^[ \t]*end;[ \t]*\r?\n[ \t]*\$checks\$;/im);
+  });
 
-    const doBlocks = [...preflight.matchAll(/\bdo\s+(\$[A-Za-z_]*\$)/gi)];
-    expect(doBlocks.length).toBeGreaterThan(0);
-    for (const match of doBlocks) {
-      const delim = match[1]!;
-      const afterDo = preflight.slice(match.index! + match[0].length);
-      const closeAt = afterDo.indexOf(delim);
-      expect(closeAt, delim).toBeGreaterThan(0);
-      const body = afterDo.slice(0, closeAt);
-      expect(body.toLowerCase()).toMatch(/\bend;\s*$/);
-      expect((preflight.split(delim).length - 1) % 2).toBe(0);
+  it('anon_priv y auth_priv usan un solo CROSS JOIN de siete privilegios', () => {
+    const body = checksBody(read(preflightPath));
+    for (const name of ['anon_priv', 'auth_priv'] as const) {
+      const select = selectInto(body, name);
+      expect((select.match(/cross join/gi) ?? []).length, name).toBe(1);
+      expect((select.match(/as p\(priv\)/gi) ?? []).length, name).toBe(1);
+      expect(select).toMatch(/\('SELECT'\),\s*\('INSERT'\),\s*\('UPDATE'\),\s*\('DELETE'\),\s*\('TRUNCATE'\),\s*\('REFERENCES'\),\s*\('TRIGGER'\)/);
+      expect(select).not.toMatch(/cross join \(values\s*\('SELECT'\),\s*\('INSERT'\),\s*\('UPDATE'\),\s*\('DELETE'\)\s*\) as p\(priv\)\s*cross join/i);
     }
+  });
 
-    const ifOpens = preflight.match(/^[ \t]*if\b/gim)?.length ?? 0;
-    const ifCloses = preflight.match(/^[ \t]*end if;/gim)?.length ?? 0;
-    expect(ifCloses).toBe(ifOpens);
-    expect(ifOpens).toBeGreaterThan(0);
-    expect(preflight).not.toMatch(/^[ \t]*end if[ \t]*$/im);
-    expect(preflight.toLowerCase()).not.toMatch(/\bloop\b/);
+  it('service_missing es un único IF cerrado y no se mezcla con la vista', () => {
+    const body = checksBody(read(preflightPath));
+    expect((body.match(/if service_missing <> 0 then/g) ?? []).length).toBe(1);
+    expect((body.match(/select count\(\*\) into service_missing/g) ?? []).length).toBe(1);
+    expect(body).not.toMatch(/if service_missing <> 0\s+or not has_table_privilege/i);
+    expect(body).not.toMatch(/raise exception[^;]*;\s*if\b/i);
+    const serviceIf = body.match(/if service_missing <> 0 then[\s\S]*?end if;/);
+    expect(serviceIf?.[0]).toContain('PREFLIGHT service_role missing required table privileges');
+    expect(serviceIf?.[0]).not.toContain('v_fuentes_master');
+    expect(body).toContain("select count(*) into view_missing");
+    expect(body).toContain('PREFLIGHT service_role missing SELECT on v_fuentes_master');
   });
 
   it('el preflight ejecuta el hardening y verifica el contrato', () => {
@@ -184,16 +208,17 @@ describe('artefactos source registry security', () => {
   });
 
   it('el preflight exige grants exactos y ausencia de privilegios extra', () => {
-    const blob = read(preflightPath).toLowerCase();
-    expect(blob).toContain("('select'), ('insert'), ('update'), ('delete'), ('truncate'), ('references'), ('trigger')");
-    expect(blob).toContain("('truncate'), ('references'), ('trigger')");
-    expect(blob).toContain("('insert'), ('update'), ('delete'), ('truncate'), ('references'), ('trigger')");
-    expect(blob).toContain('service_role has extra table privileges');
-    expect(blob).toContain('service_role has extra privileges on v_fuentes_master');
-    expect(blob).toContain('service_role missing required table privileges');
-    expect(blob).toContain('anon still has privileges');
-    expect(blob).toContain('authenticated still has privileges');
-    expect(blob).toMatch(/has_table_privilege\('service_role',\s*'public\.v_fuentes_master',\s*p\.priv\)/);
+    const body = checksBody(read(preflightPath));
+    expect(body).toContain('PREFLIGHT service_role has extra table privileges');
+    expect(body).toContain('PREFLIGHT service_role has extra privileges on v_fuentes_master');
+    expect(body).toContain('PREFLIGHT service_role missing required table privileges');
+    expect(body).toContain('PREFLIGHT anon still has privileges');
+    expect(body).toContain('PREFLIGHT authenticated still has privileges');
+    const extra = selectInto(body, 'service_extra');
+    expect(extra).toMatch(/\('TRUNCATE'\),\s*\('REFERENCES'\),\s*\('TRIGGER'\)/);
+    const viewExtra = selectInto(body, 'view_extra');
+    expect(viewExtra).toMatch(/\('INSERT'\),\s*\('UPDATE'\),\s*\('DELETE'\),\s*\('TRUNCATE'\),\s*\('REFERENCES'\),\s*\('TRIGGER'\)/);
+    expect(body).toMatch(/has_table_privilege\('service_role',\s*'public\.v_fuentes_master',\s*p\.priv\)/);
   });
 
   it('migración, live y preflight no recrean la vista ni mutan datos', () => {
