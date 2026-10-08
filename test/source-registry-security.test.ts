@@ -144,6 +144,31 @@ describe('artefactos source registry security', () => {
     expect(preflight.trimEnd().endsWith('ROLLBACK;')).toBe(true);
   });
 
+  it('el bloque DO $checks$ cierra con END; y delimitadores balanceados', () => {
+    const preflight = read(preflightPath).replace(/^\uFEFF/, '');
+    expect(preflight).not.toMatch(/^[ \t]*end[ \t]*\r?\n[ \t]*\$checks\$;/im);
+    expect(preflight).toMatch(/^[ \t]*end;[ \t]*\r?\n[ \t]*\$checks\$;/im);
+
+    const doBlocks = [...preflight.matchAll(/\bdo\s+(\$[A-Za-z_]*\$)/gi)];
+    expect(doBlocks.length).toBeGreaterThan(0);
+    for (const match of doBlocks) {
+      const delim = match[1]!;
+      const afterDo = preflight.slice(match.index! + match[0].length);
+      const closeAt = afterDo.indexOf(delim);
+      expect(closeAt, delim).toBeGreaterThan(0);
+      const body = afterDo.slice(0, closeAt);
+      expect(body.toLowerCase()).toMatch(/\bend;\s*$/);
+      expect((preflight.split(delim).length - 1) % 2).toBe(0);
+    }
+
+    const ifOpens = preflight.match(/^[ \t]*if\b/gim)?.length ?? 0;
+    const ifCloses = preflight.match(/^[ \t]*end if;/gim)?.length ?? 0;
+    expect(ifCloses).toBe(ifOpens);
+    expect(ifOpens).toBeGreaterThan(0);
+    expect(preflight).not.toMatch(/^[ \t]*end if[ \t]*$/im);
+    expect(preflight.toLowerCase()).not.toMatch(/\bloop\b/);
+  });
+
   it('el preflight ejecuta el hardening y verifica el contrato', () => {
     const preflightOps = statements(read(preflightPath));
     for (const op of migrationOps) expect(preflightOps).toContain(op);

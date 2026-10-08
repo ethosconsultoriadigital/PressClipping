@@ -249,7 +249,7 @@ begin
   if view_rows is distinct from expected_rows then
     raise exception 'PREFLIGHT service_role cannot read v_fuentes_master (% vs %)', view_rows, expected_rows;
   end if;
-end
+end;
 $checks$;
 
 select
