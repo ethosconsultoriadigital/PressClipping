@@ -175,6 +175,14 @@ export interface ChannelCatalogRow {
   secciones_urls?: string | null;
 }
 
+export interface DiscoverOpts {
+  resumeCursor?: string | null;
+  skipSurfaces?: string[];
+  onlySurfaces?: string[];
+  probeListing?: boolean;
+  sitemapPageSize?: number;
+}
+
 /** Vista de corrida para reportes. El estado durable vive en SourceReconcileState. */
 export interface Checkpoint {
   run_id: string;

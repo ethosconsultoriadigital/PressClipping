@@ -2,7 +2,7 @@
 import { discoveryCoverageVerdict } from './coverage.js';
 import { asCheckpoint, emptySourceState, markSourceTerminal, timeBudgetExceeded, withTimeout, SourceTimeoutError } from './checkpoint.js';
 import type { CaptureReliabilityStore } from './captureRecoveryRepository.js';
-import { EXPLAINED_RECOVERY, type ChannelCatalogRow, type CompletenessFlag, type DiscoveredUrl, type GapCandidate, type RecoveryRecord, type RootCause, type SourceReconcileState } from './types.js';
+import { EXPLAINED_RECOVERY, type ChannelCatalogRow, type CompletenessFlag, type DiscoverOpts, type DiscoveredUrl, type GapCandidate, type RecoveryRecord, type RootCause, type SourceReconcileState } from './types.js';
 import { lookupExistingNewsByHashes, type HashQueryFn } from './lakeLookup.js';
 import { decideDiscoveredUrl, unionDiscovery } from './reconcile.js';
 import { googleAuditorClassify } from './recoveryQueue.js';
@@ -12,11 +12,13 @@ import { cycleIsDrained } from './cycle.js';
 import { captureCanonicalUrl, hostOf, primaryHash } from './urlIndex.js';
 import { recoveryWritesAllowed } from './writesGuard.js';
 import {
-  incrementCoverageDebtAttempt,
+  getCoverageDebt,
   isResumableDebt,
   listCoverageDebt,
   registerCoverageDebt,
+  reportCoverageDebtBacklog,
 } from './coverageDebt.js';
+import { executeCoverageDebtFollowUp } from './coverageDebtExecutor.js';
 import { gapRecoveryEligible } from '../matching/bGapCandidateToCaptureGapRow.js';
 import type { RecoveryFetchExtract, RecoveryPersist } from './recoveryWorker.js';
 
@@ -29,12 +31,21 @@ export interface SourceDiscovery {
   sitemapRuntimeCompletenessInvoked: boolean;
   capHit: boolean;
   noDiscoverySurface: boolean;
+  cursor?: string | null;
+  pageExhausted?: boolean;
+  probedSurface?: string | null;
+  probeEvaluated?: boolean;
+  resumedFromCursor?: string | null;
 }
 
 export interface EngineDeps {
   store: CaptureReliabilityStore;
   catalog: ChannelCatalogRow[];
-  discoverSource: (source: ChannelCatalogRow, window: { start: string; end: string }) => Promise<SourceDiscovery>;
+  discoverSource: (
+    source: ChannelCatalogRow,
+    window: { start: string; end: string },
+    opts?: DiscoverOpts,
+  ) => Promise<SourceDiscovery>;
   queryLakeHashes: HashQueryFn;
   fetchExtract?: RecoveryFetchExtract;
   persistNews?: RecoveryPersist;
@@ -114,6 +125,12 @@ export interface EngineReport {
   RECOVERY_QUEUE_CLAIMABLE: number;
   RECOVERY_PROCESSED_THIS_RUN: number;
   RECOVERY_PERSISTED: number;
+  RECOVERY_PERSISTED_GLOBAL: number;
+  NEW_WRITES_THIS_RUN: number;
+  KNOWN_THIS_RUN: number;
+  REJECTED_THIS_RUN: number;
+  RETRY_THIS_RUN: number;
+  BLOCKED_THIS_RUN: number;
   RECOVERY_KNOWN: number;
   RECOVERY_REJECTED: number;
   RECOVERY_RETRY: number;
@@ -121,6 +138,7 @@ export interface EngineReport {
   RECOVERY_FAILED: number;
   RECOVERY_REMAINING: number;
   RECOVERY_WOULD_PERSIST: number;
+  DEBT_BACKLOG: ReturnType<typeof reportCoverageDebtBacklog>;
 }
 
 async function persistIncompleteSource(
@@ -213,11 +231,6 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
     staleBeforeIso: staleBefore,
     resumeIncomplete: true,
   });
-  for (const src of claimedSources) {
-    if (debtByMedio.has(src.medio_id)) {
-      await incrementCoverageDebtAttempt(deps.store, src, opts.nowIso);
-    }
-  }
   const claimedIds = new Set(claimedSources.map((s) => s.medio_id));
   const work = shard.filter((row) => claimedIds.has(row.medio_id));
 
@@ -237,6 +250,22 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
     sourcesTouched += 1;
     let state = (await deps.store.getSourceState(row.medio_id, opts.windowStart, opts.windowEnd))
       ?? emptySourceState({ medioId: row.medio_id, windowStart: opts.windowStart, windowEnd: opts.windowEnd });
+
+    const liveDebt = await getCoverageDebt(deps.store, row.medio_id, opts.windowStart, opts.windowEnd);
+    if (liveDebt && isResumableDebt(liveDebt)) {
+      await executeCoverageDebtFollowUp({
+        store: deps.store,
+        catalog: row,
+        state,
+        debt: liveDebt,
+        nowIso: opts.nowIso,
+        runId: opts.runId,
+        discover: deps.discoverSource,
+        queryLakeHashes: deps.queryLakeHashes,
+        workerId: opts.workerId,
+      });
+      continue;
+    }
 
     let discovery: SourceDiscovery;
     try {
@@ -437,6 +466,12 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
     RECOVERY_QUEUE_CLAIMABLE: 0,
     RECOVERY_PROCESSED_THIS_RUN: 0,
     RECOVERY_PERSISTED: 0,
+    RECOVERY_PERSISTED_GLOBAL: 0,
+    NEW_WRITES_THIS_RUN: 0,
+    KNOWN_THIS_RUN: 0,
+    REJECTED_THIS_RUN: 0,
+    RETRY_THIS_RUN: 0,
+    BLOCKED_THIS_RUN: 0,
     RECOVERY_KNOWN: 0,
     RECOVERY_REJECTED: 0,
     RECOVERY_RETRY: 0,
@@ -503,7 +538,8 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
     };
   });
 
-  const writes = writesAllowed ? snap.filter((r) => r.status === 'PERSISTED').length : 0;
+  const writes = recovery.NEW_WRITES_THIS_RUN;
+  const debts = await listCoverageDebt(deps.store, opts.windowStart, opts.windowEnd);
   const cycleStatus = cycleIsDrained(cov.SOURCES_PENDING) ? 'DRAINED' : capHit || timeBudgetHit ? 'PAUSED' : 'OPEN';
   await deps.store.upsertRun({
     run_id: opts.runId,
@@ -572,7 +608,13 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
     RECOVERY_QUEUE_TOTAL: recovery.RECOVERY_QUEUE_TOTAL,
     RECOVERY_QUEUE_CLAIMABLE: recovery.RECOVERY_QUEUE_CLAIMABLE,
     RECOVERY_PROCESSED_THIS_RUN: recovery.RECOVERY_PROCESSED_THIS_RUN,
-    RECOVERY_PERSISTED: recovery.RECOVERY_PERSISTED,
+    RECOVERY_PERSISTED: recovery.RECOVERY_PERSISTED_GLOBAL,
+    RECOVERY_PERSISTED_GLOBAL: recovery.RECOVERY_PERSISTED_GLOBAL,
+    NEW_WRITES_THIS_RUN: recovery.NEW_WRITES_THIS_RUN,
+    KNOWN_THIS_RUN: recovery.KNOWN_THIS_RUN,
+    REJECTED_THIS_RUN: recovery.REJECTED_THIS_RUN,
+    RETRY_THIS_RUN: recovery.RETRY_THIS_RUN,
+    BLOCKED_THIS_RUN: recovery.BLOCKED_THIS_RUN,
     RECOVERY_KNOWN: recovery.RECOVERY_KNOWN,
     RECOVERY_REJECTED: recovery.RECOVERY_REJECTED,
     RECOVERY_RETRY: recovery.RECOVERY_RETRY,
@@ -580,6 +622,7 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
     RECOVERY_FAILED: recovery.RECOVERY_FAILED,
     RECOVERY_REMAINING: recovery.RECOVERY_REMAINING,
     RECOVERY_WOULD_PERSIST: recovery.RECOVERY_WOULD_PERSIST,
+    DEBT_BACKLOG: reportCoverageDebtBacklog(debts, Date.parse(opts.nowIso)),
   };
 }
 export { recoveryWritesAllowed };

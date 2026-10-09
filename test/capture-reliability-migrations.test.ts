@@ -28,6 +28,12 @@ describe('Capture reliability migrations package', () => {
     expect(sql('0019b_capture_reliability_preflight.sql')).toContain('claim_capture_gap_batch');
     expect(sql('0020_reliability_integration_rc1.sql')).toContain('b_google_radar_cursor');
     expect(sql('0020_reliability_integration_rc1.sql')).toContain('grant select, insert, update, delete on table public.b_google_radar_cursor to service_role');
+    expect(sql('0021_coverage_debt_claim.sql')).toContain('claim_capture_source_incomplete_batch');
+    expect(sql('0021_coverage_debt_claim.sql').toLowerCase()).toContain('for update skip locked');
+    expect(sql('0021_coverage_debt_claim.sql')).toContain('revoke all on function public.claim_capture_source_incomplete_batch');
+    expect(sql('0021_coverage_debt_claim.sql')).toContain('grant execute on function public.claim_capture_source_incomplete_batch');
+    expect(sql('0021_coverage_debt_claim.sql')).toContain('to service_role');
+    expect(sql('0021b_coverage_debt_claim_preflight.sql')).toContain('claim_capture_source_incomplete_batch');
     expect(sql('0020_reliability_integration_rc1.sql')).toContain('cursor_offset integer not null');
     const cursorTable = sql('0020_reliability_integration_rc1.sql').match(
       /create table if not exists public\.b_google_radar_cursor\s*\(([\s\S]*?)\);/,

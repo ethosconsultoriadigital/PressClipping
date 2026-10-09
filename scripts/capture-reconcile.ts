@@ -329,8 +329,10 @@ async function main() {
       WINDOW_SAFE_COMPLETE: safety.safeComplete,
       WINDOW_SAFE_REASON: safety.reason,
       CURSOR_ADVANCED: safety.safeComplete,
-      PRODUCTION_RECOVERY_WRITES: writes ? drain.RECOVERY_PERSISTED : 0,
       ...drain,
+      PRODUCTION_RECOVERY_WRITES: drain.NEW_WRITES_THIS_RUN,
+      RECOVERY_PERSISTED_GLOBAL: drain.RECOVERY_PERSISTED_GLOBAL,
+      NEW_WRITES_THIS_RUN: drain.NEW_WRITES_THIS_RUN,
     };
     writeFileSync('artifacts/capture-reliability-24h-dry.json', JSON.stringify(report, null, 2));
     logger.info(report, 'capture-reliability recovery');
@@ -397,7 +399,7 @@ async function main() {
     ...report,
     STORE_BACKEND: backend,
     FULL_CATALOG_STRATEGY: 'fixed_cycle + deterministic shards',
-    PRODUCTION_RECOVERY_WRITES: writes ? report.PRODUCTION_RECOVERY_WRITES : 0,
+    PRODUCTION_RECOVERY_WRITES: report.NEW_WRITES_THIS_RUN,
     WRITES_ALLOWED: writes,
     DRY_RUN: dry,
     SECRET_ENABLED: allowWritesEnv === 'true',

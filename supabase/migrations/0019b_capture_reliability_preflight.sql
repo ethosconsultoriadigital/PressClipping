@@ -1,5 +1,5 @@
 -- Read-only / transactional-safe preflight. Do not apply as LIVE mutation plan beyond this file's checks.
--- Expected order: 0016, 0017, 0018, 0019, 0020.
+-- Expected order: 0016, 0017, 0018, 0019, 0020, 0021.
 
 do $$
 begin

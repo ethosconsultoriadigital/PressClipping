@@ -411,19 +411,17 @@ export class SupabaseCaptureReliabilityStore implements CaptureReliabilityStore 
   }): Promise<SourceReconcileState[]> {
     const resumed: SourceReconcileState[] = [];
     if (opts.resumeIncomplete) {
-      for (const medioId of opts.medioIds) {
-        if (resumed.length >= opts.limit) break;
-        const existing = await this.getSourceState(medioId, opts.windowStart, opts.windowEnd);
-        if (existing?.status !== 'INCOMPLETE') continue;
-        const next = {
-          ...existing,
-          status: 'IN_PROGRESS' as const,
-          worker_id: opts.workerId,
-          started_at: opts.nowIso,
-        };
-        await this.upsertSourceState(next);
-        resumed.push(next);
-      }
+      const { data, error } = await this.sb.rpc('claim_capture_source_incomplete_batch', {
+        p_worker_id: opts.workerId,
+        p_window_start: opts.windowStart,
+        p_window_end: opts.windowEnd,
+        p_medio_ids: opts.medioIds,
+        p_limit: opts.limit,
+        p_now: opts.nowIso,
+        p_stale_before: opts.staleBeforeIso,
+      });
+      if (error) throw error;
+      resumed.push(...((data ?? []) as Record<string, unknown>[]).map((row) => stateFromRow(row)));
       if (resumed.length >= opts.limit) return resumed;
     }
     for (const medioId of opts.medioIds) {

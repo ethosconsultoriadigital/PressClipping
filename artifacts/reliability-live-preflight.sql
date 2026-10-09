@@ -453,6 +453,9 @@ begin
   if to_regclass('public.b_google_radar_cursor') is null then
     raise notice 'PREFLIGHT missing b_google_radar_cursor (apply 0020)';
   end if;
+  if to_regprocedure('public.claim_capture_source_incomplete_batch(text, timestamp with time zone, timestamp with time zone, text[], integer, timestamp with time zone, timestamp with time zone)') is null then
+    raise notice 'PREFLIGHT missing claim_capture_source_incomplete_batch (apply 0021)';
+  end if;
 end $$;
 
 
@@ -471,7 +474,8 @@ select
 select
   to_regprocedure('public.claim_capture_recovery_batch(text,integer,timestamp with time zone,text[])') as claim_recovery,
   to_regprocedure('public.claim_capture_source_batch(text,timestamp with time zone,timestamp with time zone,text[],integer,timestamp with time zone)') as claim_source,
-  to_regprocedure('public.claim_capture_gap_batch(text,integer,timestamp with time zone)') as claim_gap;
+  to_regprocedure('public.claim_capture_gap_batch(text,integer,timestamp with time zone)') as claim_gap,
+  to_regprocedure('public.claim_capture_source_incomplete_batch(text,timestamp with time zone,timestamp with time zone,text[],integer,timestamp with time zone,timestamp with time zone)') as claim_incomplete;
 
 select
   table_name,
