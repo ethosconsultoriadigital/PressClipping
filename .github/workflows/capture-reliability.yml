@@ -1,7 +1,20 @@
 name: capture-reliability
 
 # GitHub is one caller of the same CLI. Persistent DB/store is the source of truth.
-# Schedule stays fail-closed dry-run unless ALLOW_CAPTURE_RECOVERY_WRITES=true.
+#
+# WRITE GATES (fail-closed):
+#   ALLOW_CAPTURE_RECOVERY_WRITES        — único permiso para schedules y para
+#                                          dispatch sin límites (catálogo completo).
+#   ALLOW_CAPTURE_RECOVERY_CANARY_WRITES — solo workflow_dispatch CON medio_ids
+#                                          y/o recovery_hashes|urls. No abre 569 medios.
+# Un canary no activa el recovery abierto. Schedule ignora el secreto canario.
+#
+# CATCH-UP: resolve-cycle lee el cursor durable (último WINDOW_END seguro) y
+# congela UN ciclo para scheduler + 8 shards + recovery. No calcula «ahora-24h».
+# Si el scheduler/resolve falla, los workers no arrancan (sin outputs vacíos).
+# Si un shard falla: recovery corre el ciclo congelado sobre trabajo ya
+# identificado y declara COVERAGE_COMPLETE=false.
+
 on:
   workflow_dispatch:
     inputs:
@@ -14,23 +27,23 @@ on:
         required: false
         default: 'true'
       role:
-        description: scheduler | source | recovery | all
+        description: resolve-cycle | scheduler | source | recovery | all
         required: false
         default: 'all'
       cycle_id:
-        description: Fixed cycle id (optional)
+        description: Fixed cycle id (optional; ignored on schedule catch-up)
         required: false
         default: ''
       window_start:
-        description: ISO window start (optional; otherwise cycle-computed)
+        description: ISO window start (dispatch only; schedule uses durable cursor)
         required: false
         default: ''
       window_end:
-        description: ISO window end (optional; otherwise cycle-computed)
+        description: ISO window end (dispatch only; schedule uses durable cursor)
         required: false
         default: ''
       medio_ids:
-        description: Lista opcional de medio_id
+        description: Canario — lista de medio_id. Vacío en schedule = catálogo completo (requiere gate full).
         required: false
         default: ''
       shard_index:
@@ -54,11 +67,11 @@ on:
         required: false
         default: '20'
       recovery_hashes:
-        description: Optional comma-separated hash_url filter (scheduled runs leave empty)
+        description: Canario — hashes. Vacío en schedule.
         required: false
         default: ''
       recovery_urls:
-        description: Optional comma-separated URL filter (scheduled runs leave empty)
+        description: Canario — URLs. Vacío en schedule.
         required: false
         default: ''
   schedule:
@@ -66,18 +79,20 @@ on:
     - cron: '50 11 * * *'
 
 concurrency:
-  group: capture-reliability-${{ github.event.inputs.role || 'all' }}-${{ github.event.inputs.shard_index || '0' }}
+  group: capture-reliability
   cancel-in-progress: false
 
 jobs:
   scheduler:
-    if: ${{ github.event_name == 'schedule' || github.event.inputs.role == 'scheduler' || github.event.inputs.role == 'all' || github.event.inputs.role == '' }}
+    if: ${{ github.event_name == 'schedule' || github.event.inputs.role == 'scheduler' || github.event.inputs.role == 'resolve-cycle' || github.event.inputs.role == 'all' || github.event.inputs.role == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       ALLOW_CAPTURE_RECOVERY_WRITES: ${{ secrets.ALLOW_CAPTURE_RECOVERY_WRITES }}
+      ALLOW_CAPTURE_RECOVERY_CANARY_WRITES: ${{ secrets.ALLOW_CAPTURE_RECOVERY_CANARY_WRITES }}
+      CAPTURE_CATCH_UP_FROM: ${{ secrets.CAPTURE_CATCH_UP_FROM }}
       RUN_BY: github-actions-capture-reliability
       LOG_FORMAT: json
       NO_SEND: 'true'
@@ -85,10 +100,12 @@ jobs:
       NO_WHATSAPP: 'true'
       NO_TWILIO: 'true'
     outputs:
+      skip: ${{ steps.cycle.outputs.skip }}
       cycle_id: ${{ steps.cycle.outputs.cycle_id }}
       window_start: ${{ steps.cycle.outputs.window_start }}
       window_end: ${{ steps.cycle.outputs.window_end }}
       mode: ${{ steps.cycle.outputs.mode }}
+      reason: ${{ steps.cycle.outputs.reason }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -97,31 +114,51 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - id: cycle
-        name: Resolve fixed cycle
+        name: Resolve durable catch-up cycle
         run: |
+          set -euo pipefail
           MODE="${{ github.event.inputs.mode || '24h' }}"
           if [ "${{ github.event.schedule }}" = "50 11 * * *" ]; then MODE=72h; fi
-          WS="${{ github.event.inputs.window_start }}"
-          WE="${{ github.event.inputs.window_end }}"
-          CID="${{ github.event.inputs.cycle_id }}"
-          if [ -z "$WE" ]; then WE=$(date -u +"%Y-%m-%dT%H:00:00.000Z"); fi
-          if [ -z "$WS" ]; then
-            if [ "$MODE" = "72h" ]; then WS=$(date -u -d "$WE -72 hours" +"%Y-%m-%dT%H:00:00.000Z"); else WS=$(date -u -d "$WE -24 hours" +"%Y-%m-%dT%H:00:00.000Z"); fi
+          EVENT="${{ github.event_name }}"
+          ARGS="--role=resolve-cycle --mode=$MODE --event=$EVENT --shard-count=${{ github.event.inputs.shard_count || '8' }} --store=artifacts/capture-reliability-store.json --gap-candidates=config/capture-gap-candidates.json"
+          if [ "$EVENT" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.window_start }}" ] && [ -n "${{ github.event.inputs.window_end }}" ]; then
+            ARGS="$ARGS --window-start=${{ github.event.inputs.window_start }} --window-end=${{ github.event.inputs.window_end }}"
+            if [ -n "${{ github.event.inputs.cycle_id }}" ]; then ARGS="$ARGS --cycle-id=${{ github.event.inputs.cycle_id }}"; fi
           fi
-          if [ -z "$CID" ]; then CID="caprel-$MODE-$(echo "$WE" | tr -d '-:' | sed 's/\..*Z/Z/')"; fi
+          npm run capture-reliability:reconcile -- $ARGS
+          test -f artifacts/capture-reliability-cycle.json
+          SKIP=$(node -e "const j=require('./artifacts/capture-reliability-cycle.json'); process.stdout.write(j.skip||'false')")
+          WS=$(node -e "const j=require('./artifacts/capture-reliability-cycle.json'); process.stdout.write(j.window_start||'')")
+          WE=$(node -e "const j=require('./artifacts/capture-reliability-cycle.json'); process.stdout.write(j.window_end||'')")
+          CID=$(node -e "const j=require('./artifacts/capture-reliability-cycle.json'); process.stdout.write(j.cycle_id||'')")
+          REASON=$(node -e "const j=require('./artifacts/capture-reliability-cycle.json'); process.stdout.write(j.reason||'')")
+          echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "window_start=$WS" >> "$GITHUB_OUTPUT"
           echo "window_end=$WE" >> "$GITHUB_OUTPUT"
           echo "cycle_id=$CID" >> "$GITHUB_OUTPUT"
-      - name: Schedule source jobs
+          echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+          if [ "$SKIP" != "true" ] && { [ -z "$WE" ] || [ -z "$WS" ] || [ -z "$CID" ]; }; then
+            echo "FAIL_CLOSED empty frozen cycle" >&2
+            exit 1
+          fi
+      - name: Schedule source jobs for frozen window
+        if: ${{ steps.cycle.outputs.skip != 'true' && steps.cycle.outputs.window_end != '' }}
         run: |
-          ARGS="--role=scheduler --mode=${{ steps.cycle.outputs.mode }} --cycle-id=${{ steps.cycle.outputs.cycle_id }} --window-start=${{ steps.cycle.outputs.window_start }} --window-end=${{ steps.cycle.outputs.window_end }} --shard-count=${{ github.event.inputs.shard_count || '8' }} --store=artifacts/capture-reliability-store.json --gap-candidates=config/capture-gap-candidates.json"
-          if [ "${ALLOW_CAPTURE_RECOVERY_WRITES}" = "true" ] && { [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.dry_run }}" = "false" ]; }; then ARGS="$ARGS --no-dry-run"; fi
+          set -euo pipefail
+          ARGS="--role=scheduler --event=${{ github.event_name }} --mode=${{ steps.cycle.outputs.mode }} --cycle-id=${{ steps.cycle.outputs.cycle_id }} --window-start=${{ steps.cycle.outputs.window_start }} --window-end=${{ steps.cycle.outputs.window_end }} --shard-count=${{ github.event.inputs.shard_count || '8' }} --store=artifacts/capture-reliability-store.json --gap-candidates=config/capture-gap-candidates.json"
+          LIMITED=false
+          if [ -n "${{ github.event.inputs.medio_ids }}" ]; then LIMITED=true; ARGS="$ARGS --medio-ids=${{ github.event.inputs.medio_ids }}"; fi
+          if [ "${ALLOW_CAPTURE_RECOVERY_WRITES}" = "true" ] && { [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.dry_run }}" = "false" ]; }; then
+            ARGS="$ARGS --no-dry-run"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$LIMITED" = "true" ] && [ "${ALLOW_CAPTURE_RECOVERY_CANARY_WRITES}" = "true" ] && [ "${{ github.event.inputs.dry_run }}" = "false" ]; then
+            ARGS="$ARGS --no-dry-run"
+          fi
           npm run capture-reliability:reconcile -- $ARGS
 
   source-worker:
     needs: scheduler
-    if: ${{ always() && (github.event_name == 'schedule' || github.event.inputs.role == 'source' || github.event.inputs.role == 'all' || github.event.inputs.role == '') }}
+    if: ${{ needs.scheduler.result == 'success' && needs.scheduler.outputs.skip != 'true' && needs.scheduler.outputs.window_end != '' && (github.event_name == 'schedule' || github.event.inputs.role == 'source' || github.event.inputs.role == 'all' || github.event.inputs.role == '') }}
     strategy:
       fail-fast: false
       matrix:
@@ -132,6 +169,7 @@ jobs:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       ALLOW_CAPTURE_RECOVERY_WRITES: ${{ secrets.ALLOW_CAPTURE_RECOVERY_WRITES }}
+      ALLOW_CAPTURE_RECOVERY_CANARY_WRITES: ${{ secrets.ALLOW_CAPTURE_RECOVERY_CANARY_WRITES }}
       RUN_BY: github-actions-capture-source
       LOG_FORMAT: json
       NO_SEND: 'true'
@@ -145,11 +183,20 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
-      - name: Source worker shard
+      - name: Source worker shard on frozen cycle
         run: |
-          ARGS="--role=source --mode=${{ needs.scheduler.outputs.mode || github.event.inputs.mode || '24h' }} --cycle-id=${{ needs.scheduler.outputs.cycle_id }} --window-start=${{ needs.scheduler.outputs.window_start }} --window-end=${{ needs.scheduler.outputs.window_end }} --shard-index=${{ matrix.shard_index }} --shard-count=8 --max-sources-this-run=${{ github.event.inputs.max_sources_this_run || '80' }} --no-recovery --store=artifacts/capture-reliability-store.json --gap-candidates=config/capture-gap-candidates.json"
-          if [ -n "${{ github.event.inputs.medio_ids }}" ]; then ARGS="$ARGS --medio-ids=${{ github.event.inputs.medio_ids }}"; fi
-          if [ "${ALLOW_CAPTURE_RECOVERY_WRITES}" = "true" ] && { [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.dry_run }}" = "false" ]; }; then ARGS="$ARGS --no-dry-run"; fi
+          set -euo pipefail
+          test -n "${{ needs.scheduler.outputs.window_end }}"
+          test -n "${{ needs.scheduler.outputs.window_start }}"
+          test -n "${{ needs.scheduler.outputs.cycle_id }}"
+          ARGS="--role=source --event=${{ github.event_name }} --mode=${{ needs.scheduler.outputs.mode }} --cycle-id=${{ needs.scheduler.outputs.cycle_id }} --window-start=${{ needs.scheduler.outputs.window_start }} --window-end=${{ needs.scheduler.outputs.window_end }} --shard-index=${{ matrix.shard_index }} --shard-count=8 --max-sources-this-run=${{ github.event.inputs.max_sources_this_run || '80' }} --no-recovery --store=artifacts/capture-reliability-store.json --gap-candidates=config/capture-gap-candidates.json"
+          LIMITED=false
+          if [ -n "${{ github.event.inputs.medio_ids }}" ]; then LIMITED=true; ARGS="$ARGS --medio-ids=${{ github.event.inputs.medio_ids }}"; fi
+          if [ "${ALLOW_CAPTURE_RECOVERY_WRITES}" = "true" ] && { [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.dry_run }}" = "false" ]; }; then
+            ARGS="$ARGS --no-dry-run"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$LIMITED" = "true" ] && [ "${ALLOW_CAPTURE_RECOVERY_CANARY_WRITES}" = "true" ] && [ "${{ github.event.inputs.dry_run }}" = "false" ]; then
+            ARGS="$ARGS --no-dry-run"
+          fi
           npm run capture-reliability:reconcile -- $ARGS
       - uses: actions/upload-artifact@v4
         if: always()
@@ -160,13 +207,15 @@ jobs:
 
   recovery-worker:
     needs: [scheduler, source-worker]
-    if: ${{ always() && (github.event_name == 'schedule' || github.event.inputs.role == 'recovery' || github.event.inputs.role == 'all' || github.event.inputs.role == '') }}
+    if: ${{ always() && needs.scheduler.result == 'success' && needs.scheduler.outputs.skip != 'true' && needs.scheduler.outputs.window_end != '' && (github.event_name == 'schedule' || github.event.inputs.role == 'recovery' || github.event.inputs.role == 'all' || github.event.inputs.role == '') }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       ALLOW_CAPTURE_RECOVERY_WRITES: ${{ secrets.ALLOW_CAPTURE_RECOVERY_WRITES }}
+      ALLOW_CAPTURE_RECOVERY_CANARY_WRITES: ${{ secrets.ALLOW_CAPTURE_RECOVERY_CANARY_WRITES }}
+      COVERAGE_COMPLETE: ${{ needs.source-worker.result == 'success' }}
       RUN_BY: github-actions-capture-recovery
       LOG_FORMAT: json
       NO_SEND: 'true'
@@ -180,12 +229,22 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
-      - name: Recovery worker
+      - name: Recovery on frozen cycle only
         run: |
-          ARGS="--role=recovery --mode=${{ needs.scheduler.outputs.mode || github.event.inputs.mode || '24h' }} --cycle-id=${{ needs.scheduler.outputs.cycle_id }} --window-start=${{ needs.scheduler.outputs.window_start }} --window-end=${{ needs.scheduler.outputs.window_end }} --recovery-batch-size=${{ github.event.inputs.recovery_batch_size || '50' }} --max-recovery-batches=${{ github.event.inputs.max_recovery_batches || '20' }} --recovery-concurrency=4 --global-concurrency=8 --per-host-concurrency=2 --store=artifacts/capture-reliability-store.json"
-          if [ -n "${{ github.event.inputs.recovery_hashes }}" ]; then ARGS="$ARGS --recovery-hashes=${{ github.event.inputs.recovery_hashes }}"; fi
-          if [ -n "${{ github.event.inputs.recovery_urls }}" ]; then ARGS="$ARGS --recovery-urls=${{ github.event.inputs.recovery_urls }}"; fi
-          if [ "${ALLOW_CAPTURE_RECOVERY_WRITES}" = "true" ] && { [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.dry_run }}" = "false" ]; }; then ARGS="$ARGS --no-dry-run"; fi
+          set -euo pipefail
+          test -n "${{ needs.scheduler.outputs.window_end }}"
+          test -n "${{ needs.scheduler.outputs.cycle_id }}"
+          ARGS="--role=recovery --event=${{ github.event_name }} --mode=${{ needs.scheduler.outputs.mode }} --cycle-id=${{ needs.scheduler.outputs.cycle_id }} --window-start=${{ needs.scheduler.outputs.window_start }} --window-end=${{ needs.scheduler.outputs.window_end }} --recovery-batch-size=${{ github.event.inputs.recovery_batch_size || '50' }} --max-recovery-batches=${{ github.event.inputs.max_recovery_batches || '20' }} --recovery-concurrency=4 --global-concurrency=8 --per-host-concurrency=2 --store=artifacts/capture-reliability-store.json"
+          LIMITED=false
+          if [ -n "${{ github.event.inputs.recovery_hashes }}" ]; then LIMITED=true; ARGS="$ARGS --recovery-hashes=${{ github.event.inputs.recovery_hashes }}"; fi
+          if [ -n "${{ github.event.inputs.recovery_urls }}" ]; then LIMITED=true; ARGS="$ARGS --recovery-urls=${{ github.event.inputs.recovery_urls }}"; fi
+          if [ -n "${{ github.event.inputs.medio_ids }}" ]; then LIMITED=true; fi
+          if [ "${ALLOW_CAPTURE_RECOVERY_WRITES}" = "true" ] && { [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.dry_run }}" = "false" ]; }; then
+            ARGS="$ARGS --no-dry-run"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$LIMITED" = "true" ] && [ "${ALLOW_CAPTURE_RECOVERY_CANARY_WRITES}" = "true" ] && [ "${{ github.event.inputs.dry_run }}" = "false" ]; then
+            ARGS="$ARGS --no-dry-run"
+          fi
+          echo "COVERAGE_COMPLETE=${COVERAGE_COMPLETE}"
           npm run capture-reliability:reconcile -- $ARGS
       - uses: actions/upload-artifact@v4
         if: always()

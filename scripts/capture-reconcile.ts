@@ -20,8 +20,14 @@ import { SupabaseCaptureReliabilityStore } from '../src/captureReliability/supab
 import { runReconcileEngine, scheduleSourceJobs } from '../src/captureReliability/engine.js';
 import { discoverLiveSource } from '../src/captureReliability/discoverLive.js';
 import { loadGapCandidatesFromFile } from '../src/captureReliability/gapCandidates.js';
-import { recoveryWritesAllowed } from '../src/captureReliability/writesGuard.js';
-import { computeFixedCycle, contiguousCatchUpWindows, DEFAULT_SHARD_COUNT } from '../src/captureReliability/cycle.js';
+import { isLimitedCanaryScope, recoveryWritesAllowed } from '../src/captureReliability/writesGuard.js';
+import { computeFixedCycle, DEFAULT_SHARD_COUNT } from '../src/captureReliability/cycle.js';
+import {
+  loadLastSafeWindowEnd,
+  markWindowSafeComplete,
+  resolveNextCatchUpWindow,
+  seedCatchUpCursor,
+} from '../src/captureReliability/catchUpCursor.js';
 import { drainRecoveryQueue } from '../src/captureReliability/recoveryDrain.js';
 import { buildCoverageRemediation } from '../src/captureReliability/coverageRemediation.js';
 import { auditQueuedSample } from '../src/captureReliability/queueAudit.js';
@@ -116,38 +122,19 @@ async function openStore(jsonPath: string): Promise<{ store: CaptureReliabilityS
   return { store: createJsonCaptureRecoveryRepository(jsonPath), backend: 'json' };
 }
 
-function resolveDryRun(): boolean {
-  if (process.argv.includes('--no-dry-run')) {
-    return process.env.ALLOW_CAPTURE_RECOVERY_WRITES === 'true' ? false : true;
-  }
-  return true;
+function writeGithubCycle(out: Record<string, string>) {
+  const dest = process.env.GITHUB_OUTPUT;
+  const body = Object.entries(out)
+    .map(([k, v]) => `${k}=${v}`)
+    .join('\n');
+  if (dest) writeFileSync(dest, `${body}\n`, { flag: 'a' });
+  writeFileSync('artifacts/capture-reliability-cycle.json', JSON.stringify(out, null, 2));
 }
 
 async function main() {
-  const dry = resolveDryRun();
-  const allowEnv = process.env.ALLOW_CAPTURE_RECOVERY_WRITES ?? null;
-  const writes = recoveryWritesAllowed({ dryRun: dry, allowEnv });
   const mode = (arg('mode') ?? '24h') as '24h' | '72h' | 'auditor';
   const shardCount = numArg('shard-count', DEFAULT_SHARD_COUNT);
-  const catchFrom = arg('catch-up-from');
-  const catchUp = catchFrom
-    ? contiguousCatchUpWindows({
-        lastCompletedWindowEnd: catchFrom,
-        now: new Date(),
-        mode: mode === 'auditor' ? '24h' : mode,
-      })
-    : [];
-  if (catchFrom) {
-    logger.info({ CATCH_UP_WINDOWS: catchUp.length, CATCH_UP_FROM: catchFrom, windows: catchUp }, 'contiguous catch-up');
-  }
-  const firstCatch = catchUp[0];
-  const cycle = computeFixedCycle({
-    mode,
-    windowStart: firstCatch?.window_start ?? arg('window-start'),
-    windowEnd: firstCatch?.window_end ?? arg('window-end'),
-    cycleId: firstCatch?.cycle_id ?? arg('cycle-id'),
-    shardCount,
-  });
+  const eventName = arg('event') ?? process.env.GITHUB_EVENT_NAME ?? 'dispatch';
   const medioIds = (arg('medio-ids') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   const maxSourcesThisRun = numArg('max-sources-this-run', 80);
   const shardIndex = numArg('shard-index', 0);
@@ -162,7 +149,6 @@ async function main() {
   const perSourceTimeoutMs = numArg('per-source-timeout-ms', 40_000);
   const processRecovery = !process.argv.includes('--no-recovery');
   const role = arg('role') ?? 'all';
-  const runId = arg('run-id') ?? `${cycle.cycle_id}-s${shardIndex}`;
   const storePath = arg('store') ?? 'artifacts/capture-reliability-store.json';
   const gapPath = arg('gap-candidates') ?? 'config/capture-gap-candidates.json';
   const workerId = process.env.RUN_BY ?? 'capture-reliability-worker';
@@ -178,12 +164,100 @@ async function main() {
       .map((s) => s.trim())
       .filter(Boolean),
   );
+  const limitedScope = isLimitedCanaryScope({
+    medioIds,
+    recoveryHashes: [...recoveryHashes],
+  });
+  const allowWritesEnv = process.env.ALLOW_CAPTURE_RECOVERY_WRITES ?? null;
+  const writes = recoveryWritesAllowed({
+    dryRun: !process.argv.includes('--no-dry-run'),
+    allowEnv: allowWritesEnv,
+    canaryAllowEnv: process.env.ALLOW_CAPTURE_RECOVERY_CANARY_WRITES ?? null,
+    eventName,
+    limitedScope,
+  });
+  const dry = !writes;
 
   const catalog = await loadActiveCatalog(medioIds);
   const { store, backend } = await openStore(storePath);
   const gapCandidates = loadGapCandidatesFromFile(gapPath, catalog);
 
   mkdirSync('artifacts', { recursive: true });
+
+  const catchFrom = arg('catch-up-from') ?? process.env.CAPTURE_CATCH_UP_FROM ?? null;
+  const explicitStart = arg('window-start');
+  const explicitEnd = arg('window-end');
+  const useFrozenInputs = Boolean(explicitStart && explicitEnd);
+  if (catchFrom && !(await loadLastSafeWindowEnd(store, mode))) {
+    await seedCatchUpCursor(store, {
+      mode,
+      lastSafeWindowEnd: catchFrom,
+      nowIso: new Date().toISOString(),
+    });
+  }
+
+  let cycle = computeFixedCycle({
+    mode,
+    windowStart: explicitStart,
+    windowEnd: explicitEnd,
+    cycleId: arg('cycle-id'),
+    shardCount,
+  });
+  let skip = false;
+  let resolveReason = useFrozenInputs ? 'EXPLICIT_WINDOW' : 'COMPUTED';
+  if (!useFrozenInputs) {
+    const resolved = await resolveNextCatchUpWindow({
+      store,
+      mode,
+      now: new Date(),
+      lastSafeWindowEnd: catchFrom,
+    });
+    resolveReason = resolved.reason;
+    if (resolved.reason === 'NO_SAFE_CURSOR') {
+      writeGithubCycle({
+        skip: 'true',
+        mode,
+        window_start: '',
+        window_end: '',
+        cycle_id: '',
+        coverage_complete: 'false',
+        reason: resolved.reason,
+      });
+      throw new Error('NO_SAFE_CURSOR: schedule/catch-up requires a durable last-safe WINDOW_END');
+    }
+    if (!resolved.cycle) {
+      skip = true;
+      cycle = computeFixedCycle({
+        mode,
+        windowStart: resolved.lastSafeWindowEnd,
+        windowEnd: resolved.lastSafeWindowEnd,
+        cycleId: arg('cycle-id'),
+        shardCount,
+      });
+    } else {
+      cycle = { ...resolved.cycle, shard_count: shardCount };
+    }
+  }
+  const runId = arg('run-id') ?? `${cycle.cycle_id}-s${shardIndex}`;
+
+  if (role === 'resolve-cycle' || role === 'capture-reliability-resolve') {
+    writeGithubCycle({
+      skip: skip ? 'true' : 'false',
+      mode: cycle.mode,
+      window_start: skip ? '' : cycle.window_start,
+      window_end: skip ? '' : cycle.window_end,
+      cycle_id: skip ? '' : cycle.cycle_id,
+      coverage_complete: 'false',
+      reason: resolveReason,
+    });
+    logger.info({ skip, cycle, reason: resolveReason }, 'capture-reliability resolve-cycle');
+    return;
+  }
+
+  if (skip) {
+    logger.info({ reason: resolveReason, CATCH_UP: 'CAUGHT_UP' }, 'no pending catch-up window');
+    return;
+  }
 
   if (role === 'scheduler' || role === 'capture-reliability-scheduler') {
     const queued = await scheduleSourceJobs(store, catalog, cycle.window_start, cycle.window_end);
@@ -222,12 +296,18 @@ async function main() {
       windowStart: cycle.window_start,
       windowEnd: cycle.window_end,
     });
+    const coverageComplete = process.env.COVERAGE_COMPLETE === 'true';
+    const safety = await markWindowSafeComplete(store, cycle, new Date().toISOString());
     const report = {
       role: 'recovery',
       CYCLE_ID: cycle.cycle_id,
       WINDOW_START: cycle.window_start,
       WINDOW_END: cycle.window_end,
       DRY_RUN: dry,
+      COVERAGE_COMPLETE: coverageComplete && safety.safeComplete,
+      WINDOW_SAFE_COMPLETE: safety.safeComplete,
+      WINDOW_SAFE_REASON: safety.reason,
+      CURSOR_ADVANCED: safety.safeComplete,
       PRODUCTION_RECOVERY_WRITES: writes ? drain.RECOVERY_PERSISTED : 0,
       ...drain,
     };
@@ -251,7 +331,7 @@ async function main() {
       timeBudgetMs: budgetMs,
       processRecovery: role === 'source' || role === 'capture-reliability-source-worker' ? false : processRecovery,
       dryRun: dry,
-      allowWritesEnv: allowEnv,
+      allowWritesEnv: allowWritesEnv,
       gapCandidates,
       nowIso: new Date().toISOString(),
       recoveryBatchSize,
@@ -284,6 +364,10 @@ async function main() {
   );
   writeFileSync('artifacts/queued-sample-audit-v5.json', JSON.stringify(audit, null, 2));
 
+  const safety = role === 'source' || role === 'capture-reliability-source-worker'
+    ? { safeComplete: false, reason: 'SOURCE_SHARD' }
+    : await markWindowSafeComplete(store, cycle, new Date().toISOString());
+
   const out = {
     ...report,
     STORE_BACKEND: backend,
@@ -291,7 +375,10 @@ async function main() {
     PRODUCTION_RECOVERY_WRITES: writes ? report.PRODUCTION_RECOVERY_WRITES : 0,
     WRITES_ALLOWED: writes,
     DRY_RUN: dry,
-    SECRET_ENABLED: allowEnv === 'true',
+    SECRET_ENABLED: allowWritesEnv === 'true',
+    WINDOW_SAFE_COMPLETE: safety.safeComplete,
+    WINDOW_SAFE_REASON: safety.reason,
+    CURSOR_ADVANCED: safety.safeComplete,
     QUEUED_SAMPLE_TOTAL: audit.total,
     VALID_RECENT_RATE: audit.rates.VALID_ARTICLE_RECENT,
     WRONG_WINDOW_RATE: audit.rates.WRONG_WINDOW + audit.rates.VALID_ARTICLE_OLD,
