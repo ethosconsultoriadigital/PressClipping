@@ -360,3 +360,85 @@ describe('RC1 article admission — dated plural print covers', () => {
     expect(unknown.reason).toBe('WINDOW_MEMBERSHIP_UNKNOWN');
   });
 });
+
+describe('RC1 article admission — login wall and inventory', () => {
+  const reformaArticle = 'https://www.reforma.com/camacho-camacho-2026-10-07/ca322114';
+  const loginUrl = 'https://www.reforma.com/login/';
+  const inventory404 =
+    'https://www.autoexplora.com/inventario-de-seminuevos/2020-nissan-march-1-6-advance-manual-nissan-imperio-oriente-gv-6aa097702a7a68a7ddd0e701';
+  const autoEditorial =
+    'https://www.autoexplora.com/noticias/toyota-anuncia-nueva-plataforma-hibrida-en-mexico-2026/';
+
+  it('rejects a literal login URL as NON_ARTICLE_LOGIN_PAGE', () => {
+    const r = admitDiscoveredArticle({ url: loginUrl, medioId: 'MED-0027', titulo: 'Login' });
+    expect(r.admit).toBe(false);
+    expect(r.reason).toBe('NON_ARTICLE_LOGIN_PAGE');
+    expect(classifyNonArticle({ url: loginUrl }).reason).toBe('NON_ARTICLE_LOGIN_PAGE');
+  });
+
+  it('does not persist Login Grupo Reforma extract even with dated permalink', () => {
+    const r = admitDiscoveredArticle({
+      url: reformaArticle,
+      medioId: 'MED-0027',
+      titulo: 'Login Grupo Reforma',
+      publishedAt: '2026-10-07T06:00:00.000Z',
+      body: '',
+    });
+    expect(r.admit).toBe(false);
+    expect(r.reason).toBe('AUTH_WALL_EXTRACT');
+    expect(classifyNonArticle({ url: reformaArticle, titulo: 'Login Grupo Reforma' }).nonArticle).toBe(false);
+  });
+
+  it('quality FAIL on persisted login extract', () => {
+    const q = evaluateRecoveryQuality({
+      url: reformaArticle,
+      medioId: 'MED-0027',
+      expectedMedioId: 'MED-0027',
+      titulo: 'Login Grupo Reforma',
+      body: '',
+      fechaPublicacion: '2026-10-07T06:00:00.000Z',
+    });
+    expect(q.verdict).toBe('FAIL');
+    expect(q.reasons).toContain('auth_wall_extract');
+  });
+
+  it('rejects vehicle-not-found and inventory listings', () => {
+    expect(
+      admitDiscoveredArticle({
+        url: inventory404,
+        medioId: 'MED-0570',
+        titulo: 'Vehículo no encontrado · Autoexplora',
+        publishedAt: '2026-10-07T12:00:00.000Z',
+      }).reason,
+    ).toBe('NON_ARTICLE_INVENTORY');
+    expect(
+      admitDiscoveredArticle({
+        url: inventory404,
+        medioId: 'MED-0570',
+        titulo: '2018 Chevrolet Aveo 1.5 Ls Mt | Seminuevos Autoexplora',
+        body: 'x'.repeat(80),
+      }).reason,
+    ).toBe('NON_ARTICLE_INVENTORY');
+  });
+
+  it('keeps a legitimate Autoexplora editorial', () => {
+    const r = admitDiscoveredArticle({
+      url: autoEditorial,
+      medioId: 'MED-0570',
+      titulo: 'Toyota anuncia nueva plataforma híbrida en México',
+      body: 'x'.repeat(400),
+      publishedAt: '2026-10-07T12:00:00.000Z',
+    });
+    expect(r.admit).toBe(true);
+    expect(r.reason).not.toBe('NON_ARTICLE_INVENTORY');
+  });
+
+  it('is idempotent for login extract and inventory URL', () => {
+    const a = admitDiscoveredArticle({ url: reformaArticle, medioId: 'MED-0027', titulo: 'Login Grupo Reforma' });
+    const b = admitDiscoveredArticle({ url: reformaArticle, medioId: 'MED-0027', titulo: 'Login Grupo Reforma' });
+    expect(a).toEqual(b);
+    const c = classifyNonArticle({ url: inventory404, titulo: 'Vehículo no encontrado · Autoexplora' });
+    const d = classifyNonArticle({ url: inventory404, titulo: 'Vehículo no encontrado · Autoexplora' });
+    expect(c).toEqual(d);
+  });
+});

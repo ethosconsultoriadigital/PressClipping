@@ -9,6 +9,8 @@ export const NON_ARTICLE_REASONS = [
   'NON_ARTICLE_DIRECTORY',
   'NON_ARTICLE_PRINT_COVER',
   'NON_ARTICLE_GENERIC_LISTING',
+  'NON_ARTICLE_LOGIN_PAGE',
+  'NON_ARTICLE_INVENTORY',
 ] as const;
 
 export type NonArticleReason = (typeof NON_ARTICLE_REASONS)[number];
@@ -174,6 +176,19 @@ export function classifyNonArticle(input: NonArticleInput): NonArticleVerdict {
   const joined = `/${lower.join('/')}/`;
   const last = lower.at(-1) ?? '';
   const titulo = input.titulo ?? null;
+
+  if (lower.some((s) => /^(login|signin|sign-in|iniciar-sesion|acceso|suscripcion|subscribe)$/i.test(s))) {
+    return { nonArticle: true, reason: 'NON_ARTICLE_LOGIN_PAGE' };
+  }
+  if (/inventario-de-seminuevos|vehiculo-no-encontrado|vehicle-not-found/i.test(joined)) {
+    return { nonArticle: true, reason: 'NON_ARTICLE_INVENTORY' };
+  }
+  if (/veh[ií]culo no encontrado/i.test(titulo ?? '')) {
+    return { nonArticle: true, reason: 'NON_ARTICLE_INVENTORY' };
+  }
+  if (/seminuevos autoexplora/i.test(titulo ?? '') && /inventario|seminuevos/i.test(joined)) {
+    return { nonArticle: true, reason: 'NON_ARTICLE_INVENTORY' };
+  }
 
   if (lower.some((s) => TEMPLATE_SEG.test(s)) || /tdb_templates|wp-template/i.test(joined)) {
     return { nonArticle: true, reason: 'NON_ARTICLE_TEMPLATE' };

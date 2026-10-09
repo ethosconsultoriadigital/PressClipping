@@ -21,7 +21,7 @@ import { runReconcileEngine, scheduleSourceJobs } from '../src/captureReliabilit
 import { discoverLiveSource } from '../src/captureReliability/discoverLive.js';
 import { loadGapCandidatesFromFile } from '../src/captureReliability/gapCandidates.js';
 import { recoveryWritesAllowed } from '../src/captureReliability/writesGuard.js';
-import { computeFixedCycle, DEFAULT_SHARD_COUNT } from '../src/captureReliability/cycle.js';
+import { computeFixedCycle, contiguousCatchUpWindows, DEFAULT_SHARD_COUNT } from '../src/captureReliability/cycle.js';
 import { drainRecoveryQueue } from '../src/captureReliability/recoveryDrain.js';
 import { buildCoverageRemediation } from '../src/captureReliability/coverageRemediation.js';
 import { auditQueuedSample } from '../src/captureReliability/queueAudit.js';
@@ -129,11 +129,23 @@ async function main() {
   const writes = recoveryWritesAllowed({ dryRun: dry, allowEnv });
   const mode = (arg('mode') ?? '24h') as '24h' | '72h' | 'auditor';
   const shardCount = numArg('shard-count', DEFAULT_SHARD_COUNT);
+  const catchFrom = arg('catch-up-from');
+  const catchUp = catchFrom
+    ? contiguousCatchUpWindows({
+        lastCompletedWindowEnd: catchFrom,
+        now: new Date(),
+        mode: mode === 'auditor' ? '24h' : mode,
+      })
+    : [];
+  if (catchFrom) {
+    logger.info({ CATCH_UP_WINDOWS: catchUp.length, CATCH_UP_FROM: catchFrom, windows: catchUp }, 'contiguous catch-up');
+  }
+  const firstCatch = catchUp[0];
   const cycle = computeFixedCycle({
     mode,
-    windowStart: arg('window-start'),
-    windowEnd: arg('window-end'),
-    cycleId: arg('cycle-id'),
+    windowStart: firstCatch?.window_start ?? arg('window-start'),
+    windowEnd: firstCatch?.window_end ?? arg('window-end'),
+    cycleId: firstCatch?.cycle_id ?? arg('cycle-id'),
     shardCount,
   });
   const medioIds = (arg('medio-ids') ?? '').split(',').map((s) => s.trim()).filter(Boolean);

@@ -49,3 +49,32 @@ export function computeFixedCycle(opts: {
 export function cycleIsDrained(pending: number): boolean {
   return pending === 0;
 }
+
+/** Contiguous UTC windows after the last completed cycle. Never skips a slice, even after >72h. */
+export function contiguousCatchUpWindows(opts: {
+  lastCompletedWindowEnd: string;
+  now: Date;
+  mode: CaptureCycleMode;
+}): CaptureCycle[] {
+  const hours = opts.mode === '72h' ? 72 : 24;
+  const stepMs = hours * 3600_000;
+  const lastEnd = Date.parse(opts.lastCompletedWindowEnd);
+  if (!Number.isFinite(lastEnd)) throw new Error(`invalid lastCompletedWindowEnd ${opts.lastCompletedWindowEnd}`);
+  const nowEnd = floorToUtcHour(opts.now).getTime();
+  const out: CaptureCycle[] = [];
+  let start = lastEnd;
+  while (start + stepMs <= nowEnd) {
+    const window_start = new Date(start).toISOString();
+    const window_end = new Date(start + stepMs).toISOString();
+    out.push({
+      cycle_id: `caprel-${opts.mode}-${cycleStamp(window_end)}`,
+      mode: opts.mode,
+      window_start,
+      window_end,
+      shard_count: DEFAULT_SHARD_COUNT,
+      status: 'OPEN',
+    });
+    start += stepMs;
+  }
+  return out;
+}

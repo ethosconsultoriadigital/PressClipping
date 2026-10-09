@@ -25,6 +25,25 @@ export function isNonArticleAdmission(reason: string | null | undefined): boolea
   return isNonArticleReason(reason) || reason === 'homepage' || reason === 'listing_hub' || reason === 'taxonomy_or_search';
 }
 
+export const AUTH_WALL_EXTRACT = 'AUTH_WALL_EXTRACT';
+export const SOFT_404_EXTRACT = 'SOFT_404_EXTRACT';
+
+export function extractLooksLikeAuthWall(titulo?: string | null, body?: string | null): boolean {
+  const t = (titulo ?? '').trim();
+  if (!t) return false;
+  if (/^login(\s+grupo\s+reforma)?$/i.test(t)) return true;
+  if (/^(iniciar\s+sesi[oó]n|sign\s*in|acceso\s+suscriptores)$/i.test(t)) return true;
+  const b = (body ?? '').trim();
+  return /login grupo reforma/i.test(t) && b.length < 400;
+}
+
+export function extractLooksLikeSoft404(titulo?: string | null, url?: string | null): boolean {
+  const t = (titulo ?? '').trim();
+  if (/veh[ií]culo no encontrado/i.test(t)) return true;
+  if (/seminuevos autoexplora/i.test(t) && /inventario-de-seminuevos/i.test(url ?? '')) return true;
+  return false;
+}
+
 function pathLooksLikeArticle(url: string): boolean {
   try {
     const p = new URL(url).pathname.replace(/\/+$/, '');
@@ -56,6 +75,8 @@ const OBVIOUS_REJECT = new Set([
   'NON_ARTICLE_DIRECTORY',
   'NON_ARTICLE_PRINT_COVER',
   'NON_ARTICLE_GENERIC_LISTING',
+  'NON_ARTICLE_LOGIN_PAGE',
+  'NON_ARTICLE_INVENTORY',
 ]);
 
 export function classifyPreFetch(input: AdmissionInput, discoveredVia: string): {
@@ -101,6 +122,13 @@ export function admitDiscoveredArticle(input: AdmissionInput): AdmissionResult {
     }
   } catch {
     return { admit: false, reason: 'malformed_url' };
+  }
+
+  if (extractLooksLikeSoft404(input.titulo, url)) {
+    return { admit: false, reason: 'NON_ARTICLE_INVENTORY' };
+  }
+  if (extractLooksLikeAuthWall(input.titulo, input.body)) {
+    return { admit: false, reason: AUTH_WALL_EXTRACT };
   }
 
   const body = (input.body ?? '').trim();

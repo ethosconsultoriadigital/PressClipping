@@ -52,6 +52,7 @@ export function evaluateRecoveryQuality(row: RecoveryQualityRow): RecoveryQualit
   });
   const nonArticle = !admission.admit && isNonArticleAdmission(admission.reason);
   if (nonArticle) fail.push(admission.reason);
+  if (admission.reason === 'AUTH_WALL_EXTRACT') fail.push('auth_wall_extract');
   if (isGoogleNewsUrl(url) || isGoogleNewsUrl(row.canonicalUrl)) fail.push('google_redirect');
   if (isHomepage(url)) fail.push('homepage');
   if (row.expectedMedioId && row.medioId && row.medioId !== row.expectedMedioId) {

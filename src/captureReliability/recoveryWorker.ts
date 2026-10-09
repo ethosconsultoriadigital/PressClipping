@@ -1,4 +1,4 @@
-﻿import { admitDiscoveredArticle } from './articleAdmission.js';
+﻿import { admitDiscoveredArticle, AUTH_WALL_EXTRACT, isNonArticleAdmission } from './articleAdmission.js';
 import { decideFetchError } from './reconcile.js';
 import { nextBackoffSeconds } from './retry.js';
 import type { FetchExtractResult } from '../extractors/html.js';
@@ -88,6 +88,12 @@ export async function processRecoveryRecord(opts: {
     body,
   });
   if (!admission.admit) {
+    if (admission.reason === AUTH_WALL_EXTRACT) {
+      return (await opts.store.markBlocked(rec.hash_url, admission.reason)) ?? rec;
+    }
+    if (isNonArticleAdmission(admission.reason) || admission.reason === 'SOFT_404_EXTRACT') {
+      return (await opts.store.markRejected(rec.hash_url, admission.reason)) ?? rec;
+    }
     return (await opts.store.markRejected(rec.hash_url, admission.reason)) ?? rec;
   }
   if (!rec.medio_id) {

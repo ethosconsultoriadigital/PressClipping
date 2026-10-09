@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeFixedCycle } from '../src/captureReliability/cycle.js';
+import { computeFixedCycle, contiguousCatchUpWindows } from '../src/captureReliability/cycle.js';
 import { shardCatalog } from '../src/captureReliability/catalog.js';
 import { HostConcurrencyLimiter } from '../src/captureReliability/hostLimiter.js';
 import { drainRecoveryQueue } from '../src/captureReliability/recoveryDrain.js';
@@ -256,4 +256,39 @@ describe('Capture reliability V5', () => {
     expect(out.status).toBe('QUEUED');
     expect(out.last_dry_run_result).toBe('WOULD_PERSIST');
   });
+
+  it('catch-up after >72h emits every contiguous 24h window and skips none', () => {
+    const windows = contiguousCatchUpWindows({
+      lastCompletedWindowEnd: '2026-10-01T18:00:00.000Z',
+      now: new Date('2026-10-05T18:05:00.000Z'),
+      mode: '24h',
+    });
+    expect(windows.map((w) => `${w.window_start}/${w.window_end}`)).toEqual([
+      '2026-10-01T18:00:00.000Z/2026-10-02T18:00:00.000Z',
+      '2026-10-02T18:00:00.000Z/2026-10-03T18:00:00.000Z',
+      '2026-10-03T18:00:00.000Z/2026-10-04T18:00:00.000Z',
+      '2026-10-04T18:00:00.000Z/2026-10-05T18:00:00.000Z',
+    ]);
+    expect(windows).toHaveLength(4);
+  });
+
+  it('login extract on a real article URL is BLOCKED not REJECTED_NON_ARTICLE', async () => {
+    const url = 'https://www.reforma.com/camacho-camacho-2026-10-07/ca322114';
+    const store = new MemoryCaptureReliabilityStore();
+    const rec0 = rec(url);
+    await store.upsertDiscovered(rec0);
+    const out = await processRecoveryRecord({
+      record: rec0,
+      store,
+      fetchExtract: async () => okExtract({ titulo: 'Login Grupo Reforma', texto_cuerpo_nota: '', texto_nota_limpia: '', texto_extraido: '' }),
+      writesAllowed: true,
+      persistNews: async () => {
+        throw new Error('must not persist login extract');
+      },
+      nowIso: NOW,
+    });
+    expect(out.status).toBe('BLOCKED');
+    expect(out.last_error).toBe('AUTH_WALL_EXTRACT');
+  });
 });
+
