@@ -181,6 +181,7 @@ export interface DiscoverOpts {
   onlySurfaces?: string[];
   probeListing?: boolean;
   sitemapPageSize?: number;
+  fetchTextFn?: (url: string) => Promise<string>;
 }
 
 /** Vista de corrida para reportes. El estado durable vive en SourceReconcileState. */

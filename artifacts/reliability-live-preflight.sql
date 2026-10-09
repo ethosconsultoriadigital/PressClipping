@@ -454,7 +454,7 @@ begin
     raise notice 'PREFLIGHT missing b_google_radar_cursor (apply 0020)';
   end if;
   if to_regprocedure('public.claim_capture_source_incomplete_batch(text, timestamp with time zone, timestamp with time zone, text[], integer, timestamp with time zone, timestamp with time zone)') is null then
-    raise notice 'PREFLIGHT missing claim_capture_source_incomplete_batch (apply 0021)';
+    raise notice 'PREFLIGHT missing claim_capture_source_incomplete_batch (apply 0022). Use artifacts/reliability-live-coverage-debt-claim-preflight.sql';
   end if;
 end $$;
 

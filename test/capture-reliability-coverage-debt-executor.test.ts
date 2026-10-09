@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { MemoryCaptureReliabilityStore } from '../src/captureReliability/captureRecoveryRepository.js';
 import { emptySourceState, markSourceTerminal } from '../src/captureReliability/checkpoint.js';
@@ -10,7 +12,9 @@ import {
   reportCoverageDebtBacklog,
 } from '../src/captureReliability/coverageDebt.js';
 import { executeCoverageDebtFollowUp } from '../src/captureReliability/coverageDebtExecutor.js';
+import { discoverLiveSource } from '../src/captureReliability/discoverLive.js';
 import { encodeSitemapAfterCursor, encodeSitemapPageCursor, sliceSitemapFromCursor } from '../src/captureReliability/sitemapCursor.js';
+import { paginateSitemap } from '../src/captureReliability/sitemapPager.js';
 import { extractListingHrefs } from '../src/captureReliability/surfaceProbe.js';
 import { drainRecoveryQueue, assertCanaryWriteBudget } from '../src/captureReliability/recoveryDrain.js';
 import { baseRecoveryRecord } from '../src/captureReliability/reconcile.js';
@@ -71,6 +75,7 @@ function discoveryFor(urls: DiscoveredUrl[], over: Partial<SourceDiscovery> = {}
     probedSurface: over.probedSurface ?? null,
     probeEvaluated: over.probeEvaluated ?? false,
     resumedFromCursor: over.resumedFromCursor ?? null,
+    surfaceResult: over.surfaceResult,
     ...over,
   };
 }
@@ -190,7 +195,12 @@ describe('coverage debt executor + observability', () => {
         const sliced = sliceSitemapFromCursor(items, opts?.resumeCursor, 2);
         return discoveryFor(
           sliced.items.map((it) => disc(it.url)),
-          { cursor: sliced.nextCursor, pageExhausted: sliced.pageExhausted, resumedFromCursor: sliced.resumedFrom },
+          {
+            cursor: sliced.nextCursor,
+            pageExhausted: sliced.pageExhausted,
+            resumedFromCursor: sliced.resumedFrom,
+            surfaceResult: sliced.pageExhausted ? 'EXHAUSTED' : 'PARTIAL',
+          },
         );
       },
     });
@@ -225,6 +235,7 @@ describe('coverage debt executor + observability', () => {
         return discoveryFor([disc('https://example.com/from-sitemap', 'sitemap')], {
           surfaces: ['sitemap'],
           pageExhausted: true,
+          surfaceResult: 'SUCCESS',
         });
       },
     });
@@ -260,13 +271,20 @@ describe('coverage debt executor + observability', () => {
         const hrefs = extractListingHrefs(html, 'https://vozenred.com');
         return discoveryFor(
           hrefs.map((u) => disc(u, 'surface_probe:home')),
-          { surfaces: ['listing'], probedSurface: 'home', probeEvaluated: true },
+          {
+            surfaces: ['home'],
+            probedSurface: 'home',
+            probeEvaluated: true,
+            surfaceResult: 'SUCCESS',
+            nextFollowUp: 'SECOND_SURFACE',
+          },
         );
       },
     });
     expect(exec.surface_found).toBe('home');
-    expect(exec.resolved).toBe(true);
-    expect(await getCoverageDebt(store, 'MED-NONE', WS, WE)).toMatchObject({ lifecycle: 'RESOLVED' });
+    expect(exec.resolved).toBe(false);
+    expect(exec.next_follow_up).toBe('SECOND_SURFACE');
+    expect((await getCoverageDebt(store, 'MED-NONE', WS, WE))?.lifecycle).toBe('OPEN_AUTOMATIC');
   });
 
   it('three failed follow-ups escalate to ESCALATED_MANUAL and never stay silent automatic', async () => {
@@ -312,8 +330,8 @@ describe('coverage debt executor + observability', () => {
       nowIso: NOW,
       runId: 'dup-1',
       queryLakeHashes: async () => [],
-      discover: async () =>
-        discoveryFor([disc(url), disc(url)], { pageExhausted: true, cursor: null }),
+        discover: async () =>
+          discoveryFor([disc(url), disc(url)], { pageExhausted: true, cursor: null, surfaceResult: 'EXHAUSTED' }),
     });
     expect(once.resolved).toBe(true);
     expect((await store.snapshot()).filter((r) => r.hash_url === primaryHash(url))).toHaveLength(1);
@@ -325,7 +343,7 @@ describe('coverage debt executor + observability', () => {
       nowIso: NOW,
       runId: 'dup-2',
       queryLakeHashes: async () => [],
-      discover: async () => discoveryFor([disc(url)], { pageExhausted: true, cursor: null }),
+      discover: async () => discoveryFor([disc(url)], { pageExhausted: true, cursor: null, surfaceResult: 'EXHAUSTED' }),
     });
     expect((await store.snapshot()).filter((r) => r.hash_url === primaryHash(url))).toHaveLength(1);
     expect(again.duplicate_urls).toBeGreaterThanOrEqual(0);
@@ -375,6 +393,7 @@ describe('coverage debt executor + observability', () => {
           pageExhausted: true,
           cursor: null,
           resumedFromCursor: encodeSitemapPageCursor(2),
+          surfaceResult: 'EXHAUSTED',
         });
       },
     });
@@ -496,12 +515,14 @@ describe('coverage debt executor + observability', () => {
     expect(() => assertCanaryWriteBudget(new Set([queued.hash_url]), 2)).toThrow(/CANARY_WRITE_OVERFLOW/);
   });
 
-  it('0021 SQL is additive, skip-locked, and service_role only', async () => {
+  it('0022 SQL is additive, skip-locked, fail-closed and service_role only', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
-    const sql = readFileSync(resolve(import.meta.dirname, '../supabase/migrations/0021_coverage_debt_claim.sql'), 'utf8');
+    const sql = readFileSync(resolve(import.meta.dirname, '../supabase/migrations/0022_coverage_debt_claim.sql'), 'utf8');
     expect(sql).toContain('claim_capture_source_incomplete_batch');
     expect(sql.toLowerCase()).toContain('for update skip locked');
+    expect(sql).toContain('p_medio_ids is null or coalesce(cardinality(p_medio_ids), 0) = 0');
+    expect(sql).toContain('set search_path = pg_catalog, public');
     expect(sql).toContain('grant execute');
     expect(sql).toContain('service_role');
     expect(sql).toContain('revoke all');
@@ -533,4 +554,216 @@ describe('coverage debt executor + observability', () => {
     expect(third?.automatic).toBe(false);
     expect(isSilentExhaustedDebt(third)).toBe(false);
   });
+
+  it('preflight begins BEGIN, contains 0022 DDL, ends ROLLBACK and raises on mismatch', () => {
+    const pre = readFileSync(resolve(import.meta.dirname, '../artifacts/reliability-live-coverage-debt-claim-preflight.sql'), 'utf8');
+    const ddl = readFileSync(resolve(import.meta.dirname, '../supabase/migrations/0022_coverage_debt_claim.sql'), 'utf8');
+    const lines = pre.replace(/\r\n/g, '\n').trimEnd().split('\n');
+    expect(lines[0]).toBe('BEGIN;');
+    expect(lines[lines.length - 1]).toBe('ROLLBACK;');
+    expect(pre).toContain('create or replace function public.claim_capture_source_incomplete_batch');
+    expect(pre).toContain('set search_path = pg_catalog, public');
+    expect(pre).toContain('p_medio_ids is null or coalesce(cardinality(p_medio_ids), 0) = 0');
+    expect(pre).toContain('raise exception \'missing claim_capture_source_incomplete_batch exact signature\'');
+    expect(pre).toContain('raise exception \'service_role must EXECUTE');
+    expect(pre).toContain('raise exception \'PUBLIC must not EXECUTE');
+    expect(pre).toContain('raise exception \'anon must not EXECUTE');
+    expect(pre).toContain('raise exception \'authenticated must not EXECUTE');
+    expect(pre).toContain('raise exception \'function must contain FOR UPDATE SKIP LOCKED\'');
+    expect(pre).toContain('raise exception \'function search_path must be pg_catalog, public\'');
+    expect(ddl).toContain('for update skip locked');
+  });
+
+  it('empty medio ids claim nothing', async () => {
+    const store = new MemoryCaptureReliabilityStore();
+    await seedDebt(store, 'MED-PAGE', { cap_hit: true });
+    const claimed = await store.claimSourceBatch({
+      workerId: 'w-empty',
+      windowStart: WS,
+      windowEnd: WE,
+      medioIds: [],
+      limit: 8,
+      nowIso: NOW,
+      staleBeforeIso: '2026-10-05T17:00:00.000Z',
+      resumeIncomplete: true,
+    });
+    expect(claimed).toEqual([]);
+    expect((await store.getSourceState('MED-PAGE', WS, WE))?.status).toBe('INCOMPLETE');
+  });
+
+  it('sitemap HTTP failure keeps debt open and never marks EXHAUSTED', async () => {
+    const store = new MemoryCaptureReliabilityStore();
+    const { st, debt } = await seedDebt(store, 'MED-PAGE', { cap_hit: true, cursor: 'page:2' });
+    const exec = await executeCoverageDebtFollowUp({
+      store,
+      catalog: catalog(),
+      state: st,
+      debt: { ...debt, follow_up: 'PAGINATE_FROM_CURSOR' },
+      nowIso: NOW,
+      runId: 'http-fail',
+      queryLakeHashes: async () => [],
+      discover: async () =>
+        discoveryFor([], {
+          surfaces: ['sitemap'],
+          pageExhausted: false,
+          surfaceResult: 'FAILED',
+        }),
+    });
+    expect(exec.resolved).toBe(false);
+    expect(exec.result).toBe('SITEMAP_FETCH_FAILED');
+    expect((await getCoverageDebt(store, 'MED-PAGE', WS, WE))?.lifecycle).toBe('OPEN_AUTOMATIC');
+    const failed = await discoverLiveSource(catalog(), { start: WS, end: WE }, {
+      resumeCursor: null,
+      onlySurfaces: ['sitemap'],
+      fetchTextFn: async () => {
+        throw new Error('HTTP 500');
+      },
+    });
+    expect(failed.pageExhausted).toBe(false);
+    expect(failed.surfaceResult).toBe('FAILED');
+  });
+
+  it('root sitemap of 2001 URLs continues after URL 1600', async () => {
+    const items = Array.from({ length: 2001 }, (_, i) => ({
+      url: `https://example.com/n-${String(i + 1).padStart(4, '0')}`,
+    }));
+    const xml = `<?xml version="1.0"?><urlset>${items.map((it) => `<url><loc>${it.url}</loc></url>`).join('')}</urlset>`;
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let lastExhausted = false;
+    for (let page = 1; page <= 6; page += 1) {
+      const next = await paginateSitemap({
+        rootUrl: 'https://example.com/sitemap.xml',
+        fetcher: async () => xml,
+        cursor,
+        pageSize: 400,
+      });
+      seen.push(...next.items.map((i) => i.url));
+      cursor = next.nextCursor;
+      lastExhausted = next.exhausted;
+    }
+    expect(seen).toContain('https://example.com/n-1601');
+    expect(seen).toContain('https://example.com/n-2001');
+    expect(lastExhausted).toBe(true);
+    expect(new Set(seen).size).toBe(2001);
+  });
+
+  it('sitemap index of 16 subs continues after the 15th', async () => {
+    const index = `<?xml version="1.0"?><sitemapindex>${Array.from({ length: 16 }, (_, i) => `<sitemap><loc>https://example.com/sub-${i + 1}.xml</loc></sitemap>`).join('')}</sitemapindex>`;
+    const fetcher = async (url: string) => {
+      if (url.endsWith('sitemap.xml')) return index;
+      const n = url.match(/sub-(\d+)/)?.[1];
+      return `<?xml version="1.0"?><urlset><url><loc>https://example.com/from-sub-${n}</loc></url></urlset>`;
+    };
+    const first = await paginateSitemap({
+      rootUrl: 'https://example.com/sitemap.xml',
+      fetcher,
+      maxSubsPerRun: 15,
+      pageSize: 400,
+    });
+    expect(first.pendingSubs).toBe(1);
+    expect(first.exhausted).toBe(false);
+    expect(first.items.some((i) => i.url === 'https://example.com/from-sub-16')).toBe(false);
+    const second = await paginateSitemap({
+      rootUrl: 'https://example.com/sitemap.xml',
+      fetcher,
+      cursor: first.nextCursor,
+      maxSubsPerRun: 15,
+      pageSize: 400,
+    });
+    expect(second.items.map((i) => i.url)).toContain('https://example.com/from-sub-16');
+    expect(second.exhausted).toBe(true);
+  });
+
+  it('unknown or missing cursor fails closed without silent page-1 replay', async () => {
+    const items = [
+      { url: 'https://example.com/a' },
+      { url: 'https://example.com/b' },
+    ];
+    const missing = sliceSitemapFromCursor(items, 'after:https://example.com/missing', 2);
+    expect(missing.cursorNotFound).toBe(true);
+    expect(missing.items).toEqual([]);
+    expect(missing.pageExhausted).toBe(false);
+    const page = await paginateSitemap({
+      rootUrl: 'https://example.com/sitemap.xml',
+      fetcher: async () => '<?xml version="1.0"?><urlset><url><loc>https://example.com/a</loc></url></urlset>',
+      cursor: 'not-a-real-cursor',
+    });
+    expect(page.cursorNotFound).toBe(true);
+    expect(page.exhausted).toBe(false);
+    expect(page.surfaceResult).toBe('FAILED');
+    expect(page.items).toEqual([]);
+  });
+
+  it('nominal listing without fetch does not resolve; fetched listing produces URLs', async () => {
+    const store = new MemoryCaptureReliabilityStore();
+    const { st, debt } = await seedDebt(store, 'MED-RSS', { discovery_surfaces: ['rss'] });
+    const unlabeled = await executeCoverageDebtFollowUp({
+      store,
+      catalog: catalog({
+        medio_id: 'MED-RSS',
+        rss_url: 'https://example.com/rss',
+        sitemap_url: null,
+        secciones_urls: 'https://example.com/seccion',
+      }),
+      state: st,
+      debt: { ...debt, follow_up: 'SECOND_SURFACE', reason: 'RSS_ONLY' },
+      nowIso: NOW,
+      runId: 'listing-label',
+      queryLakeHashes: async () => [],
+      discover: async () => discoveryFor([], { surfaces: ['listing'], surfaceResult: 'UNAVAILABLE' }),
+    });
+    expect(unlabeled.resolved).toBe(false);
+    const html = '<html><a href="/nota-real-1">n</a></html>';
+    const live = await discoverLiveSource(
+      catalog({
+        medio_id: 'MED-RSS',
+        rss_url: 'https://example.com/rss',
+        sitemap_url: null,
+        url_base: 'https://example.com',
+        secciones_urls: 'https://example.com/seccion',
+      }),
+      { start: WS, end: WE },
+      {
+        onlySurfaces: ['listing'],
+        fetchTextFn: async () => html,
+      },
+    );
+    expect(live.surfaces).toContain('listing');
+    expect(live.urls.some((u) => u.url.includes('nota-real-1'))).toBe(true);
+    expect(live.surfaceResult).toBe('SUCCESS');
+  });
+
+  it('failed second surface and failed probes stay open', async () => {
+    const store = new MemoryCaptureReliabilityStore();
+    const rss = await seedDebt(store, 'MED-RSS2', { discovery_surfaces: ['rss'] });
+    const failedSecond = await executeCoverageDebtFollowUp({
+      store,
+      catalog: catalog({ medio_id: 'MED-RSS2', rss_url: 'https://example.com/rss', sitemap_url: 'https://example.com/sitemap.xml' }),
+      state: rss.st,
+      debt: { ...rss.debt, follow_up: 'SECOND_SURFACE', reason: 'RSS_ONLY' },
+      nowIso: NOW,
+      runId: '2nd-fail',
+      queryLakeHashes: async () => [],
+      discover: async () => discoveryFor([], { surfaces: ['sitemap'], surfaceResult: 'FAILED', pageExhausted: false }),
+    });
+    expect(failedSecond.resolved).toBe(false);
+    expect(failedSecond.result).toBe('SECOND_SURFACE_FAILED');
+    const probe = await seedDebt(store, 'MED-PRB', { discovery_surfaces: ['NO_DISCOVERY_SURFACE'], last_error: 'NO_DISCOVERY_SURFACE' });
+    const failedProbe = await executeCoverageDebtFollowUp({
+      store,
+      catalog: catalog({ medio_id: 'MED-PRB', rss_url: null, sitemap_url: null }),
+      state: probe.st,
+      debt: { ...probe.debt, follow_up: 'SURFACE_PROBE' },
+      nowIso: NOW,
+      runId: 'probe-fail',
+      queryLakeHashes: async () => [],
+      discover: async () =>
+        discoveryFor([], { surfaces: ['NO_DISCOVERY_SURFACE'], probeEvaluated: false, surfaceResult: 'FAILED' }),
+    });
+    expect(failedProbe.resolved).toBe(false);
+    expect(failedProbe.result).toBe('SURFACE_PROBE_FAILED');
+    expect((await getCoverageDebt(store, 'MED-PRB', WS, WE))?.lifecycle).toBe('OPEN_AUTOMATIC');
+  });
 });
+

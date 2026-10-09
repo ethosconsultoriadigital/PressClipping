@@ -4,8 +4,11 @@ import {
   incrementCoverageDebtAttempt,
   markCoverageDebtInProgress,
   type CoverageDebtRecord,
+  type CoverageFollowUp,
 } from './coverageDebt.js';
 import { nextUnusedSurface } from './sitemapCursor.js';
+import { canResolveFromSurface, followUpForProbedSurface } from './surfaceResult.js';
+import type { SurfaceAttemptResult } from './surfaceResult.js';
 import type { CaptureReliabilityStore } from './captureRecoveryRepository.js';
 import type { ChannelCatalogRow, DiscoverOpts, DiscoveredUrl, SourceReconcileState } from './types.js';
 import type { SourceDiscovery } from './engine.js';
@@ -31,9 +34,11 @@ export interface CoverageDebtExecution {
   duplicate_urls: number;
   surface_used: string[];
   surface_found: string | null;
+  surface_result: SurfaceAttemptResult | null;
   progressed: boolean;
   resolved: boolean;
   noop_rediscovery: boolean;
+  next_follow_up: CoverageFollowUp;
 }
 
 function sameSurfaces(prev: string[], next: string[]): boolean {
@@ -134,19 +139,18 @@ export async function executeCoverageDebtFollowUp(opts: {
     });
   }
 
-  const nextCursor = discovery.pageExhausted ? null : (discovery.cursor ?? state.cursor);
+  const surfaceResult = discovery.surfaceResult ?? null;
+  const nextCursor = discovery.pageExhausted && surfaceResult === 'EXHAUSTED'
+    ? null
+    : (discovery.cursor ?? state.cursor);
   const surfaceFound = discovery.probedSurface ?? (discovery.surfaces.find((s) => s !== 'NO_DISCOVERY_SURFACE') ?? null);
   const cursorMoved = Boolean(nextCursor && nextCursor !== prevCursor);
-  const pageExhausted = discovery.pageExhausted === true;
-  const secondSurfaceUsed =
-    opts.debt.follow_up === 'SECOND_SURFACE' &&
-    discovery.surfaces.some((s) => s !== 'rss' && s !== 'NO_DISCOVERY_SURFACE');
-  const probeEvaluated = opts.debt.follow_up === 'SURFACE_PROBE' && discovery.probeEvaluated === true;
-  const resumeEvaluated =
-    opts.debt.follow_up === 'RESUME_SAME_WINDOW' &&
-    newUrls > 0 &&
-    !discovery.capHit &&
-    !discovery.noDiscoverySurface;
+  const pageExhausted = discovery.pageExhausted === true && surfaceResult === 'EXHAUSTED';
+  const pendingWork = Boolean(discovery.pendingSubs || discovery.truncated || (discovery.subsFallidos ?? 0) > 0);
+  const coverageEvaluated =
+    discovery.rssSpanCovered === 'YES' ||
+    discovery.sitemapSpanCovered === 'YES' ||
+    (pageExhausted && !pendingWork);
   const noop =
     !cursorMoved &&
     newUrls === 0 &&
@@ -157,24 +161,51 @@ export async function executeCoverageDebtFollowUp(opts: {
   let progressed = false;
   let evaluated = false;
   let result = 'NO_PROGRESS';
+  let nextFollowUp: CoverageFollowUp = opts.debt.follow_up;
   if (opts.debt.follow_up === 'PAGINATE_FROM_CURSOR') {
     progressed = cursorMoved || pageExhausted || newUrls > 0;
-    evaluated = pageExhausted || (progressed && !discovery.capHit);
-    result = pageExhausted ? 'PAGINATION_EXHAUSTED' : progressed ? 'PAGINATED' : 'PAGINATION_NO_PROGRESS';
+    evaluated = pageExhausted && !pendingWork && !discovery.cursorNotFound && surfaceResult === 'EXHAUSTED';
+    result = discovery.cursorNotFound
+      ? 'CURSOR_NOT_FOUND'
+      : surfaceResult === 'FAILED'
+        ? 'SITEMAP_FETCH_FAILED'
+        : evaluated
+          ? 'PAGINATION_EXHAUSTED'
+          : surfaceResult === 'PARTIAL'
+            ? 'PAGINATION_PARTIAL'
+            : 'PAGINATION_NO_PROGRESS';
   } else if (opts.debt.follow_up === 'SECOND_SURFACE') {
-    progressed = secondSurfaceUsed;
-    evaluated = secondSurfaceUsed || discoverOpts.onlySurfaces?.length === 0;
-    result = secondSurfaceUsed ? 'SECOND_SURFACE_EVALUATED' : 'SECOND_SURFACE_UNAVAILABLE';
+    const fetched = canResolveFromSurface(surfaceResult);
+    progressed = fetched;
+    evaluated = fetched && !pendingWork && surfaceResult === 'SUCCESS';
+    result = surfaceResult === 'FAILED'
+      ? 'SECOND_SURFACE_FAILED'
+      : surfaceResult === 'UNAVAILABLE' || discoverOpts.onlySurfaces?.length === 0
+        ? 'SECOND_SURFACE_UNAVAILABLE'
+        : evaluated
+          ? 'SECOND_SURFACE_EVALUATED'
+          : 'SECOND_SURFACE_PARTIAL';
   } else if (opts.debt.follow_up === 'SURFACE_PROBE') {
-    progressed = Boolean(surfaceFound) || newUrls > 0;
-    evaluated = probeEvaluated;
-    result = surfaceFound ? `SURFACE_FOUND:${surfaceFound}` : 'SURFACE_PROBE_EMPTY';
+    progressed = Boolean(discovery.probeEvaluated && surfaceFound);
+    evaluated = false;
+    if (!discovery.probeEvaluated || surfaceResult === 'FAILED') {
+      result = 'SURFACE_PROBE_FAILED';
+    } else {
+      nextFollowUp = discovery.nextFollowUp ?? followUpForProbedSurface(surfaceFound);
+      result = `SURFACE_FOUND:${surfaceFound}:CHAIN:${nextFollowUp}`;
+    }
   } else {
-    progressed = newUrls > 0 || resumeEvaluated;
-    evaluated = resumeEvaluated && !noop;
+    progressed = newUrls > 0;
+    evaluated =
+      !noop &&
+      canResolveFromSurface(surfaceResult) &&
+      !discovery.capHit &&
+      !pendingWork &&
+      coverageEvaluated &&
+      !discovery.noDiscoverySurface;
     result = evaluated ? 'WINDOW_RESUMED' : 'RESUME_NO_PROGRESS';
   }
-  if (noop) {
+  if (noop && opts.debt.follow_up === 'RESUME_SAME_WINDOW') {
     evaluated = false;
     result = 'NOOP_REDISCOVERY';
   }
@@ -193,12 +224,19 @@ export async function executeCoverageDebtFollowUp(opts: {
   };
 
   const incremented = await incrementCoverageDebtAttempt(opts.store, state, opts.nowIso);
-  const lifecycle = evaluated && !noop
+  const lifecycle = evaluated
     ? 'RESOLVED'
     : incremented && incremented.attempt_count >= 3
       ? 'ESCALATED_MANUAL'
       : 'OPEN_AUTOMATIC';
-  await finalizeCoverageDebt(opts.store, { ...state, status: evaluated ? 'COMPLETE' : 'INCOMPLETE' }, opts.nowIso, lifecycle, result);
+  await finalizeCoverageDebt(
+    opts.store,
+    { ...state, status: evaluated ? 'COMPLETE' : 'INCOMPLETE' },
+    opts.nowIso,
+    lifecycle,
+    result,
+    { follow_up: nextFollowUp },
+  );
 
   if (evaluated && !noop) {
     await opts.store.upsertSourceState(markSourceTerminal({ ...state, last_error: null }, 'COMPLETE', opts.nowIso));
@@ -221,9 +259,11 @@ export async function executeCoverageDebtFollowUp(opts: {
     duplicate_urls: duplicateUrls,
     surface_used: discovery.surfaces,
     surface_found: surfaceFound,
+    surface_result: surfaceResult,
     progressed,
     resolved: lifecycle === 'RESOLVED',
     noop_rediscovery: noop,
+    next_follow_up: nextFollowUp,
   };
 }
 

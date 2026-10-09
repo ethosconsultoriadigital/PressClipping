@@ -42,12 +42,35 @@ export function sliceSitemapFromCursor<T extends { url: string }>(
   startedPage: number;
   nextCursor: string | null;
   pageExhausted: boolean;
+  cursorNotFound: boolean;
 } {
+  if (cursor && !/^(page:|offset:|after:|sm2\|)/.test(cursor)) {
+    return {
+      items: [],
+      skipped: 0,
+      resumedFrom: cursor,
+      startedPage: 1,
+      nextCursor: null,
+      pageExhausted: false,
+      cursorNotFound: true,
+    };
+  }
   const parsed = parseSitemapCursor(cursor, pageSize);
   let start = parsed.offset;
   if (parsed.kind === 'after' && parsed.afterUrl) {
     const idx = items.findIndex((it) => it.url === parsed.afterUrl);
-    start = idx >= 0 ? idx + 1 : 0;
+    if (idx < 0) {
+      return {
+        items: [],
+        skipped: 0,
+        resumedFrom: cursor ?? null,
+        startedPage: parsed.page,
+        nextCursor: null,
+        pageExhausted: false,
+        cursorNotFound: true,
+      };
+    }
+    start = idx + 1;
   }
   const rest = items.slice(start);
   const page = rest.slice(0, pageSize);
@@ -66,6 +89,7 @@ export function sliceSitemapFromCursor<T extends { url: string }>(
     startedPage: parsed.page,
     nextCursor,
     pageExhausted,
+    cursorNotFound: false,
   };
 }
 

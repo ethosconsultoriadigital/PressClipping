@@ -350,6 +350,7 @@ export class MemoryCaptureReliabilityStore implements CaptureReliabilityStore {
     staleBeforeIso: string;
     resumeIncomplete?: boolean;
   }): Promise<SourceReconcileState[]> {
+    if (!opts.medioIds.length) return [];
     const staleCut = Date.parse(opts.staleBeforeIso);
     const out: SourceReconcileState[] = [];
     for (const medioId of opts.medioIds) {

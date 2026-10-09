@@ -287,6 +287,7 @@ export async function finalizeCoverageDebt(
   nowIso: string,
   outcome: CoverageDebtLifecycle | 'OPEN_AUTOMATIC',
   result: string,
+  patch?: Partial<Pick<CoverageDebtRecord, 'follow_up' | 'next_action'>>,
 ): Promise<CoverageDebtRecord | null> {
   const prev = await getCoverageDebt(store, state.medio_id, state.window_start, state.window_end);
   if (!prev) return null;
@@ -296,6 +297,7 @@ export async function finalizeCoverageDebt(
   }
   return persistCoverageDebt(store, {
     ...prev,
+    ...patch,
     lifecycle,
     status: lifecycle,
     automatic: lifecycle === 'ESCALATED_MANUAL' || lifecycle === 'RESOLVED' ? false : prev.automatic,

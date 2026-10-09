@@ -1,6 +1,6 @@
 ﻿-- ETHOS reliability integration RC1 combined package
--- APPLY ORDER: 0016, 0017, 0018, 0019, 0020, 0021
--- Then run 0019b notices (read-only) and 0021b transactional preflight.
+-- APPLY ORDER: 0016, 0017, 0018, 0019, 0020, 0021 security, 0022 coverage debt
+-- Then run 0019b notices (read-only) and artifacts/reliability-live-coverage-debt-claim-preflight.sql.
 -- Transactional preflight: wrap in BEGIN; ... ROLLBACK; before persistent apply.
 
 
@@ -453,14 +453,14 @@ begin
     raise notice 'PREFLIGHT missing b_google_radar_cursor (apply 0020)';
   end if;
   if to_regprocedure('public.claim_capture_source_incomplete_batch(text, timestamp with time zone, timestamp with time zone, text[], integer, timestamp with time zone, timestamp with time zone)') is null then
-    raise notice 'PREFLIGHT missing claim_capture_source_incomplete_batch (apply 0021)';
+    raise notice 'PREFLIGHT missing claim_capture_source_incomplete_batch (apply 0022)';
   end if;
 end $$;
 
 
 -- ============================================================
--- FILE: supabase/migrations/0021_coverage_debt_claim.sql
--- DO NOT APPLY LIVE in the executor task. Transactional preflight first.
+-- FILE: supabase/migrations/0022_coverage_debt_claim.sql
+-- DO NOT APPLY LIVE. Use artifacts/reliability-live-coverage-debt-claim-preflight.sql first.
 -- ============================================================
 create or replace function public.claim_capture_source_incomplete_batch(
   p_worker_id text,
@@ -473,16 +473,19 @@ create or replace function public.claim_capture_source_incomplete_batch(
 ) returns setof public.capture_source_reconcile_state
 language plpgsql
 security definer
-set search_path = public
+set search_path = pg_catalog, public
 as $$
 begin
   if p_limit is null or p_limit <= 0 then
     return;
   end if;
+  if p_medio_ids is null or coalesce(cardinality(p_medio_ids), 0) = 0 then
+    return;
+  end if;
   return query
   with picked as (
     select s.medio_id, s.window_start, s.window_end
-    from public.capture_source_reconcile_state s
+    from public.capture_source_reconcile_state as s
     where s.window_start = p_window_start
       and s.window_end = p_window_end
       and (
@@ -494,12 +497,12 @@ begin
           and s.started_at < p_stale_before
         )
       )
-      and (p_medio_ids is null or s.medio_id = any(p_medio_ids))
+      and s.medio_id = any(p_medio_ids)
     order by s.medio_id
     for update skip locked
     limit p_limit
   )
-  update public.capture_source_reconcile_state s
+  update public.capture_source_reconcile_state as s
   set status = 'IN_PROGRESS',
       worker_id = p_worker_id,
       started_at = p_now,

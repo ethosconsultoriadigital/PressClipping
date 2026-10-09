@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -8,7 +8,25 @@ function sql(name: string): string {
   return readFileSync(resolve(root, 'supabase/migrations', name), 'utf8');
 }
 
+export function migrationVersionKey(name: string): string | null {
+  const m = name.match(/^(\d+[a-z]?)/i);
+  return m?.[1] ?? null;
+}
+
 describe('Capture reliability migrations package', () => {
+  it('rejects duplicate numeric migration prefixes', () => {
+    const names = readdirSync(resolve(root, 'supabase/migrations')).filter((n) => n.endsWith('.sql'));
+    const seen = new Map<string, string>();
+    for (const name of names) {
+      const key = migrationVersionKey(name);
+      if (!key) continue;
+      expect(seen.has(key), `duplicate prefix ${key}: ${seen.get(key)} and ${name}`).toBe(false);
+      seen.set(key, name);
+    }
+    expect(seen.get('0021')).toBe('0021_source_registry_security_hardening.sql');
+    expect(seen.get('0022')).toBe('0022_coverage_debt_claim.sql');
+  });
+
   it('T65 0016-0019 exist and 0018/0019 grant service_role', () => {
     const a = sql('0016_capture_recovery_queue.sql');
     const b = sql('0017_capture_reconcile_state.sql');
@@ -28,12 +46,15 @@ describe('Capture reliability migrations package', () => {
     expect(sql('0019b_capture_reliability_preflight.sql')).toContain('claim_capture_gap_batch');
     expect(sql('0020_reliability_integration_rc1.sql')).toContain('b_google_radar_cursor');
     expect(sql('0020_reliability_integration_rc1.sql')).toContain('grant select, insert, update, delete on table public.b_google_radar_cursor to service_role');
-    expect(sql('0021_coverage_debt_claim.sql')).toContain('claim_capture_source_incomplete_batch');
-    expect(sql('0021_coverage_debt_claim.sql').toLowerCase()).toContain('for update skip locked');
-    expect(sql('0021_coverage_debt_claim.sql')).toContain('revoke all on function public.claim_capture_source_incomplete_batch');
-    expect(sql('0021_coverage_debt_claim.sql')).toContain('grant execute on function public.claim_capture_source_incomplete_batch');
-    expect(sql('0021_coverage_debt_claim.sql')).toContain('to service_role');
-    expect(sql('0021b_coverage_debt_claim_preflight.sql')).toContain('claim_capture_source_incomplete_batch');
+    expect(sql('0021_source_registry_security_hardening.sql')).toContain('Source Registry security hardening');
+    expect(sql('0022_coverage_debt_claim.sql')).toContain('claim_capture_source_incomplete_batch');
+    expect(sql('0022_coverage_debt_claim.sql').toLowerCase()).toContain('for update skip locked');
+    expect(sql('0022_coverage_debt_claim.sql')).toContain('p_medio_ids is null or coalesce(cardinality(p_medio_ids), 0) = 0');
+    expect(sql('0022_coverage_debt_claim.sql')).toContain('set search_path = pg_catalog, public');
+    expect(sql('0022_coverage_debt_claim.sql')).toContain('revoke all on function public.claim_capture_source_incomplete_batch');
+    expect(sql('0022_coverage_debt_claim.sql')).toContain('grant execute on function public.claim_capture_source_incomplete_batch');
+    expect(sql('0022_coverage_debt_claim.sql')).toContain('to service_role');
+    expect(sql('0022b_coverage_debt_claim_preflight.sql')).toContain('claim_capture_source_incomplete_batch');
     expect(sql('0020_reliability_integration_rc1.sql')).toContain('cursor_offset integer not null');
     const cursorTable = sql('0020_reliability_integration_rc1.sql').match(
       /create table if not exists public\.b_google_radar_cursor\s*\(([\s\S]*?)\);/,

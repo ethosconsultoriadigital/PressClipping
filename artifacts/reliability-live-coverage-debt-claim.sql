@@ -1,8 +1,6 @@
--- LIVE artifact for 0021 coverage-debt atomic claim. DO NOT APPLY in this task.
--- Apply order after 0020. Wrap first apply in BEGIN; ... ROLLBACK; using 0021b preflight.
-
--- Additive RC1. Atomic INCOMPLETE / stale IN_PROGRESS reclaim for coverage debt.
--- Does not replace claim_capture_source_batch (PENDING). No noticias/medios writes.
+-- LIVE artifact for 0022 coverage-debt atomic claim. DO NOT APPLY in this task.
+-- Persistent apply is this file. Transactional rehearsal:
+-- artifacts/reliability-live-coverage-debt-claim-preflight.sql
 
 create or replace function public.claim_capture_source_incomplete_batch(
   p_worker_id text,
@@ -15,16 +13,19 @@ create or replace function public.claim_capture_source_incomplete_batch(
 ) returns setof public.capture_source_reconcile_state
 language plpgsql
 security definer
-set search_path = public
+set search_path = pg_catalog, public
 as $$
 begin
   if p_limit is null or p_limit <= 0 then
     return;
   end if;
+  if p_medio_ids is null or coalesce(cardinality(p_medio_ids), 0) = 0 then
+    return;
+  end if;
   return query
   with picked as (
     select s.medio_id, s.window_start, s.window_end
-    from public.capture_source_reconcile_state s
+    from public.capture_source_reconcile_state as s
     where s.window_start = p_window_start
       and s.window_end = p_window_end
       and (
@@ -36,12 +37,12 @@ begin
           and s.started_at < p_stale_before
         )
       )
-      and (p_medio_ids is null or s.medio_id = any(p_medio_ids))
+      and s.medio_id = any(p_medio_ids)
     order by s.medio_id
     for update skip locked
     limit p_limit
   )
-  update public.capture_source_reconcile_state s
+  update public.capture_source_reconcile_state as s
   set status = 'IN_PROGRESS',
       worker_id = p_worker_id,
       started_at = p_now,

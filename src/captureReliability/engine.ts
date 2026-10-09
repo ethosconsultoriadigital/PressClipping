@@ -36,6 +36,12 @@ export interface SourceDiscovery {
   probedSurface?: string | null;
   probeEvaluated?: boolean;
   resumedFromCursor?: string | null;
+  surfaceResult?: import('./surfaceResult.js').SurfaceAttemptResult;
+  cursorNotFound?: boolean;
+  pendingSubs?: number;
+  subsFallidos?: number;
+  truncated?: boolean;
+  nextFollowUp?: import('./coverageDebt.js').CoverageFollowUp | null;
 }
 
 export interface EngineDeps {
