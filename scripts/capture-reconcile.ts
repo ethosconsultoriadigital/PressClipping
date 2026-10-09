@@ -20,7 +20,12 @@ import { SupabaseCaptureReliabilityStore } from '../src/captureReliability/supab
 import { runReconcileEngine, scheduleSourceJobs } from '../src/captureReliability/engine.js';
 import { discoverLiveSource } from '../src/captureReliability/discoverLive.js';
 import { loadGapCandidatesFromFile } from '../src/captureReliability/gapCandidates.js';
-import { isLimitedCanaryScope, recoveryWritesAllowed } from '../src/captureReliability/writesGuard.js';
+import {
+  assertCanaryHashesForWrite,
+  canaryClaimHashes,
+  isLimitedCanaryScope,
+  recoveryWritesAllowed,
+} from '../src/captureReliability/writesGuard.js';
 import { computeFixedCycle, DEFAULT_SHARD_COUNT } from '../src/captureReliability/cycle.js';
 import {
   loadLastSafeWindowEnd,
@@ -169,14 +174,26 @@ async function main() {
     recoveryHashes: [...recoveryHashes],
   });
   const allowWritesEnv = process.env.ALLOW_CAPTURE_RECOVERY_WRITES ?? null;
-  const writes = recoveryWritesAllowed({
-    dryRun: !process.argv.includes('--no-dry-run'),
+  const canaryAllowEnv = process.env.ALLOW_CAPTURE_RECOVERY_CANARY_WRITES ?? null;
+  const wantsWrites = process.argv.includes('--no-dry-run');
+  assertCanaryHashesForWrite({
+    wantsWrites,
     allowEnv: allowWritesEnv,
-    canaryAllowEnv: process.env.ALLOW_CAPTURE_RECOVERY_CANARY_WRITES ?? null,
+    canaryAllowEnv,
+    recoveryHashes: [...recoveryHashes],
+  });
+  const writes = recoveryWritesAllowed({
+    dryRun: !wantsWrites,
+    allowEnv: allowWritesEnv,
+    canaryAllowEnv,
     eventName,
     limitedScope,
+    recoveryHashes: [...recoveryHashes],
   });
   const dry = !writes;
+  const isLimitedDispatch = eventName !== 'schedule' && (medioIds.length > 0 || recoveryHashes.size > 0);
+  const canaryScoped = allowWritesEnv !== 'true' && eventName !== 'schedule';
+  const onlyHashes = canaryClaimHashes({ canaryScoped, hashes: recoveryHashes });
 
   const catalog = await loadActiveCatalog(medioIds);
   const { store, backend } = await openStore(storePath);
@@ -292,12 +309,16 @@ async function main() {
       writesAllowed: writes,
       fetchExtract: (url) => fetchAndExtract(url, { timeoutMs: 12000, maxAttempts: 1 }),
       persistNews: writes ? persistViaNewsLake : undefined,
-      onlyHashes: recoveryHashes.size ? recoveryHashes : undefined,
+      onlyHashes,
       windowStart: cycle.window_start,
       windowEnd: cycle.window_end,
     });
     const coverageComplete = process.env.COVERAGE_COMPLETE === 'true';
-    const safety = await markWindowSafeComplete(store, cycle, new Date().toISOString());
+    const safety = await markWindowSafeComplete(store, cycle, new Date().toISOString(), {
+      allowCursorAdvance: eventName === 'schedule' && !isLimitedDispatch,
+      coverageComplete: eventName === 'schedule' ? coverageComplete : undefined,
+      expectedMedioIds: eventName === 'schedule' && !isLimitedDispatch ? catalog.map((c) => c.medio_id) : undefined,
+    });
     const report = {
       role: 'recovery',
       CYCLE_ID: cycle.cycle_id,
@@ -340,7 +361,7 @@ async function main() {
       recoveryTimeBudgetMs,
       globalConcurrency,
       perHostConcurrency,
-      recoveryOnlyHashes: recoveryHashes.size ? recoveryHashes : undefined,
+      recoveryOnlyHashes: onlyHashes,
       perSourceTimeoutMs,
     },
     {
@@ -366,7 +387,11 @@ async function main() {
 
   const safety = role === 'source' || role === 'capture-reliability-source-worker'
     ? { safeComplete: false, reason: 'SOURCE_SHARD' }
-    : await markWindowSafeComplete(store, cycle, new Date().toISOString());
+    : await markWindowSafeComplete(store, cycle, new Date().toISOString(), {
+      allowCursorAdvance: eventName === 'schedule' && !isLimitedDispatch,
+      coverageComplete: eventName === 'schedule' ? process.env.COVERAGE_COMPLETE === 'true' : undefined,
+      expectedMedioIds: eventName === 'schedule' && !isLimitedDispatch ? catalog.map((c) => c.medio_id) : undefined,
+    });
 
   const out = {
     ...report,

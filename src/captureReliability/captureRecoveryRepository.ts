@@ -28,6 +28,8 @@ export interface CaptureReliabilityStore {
   releaseStaleClaims(staleBeforeIso: string): Promise<number>;
   get(hashUrl: string): Promise<RecoveryRecord | null>;
   snapshot(): Promise<RecoveryRecord[]>;
+  listRecoveryPage(opts: { offset: number; pageSize: number }): Promise<RecoveryRecord[]>;
+  countRecovery(): Promise<number>;
   byStatus(status: RecoveryStatus): Promise<RecoveryRecord[]>;
   upsertSourceState(state: SourceReconcileState): Promise<SourceReconcileState>;
   getSourceState(medioId: string, windowStart: string, windowEnd: string): Promise<SourceReconcileState | null>;
@@ -94,6 +96,14 @@ export class MemoryCaptureReliabilityStore implements CaptureReliabilityStore {
     return [...this.queue.values()];
   }
 
+  async listRecoveryPage(opts: { offset: number; pageSize: number }): Promise<RecoveryRecord[]> {
+    return [...this.queue.values()].slice(opts.offset, opts.offset + opts.pageSize);
+  }
+
+  async countRecovery(): Promise<number> {
+    return this.queue.size;
+  }
+
   async byStatus(status: RecoveryStatus): Promise<RecoveryRecord[]> {
     return [...this.queue.values()].filter((r) => r.status === status);
   }
@@ -108,11 +118,12 @@ export class MemoryCaptureReliabilityStore implements CaptureReliabilityStore {
   }
 
   private async claimBatchUnlocked(opts: { workerId: string; limit: number; nowIso: string; skipHashes?: Set<string>; onlyHashes?: Set<string> }): Promise<RecoveryRecord[]> {
+    if (opts.onlyHashes !== undefined && opts.onlyHashes.size === 0) return [];
     const now = Date.parse(opts.nowIso);
     const out: RecoveryRecord[] = [];
     for (const rec of this.queue.values()) {
       if (out.length >= opts.limit) break;
-      if (opts.onlyHashes && !opts.onlyHashes.has(rec.hash_url)) continue;
+      if (opts.onlyHashes !== undefined && !opts.onlyHashes.has(rec.hash_url)) continue;
       if (opts.skipHashes?.has(rec.hash_url)) continue;
       if (!CLAIMABLE.includes(rec.status)) continue;
       if (rec.claimed_at) continue;

@@ -9,6 +9,8 @@ import type { ReconcileRun, RecoveryRecord, RecoveryStatus, SourceReconcileState
 export const CATCH_UP_CURSOR_PREFIX = 'caprel-cursor-';
 export const DEBT_STATUSES = ['BLOCKED', 'RETRY', 'MANUAL_REVIEW'] as const;
 export const BLOCKING_PENDING = ['QUEUED', 'FETCH_TO_CLASSIFY', 'FETCHING'] as const satisfies readonly RecoveryStatus[];
+export const RECOVERY_PAGE_SIZE = 1000;
+export const RECOVERY_READ_CAP = 200_000;
 
 export function catchUpCursorRunId(mode: CaptureCycleMode): string {
   return `${CATCH_UP_CURSOR_PREFIX}${mode === 'auditor' ? '24h' : mode}`;
@@ -55,21 +57,82 @@ export function tallyDebt(rows: RecoveryRecord[]): Record<(typeof DEBT_STATUSES)
   return debt;
 }
 
+export interface CompleteRecoveryRead {
+  rows: RecoveryRecord[];
+  complete: boolean;
+  counted: number;
+  scanned: number;
+  pageSize: number;
+  reason: string;
+}
+
+export async function loadCompleteRecovery(store: CaptureReliabilityStore): Promise<CompleteRecoveryRead> {
+  const pageSize = RECOVERY_PAGE_SIZE;
+  const counted = await store.countRecovery();
+  const rows: RecoveryRecord[] = [];
+  let offset = 0;
+  let lastLen = 0;
+  while (offset < RECOVERY_READ_CAP) {
+    const page = await store.listRecoveryPage({ offset, pageSize });
+    lastLen = page.length;
+    rows.push(...page);
+    if (page.length < pageSize) break;
+    offset += pageSize;
+  }
+  const complete = rows.length === counted && lastLen < pageSize;
+  return {
+    rows,
+    complete,
+    counted,
+    scanned: rows.length,
+    pageSize,
+    reason: complete ? 'QUEUE_READ_COMPLETE' : 'QUEUE_READ_INCOMPLETE',
+  };
+}
+
 export function evaluateWindowSafety(opts: {
   sourceStates: SourceReconcileState[];
   recovery: RecoveryRecord[];
   failed?: boolean;
+  coverageComplete?: boolean;
+  expectedMedioIds?: string[];
+  queueReadComplete?: boolean;
 }): WindowSafety {
   const debt = tallyDebt(opts.recovery);
-  if (opts.failed) {
+  if (opts.queueReadComplete === false) {
+    return {
+      safeComplete: false,
+      canAdvance: false,
+      blockingPending: 0,
+      sourcesOpen: 0,
+      debt,
+      reason: 'QUEUE_READ_INCOMPLETE',
+    };
+  }
+  if (opts.failed || opts.coverageComplete === false) {
     return {
       safeComplete: false,
       canAdvance: false,
       blockingPending: 0,
       sourcesOpen: opts.sourceStates.filter((s) => s.status === 'PENDING' || s.status === 'IN_PROGRESS').length,
       debt,
-      reason: 'WINDOW_FAILED',
+      reason: opts.coverageComplete === false ? 'COVERAGE_INCOMPLETE' : 'WINDOW_FAILED',
     };
+  }
+  if (opts.expectedMedioIds?.length) {
+    const byId = new Map(opts.sourceStates.map((s) => [s.medio_id, s]));
+    const missing = opts.expectedMedioIds.filter((id) => !byId.has(id));
+    const notComplete = opts.expectedMedioIds.filter((id) => byId.get(id)?.status !== 'COMPLETE');
+    if (missing.length > 0 || notComplete.length > 0) {
+      return {
+        safeComplete: false,
+        canAdvance: false,
+        blockingPending: 0,
+        sourcesOpen: missing.length + notComplete.filter((id) => !missing.includes(id)).length,
+        debt,
+        reason: 'CATALOG_INCOMPLETE',
+      };
+    }
   }
   const sourcesOpen = opts.sourceStates.filter((s) => s.status === 'PENDING' || s.status === 'IN_PROGRESS').length;
   const blocking = opts.recovery.filter((r) =>
@@ -168,9 +231,13 @@ export async function resolveNextCatchUpWindow(opts: {
   });
   for (const cycle of generated) {
     const states = await opts.store.listSourceStates(cycle.window_start, cycle.window_end);
-    const snap = await opts.store.snapshot();
-    const recovery = snap.filter((r) => recoveryBelongsToWindow(r, cycle.window_start, cycle.window_end));
-    const safety = evaluateWindowSafety({ sourceStates: states, recovery });
+    const read = await loadCompleteRecovery(opts.store);
+    const recovery = read.rows.filter((r) => recoveryBelongsToWindow(r, cycle.window_start, cycle.window_end));
+    const safety = evaluateWindowSafety({
+      sourceStates: states,
+      recovery,
+      queueReadComplete: read.complete,
+    });
     if (!safety.safeComplete) {
       return {
         cycle,
@@ -194,12 +261,31 @@ export async function markWindowSafeComplete(
   store: CaptureReliabilityStore,
   cycle: CaptureCycle,
   nowIso: string,
+  opts?: {
+    allowCursorAdvance?: boolean;
+    coverageComplete?: boolean;
+    expectedMedioIds?: string[];
+  },
 ): Promise<WindowSafety> {
   const states = await store.listSourceStates(cycle.window_start, cycle.window_end);
-  const snap = await store.snapshot();
-  const recovery = snap.filter((r) => recoveryBelongsToWindow(r, cycle.window_start, cycle.window_end));
-  const safety = evaluateWindowSafety({ sourceStates: states, recovery });
+  const read = await loadCompleteRecovery(store);
+  const recovery = read.rows.filter((r) => recoveryBelongsToWindow(r, cycle.window_start, cycle.window_end));
+  const safety = evaluateWindowSafety({
+    sourceStates: states,
+    recovery,
+    coverageComplete: opts?.coverageComplete,
+    expectedMedioIds: opts?.expectedMedioIds,
+    queueReadComplete: read.complete,
+  });
   if (!safety.safeComplete) return safety;
+  if (opts?.allowCursorAdvance === false) {
+    return {
+      ...safety,
+      safeComplete: false,
+      canAdvance: false,
+      reason: 'LIMITED_DISPATCH_NO_CURSOR',
+    };
+  }
   await store.upsertRun({
     run_id: cycle.cycle_id,
     cycle_id: cycle.cycle_id,
@@ -288,8 +374,10 @@ export async function executeCatchUpWindows(opts: {
     if (beforeStates.length > 0 && afterStates.length !== beforeStates.length) {
       report.duplicateSourceClaims += Math.max(0, afterStates.length - beforeStates.length);
     }
-    const snap = await opts.store.snapshot();
-    const windowRows = snap.filter((r) => recoveryBelongsToWindow(r, next.cycle!.window_start, next.cycle!.window_end));
+    const read = await loadCompleteRecovery(opts.store);
+    const windowRows = read.rows.filter((r) =>
+      recoveryBelongsToWindow(r, next.cycle!.window_start, next.cycle!.window_end),
+    );
     const safety = await markWindowSafeComplete(opts.store, next.cycle, opts.nowIso);
     const debt = tallyDebt(windowRows);
     report.debtPreserved.BLOCKED += debt.BLOCKED;

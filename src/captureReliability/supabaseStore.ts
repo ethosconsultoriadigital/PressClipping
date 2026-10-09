@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CaptureReliabilityStore } from './captureRecoveryRepository.js';
 import { emptySourceState } from './checkpoint.js';
+import { buildClaimBatchRpcArgs } from './writesGuard.js';
 import type { GapCandidate, ReconcileRun, RecoveryRecord, RecoveryStatus, SourceReconcileState } from './types.js';
 
 function recFromRow(r: Record<string, unknown>): RecoveryRecord {
@@ -127,16 +128,17 @@ export class SupabaseCaptureReliabilityStore implements CaptureReliabilityStore 
   }
 
   async claimBatch(opts: { workerId: string; limit: number; nowIso: string; skipHashes?: Set<string>; onlyHashes?: Set<string> }): Promise<RecoveryRecord[]> {
-    const args: Record<string, unknown> = {
-      p_worker_id: opts.workerId,
-      p_limit: opts.limit,
-      p_now: opts.nowIso,
-    };
-    if (opts.onlyHashes?.size) args.p_only_hashes = [...opts.onlyHashes];
-    const { data, error } = await this.sb.rpc('claim_capture_recovery_batch', args);
+    const built = buildClaimBatchRpcArgs({
+      workerId: opts.workerId,
+      limit: opts.limit,
+      nowIso: opts.nowIso,
+      onlyHashes: opts.onlyHashes,
+    });
+    if (built.abort) return [];
+    const { data, error } = await this.sb.rpc('claim_capture_recovery_batch', built.args);
     if (error) throw error;
     let rows = (data ?? []).map((row: Record<string, unknown>) => recFromRow(row));
-    if (opts.onlyHashes?.size) rows = rows.filter((r: RecoveryRecord) => opts.onlyHashes!.has(r.hash_url));
+    if (opts.onlyHashes !== undefined) rows = rows.filter((r: RecoveryRecord) => opts.onlyHashes!.has(r.hash_url));
     if (opts.skipHashes?.size) rows = rows.filter((r: RecoveryRecord) => !opts.skipHashes!.has(r.hash_url));
     return rows;
   }
@@ -208,9 +210,37 @@ export class SupabaseCaptureReliabilityStore implements CaptureReliabilityStore 
   }
 
   async snapshot(): Promise<RecoveryRecord[]> {
-    const { data, error } = await this.sb.from('capture_recovery_queue').select('*');
+    const counted = await this.countRecovery();
+    const rows: RecoveryRecord[] = [];
+    const pageSize = 1000;
+    for (let offset = 0; offset < counted; offset += pageSize) {
+      const page = await this.listRecoveryPage({ offset, pageSize });
+      rows.push(...page);
+      if (page.length < pageSize) break;
+    }
+    if (rows.length !== counted) {
+      throw new Error(`QUEUE_READ_INCOMPLETE: scanned=${rows.length} counted=${counted}`);
+    }
+    return rows;
+  }
+
+  async listRecoveryPage(opts: { offset: number; pageSize: number }): Promise<RecoveryRecord[]> {
+    const to = opts.offset + opts.pageSize - 1;
+    const { data, error } = await this.sb
+      .from('capture_recovery_queue')
+      .select('*')
+      .order('hash_url')
+      .range(opts.offset, to);
     if (error) throw error;
     return (data ?? []).map((r) => recFromRow(r as Record<string, unknown>));
+  }
+
+  async countRecovery(): Promise<number> {
+    const { count, error } = await this.sb
+      .from('capture_recovery_queue')
+      .select('hash_url', { count: 'exact', head: true });
+    if (error) throw error;
+    return count ?? 0;
   }
 
   async byStatus(status: RecoveryStatus): Promise<RecoveryRecord[]> {

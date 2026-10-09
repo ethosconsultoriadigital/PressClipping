@@ -278,6 +278,16 @@ describe('RC1 write gates', () => {
         eventName: 'dispatch',
         limitedScope: true,
       }),
+    ).toBe(false);
+    expect(
+      recoveryWritesAllowed({
+        dryRun: false,
+        allowEnv: null,
+        canaryAllowEnv: 'true',
+        eventName: 'dispatch',
+        limitedScope: true,
+        recoveryHashes: ['abc'],
+      }),
     ).toBe(true);
     expect(isLimitedCanaryScope({ medioIds: ['MED-0027'] })).toBe(true);
     expect(isLimitedCanaryScope({ medioIds: [], recoveryHashes: [] })).toBe(false);
@@ -291,6 +301,7 @@ describe('RC1 capture-reliability workflow contract', () => {
     expect(wf).toContain('--role=resolve-cycle');
     expect(wf).not.toContain('date -u');
     expect(wf).toContain('ALLOW_CAPTURE_RECOVERY_CANARY_WRITES');
+    expect(wf).toContain('HASH_SCOPED');
     expect(wf).toContain('COVERAGE_COMPLETE');
     expect(wf).toContain("needs.scheduler.result == 'success'");
     expect(wf).toContain('needs.scheduler.outputs.window_end');

@@ -5,9 +5,17 @@ name: capture-reliability
 # WRITE GATES (fail-closed):
 #   ALLOW_CAPTURE_RECOVERY_WRITES        — único permiso para schedules y para
 #                                          dispatch sin límites (catálogo completo).
-#   ALLOW_CAPTURE_RECOVERY_CANARY_WRITES — solo workflow_dispatch CON medio_ids
-#                                          y/o recovery_hashes|urls. No abre 569 medios.
+#   ALLOW_CAPTURE_RECOVERY_CANARY_WRITES — solo workflow_dispatch CON hashes
+#                                          explícitos (recovery_hashes|urls).
+#   medio_ids solo NO autoriza writes ni un claim sin p_only_hashes.
 # Un canary no activa el recovery abierto. Schedule ignora el secreto canario.
+# Dispatch limitado NUNCA adelanta caprel-cursor-24h/72h.
+#
+# EXECUTION PATH: GitHub no registra ni permite workflow_dispatch de este
+# archivo hasta que exista en la rama default. No usar dispatch desde RC1
+# antes de esa integración. Camino seguro post-hotfix (no ejecutar ahora):
+#   1) CLI local RC1 con override efímero + hashes exactos, o
+#   2) integración autorizada a default y después dispatch con hashes.
 #
 # CATCH-UP: resolve-cycle lee el cursor durable (último WINDOW_END seguro) y
 # congela UN ciclo para scheduler + 8 shards + recovery. No calcula «ahora-24h».
@@ -147,11 +155,11 @@ jobs:
         run: |
           set -euo pipefail
           ARGS="--role=scheduler --event=${{ github.event_name }} --mode=${{ steps.cycle.outputs.mode }} --cycle-id=${{ steps.cycle.outputs.cycle_id }} --window-start=${{ steps.cycle.outputs.window_start }} --window-end=${{ steps.cycle.outputs.window_end }} --shard-count=${{ github.event.inputs.shard_count || '8' }} --store=artifacts/capture-reliability-store.json --gap-candidates=config/capture-gap-candidates.json"
-          LIMITED=false
-          if [ -n "${{ github.event.inputs.medio_ids }}" ]; then LIMITED=true; ARGS="$ARGS --medio-ids=${{ github.event.inputs.medio_ids }}"; fi
+          HASH_SCOPED=false
+          if [ -n "${{ github.event.inputs.medio_ids }}" ]; then ARGS="$ARGS --medio-ids=${{ github.event.inputs.medio_ids }}"; fi
           if [ "${ALLOW_CAPTURE_RECOVERY_WRITES}" = "true" ] && { [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.dry_run }}" = "false" ]; }; then
             ARGS="$ARGS --no-dry-run"
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$LIMITED" = "true" ] && [ "${ALLOW_CAPTURE_RECOVERY_CANARY_WRITES}" = "true" ] && [ "${{ github.event.inputs.dry_run }}" = "false" ]; then
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$HASH_SCOPED" = "true" ] && [ "${ALLOW_CAPTURE_RECOVERY_CANARY_WRITES}" = "true" ] && [ "${{ github.event.inputs.dry_run }}" = "false" ]; then
             ARGS="$ARGS --no-dry-run"
           fi
           npm run capture-reliability:reconcile -- $ARGS
@@ -190,11 +198,11 @@ jobs:
           test -n "${{ needs.scheduler.outputs.window_start }}"
           test -n "${{ needs.scheduler.outputs.cycle_id }}"
           ARGS="--role=source --event=${{ github.event_name }} --mode=${{ needs.scheduler.outputs.mode }} --cycle-id=${{ needs.scheduler.outputs.cycle_id }} --window-start=${{ needs.scheduler.outputs.window_start }} --window-end=${{ needs.scheduler.outputs.window_end }} --shard-index=${{ matrix.shard_index }} --shard-count=8 --max-sources-this-run=${{ github.event.inputs.max_sources_this_run || '80' }} --no-recovery --store=artifacts/capture-reliability-store.json --gap-candidates=config/capture-gap-candidates.json"
-          LIMITED=false
-          if [ -n "${{ github.event.inputs.medio_ids }}" ]; then LIMITED=true; ARGS="$ARGS --medio-ids=${{ github.event.inputs.medio_ids }}"; fi
+          HASH_SCOPED=false
+          if [ -n "${{ github.event.inputs.medio_ids }}" ]; then ARGS="$ARGS --medio-ids=${{ github.event.inputs.medio_ids }}"; fi
           if [ "${ALLOW_CAPTURE_RECOVERY_WRITES}" = "true" ] && { [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.dry_run }}" = "false" ]; }; then
             ARGS="$ARGS --no-dry-run"
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$LIMITED" = "true" ] && [ "${ALLOW_CAPTURE_RECOVERY_CANARY_WRITES}" = "true" ] && [ "${{ github.event.inputs.dry_run }}" = "false" ]; then
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$HASH_SCOPED" = "true" ] && [ "${ALLOW_CAPTURE_RECOVERY_CANARY_WRITES}" = "true" ] && [ "${{ github.event.inputs.dry_run }}" = "false" ]; then
             ARGS="$ARGS --no-dry-run"
           fi
           npm run capture-reliability:reconcile -- $ARGS
@@ -235,13 +243,13 @@ jobs:
           test -n "${{ needs.scheduler.outputs.window_end }}"
           test -n "${{ needs.scheduler.outputs.cycle_id }}"
           ARGS="--role=recovery --event=${{ github.event_name }} --mode=${{ needs.scheduler.outputs.mode }} --cycle-id=${{ needs.scheduler.outputs.cycle_id }} --window-start=${{ needs.scheduler.outputs.window_start }} --window-end=${{ needs.scheduler.outputs.window_end }} --recovery-batch-size=${{ github.event.inputs.recovery_batch_size || '50' }} --max-recovery-batches=${{ github.event.inputs.max_recovery_batches || '20' }} --recovery-concurrency=4 --global-concurrency=8 --per-host-concurrency=2 --store=artifacts/capture-reliability-store.json"
-          LIMITED=false
-          if [ -n "${{ github.event.inputs.recovery_hashes }}" ]; then LIMITED=true; ARGS="$ARGS --recovery-hashes=${{ github.event.inputs.recovery_hashes }}"; fi
-          if [ -n "${{ github.event.inputs.recovery_urls }}" ]; then LIMITED=true; ARGS="$ARGS --recovery-urls=${{ github.event.inputs.recovery_urls }}"; fi
-          if [ -n "${{ github.event.inputs.medio_ids }}" ]; then LIMITED=true; fi
+          HASH_SCOPED=false
+          if [ -n "${{ github.event.inputs.recovery_hashes }}" ]; then HASH_SCOPED=true; ARGS="$ARGS --recovery-hashes=${{ github.event.inputs.recovery_hashes }}"; fi
+          if [ -n "${{ github.event.inputs.recovery_urls }}" ]; then HASH_SCOPED=true; ARGS="$ARGS --recovery-urls=${{ github.event.inputs.recovery_urls }}"; fi
+          if [ -n "${{ github.event.inputs.medio_ids }}" ]; then ARGS="$ARGS --medio-ids=${{ github.event.inputs.medio_ids }}"; fi
           if [ "${ALLOW_CAPTURE_RECOVERY_WRITES}" = "true" ] && { [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.dry_run }}" = "false" ]; }; then
             ARGS="$ARGS --no-dry-run"
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$LIMITED" = "true" ] && [ "${ALLOW_CAPTURE_RECOVERY_CANARY_WRITES}" = "true" ] && [ "${{ github.event.inputs.dry_run }}" = "false" ]; then
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$HASH_SCOPED" = "true" ] && [ "${ALLOW_CAPTURE_RECOVERY_CANARY_WRITES}" = "true" ] && [ "${{ github.event.inputs.dry_run }}" = "false" ]; then
             ARGS="$ARGS --no-dry-run"
           fi
           echo "COVERAGE_COMPLETE=${COVERAGE_COMPLETE}"
