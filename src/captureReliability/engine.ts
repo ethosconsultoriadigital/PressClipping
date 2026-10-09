@@ -11,6 +11,12 @@ import { recoveryTargetUrl } from './gapCandidates.js';
 import { cycleIsDrained } from './cycle.js';
 import { captureCanonicalUrl, hostOf, primaryHash } from './urlIndex.js';
 import { recoveryWritesAllowed } from './writesGuard.js';
+import {
+  incrementCoverageDebtAttempt,
+  isResumableDebt,
+  listCoverageDebt,
+  registerCoverageDebt,
+} from './coverageDebt.js';
 import { gapRecoveryEligible } from '../matching/bGapCandidateToCaptureGapRow.js';
 import type { RecoveryFetchExtract, RecoveryPersist } from './recoveryWorker.js';
 
@@ -117,6 +123,18 @@ export interface EngineReport {
   RECOVERY_WOULD_PERSIST: number;
 }
 
+async function persistIncompleteSource(
+  store: CaptureReliabilityStore,
+  state: SourceReconcileState,
+  nowIso: string,
+  catalogRow?: ChannelCatalogRow,
+): Promise<SourceReconcileState> {
+  const terminal = markSourceTerminal(state, 'INCOMPLETE', nowIso);
+  await store.upsertSourceState(terminal);
+  await registerCoverageDebt(store, terminal, nowIso, catalogRow);
+  return terminal;
+}
+
 function provenCause(item: DiscoveredUrl, discovery: SourceDiscovery): RootCause | null {
   if (item.discoveredVia.includes('gap') || item.discoveredVia.includes('google') || item.discoveredVia.includes('auditor')) {
     return 'LATE_PUBLISHER_DISCOVERY';
@@ -177,10 +195,13 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
   await deps.store.releaseStaleClaims(staleBefore);
 
   const shard = shardCatalog(deps.catalog, opts.shardIndex, opts.shardCount);
+  const windowDebt = await listCoverageDebt(deps.store, opts.windowStart, opts.windowEnd);
+  const debtByMedio = new Map(windowDebt.map((d) => [d.medio_id, d]));
   const pendingIds: string[] = [];
   for (const row of shard) {
     const st = await deps.store.getSourceState(row.medio_id, opts.windowStart, opts.windowEnd);
     if (!st || st.status === 'PENDING' || st.status === 'IN_PROGRESS') pendingIds.push(row.medio_id);
+    else if (st.status === 'INCOMPLETE' && isResumableDebt(debtByMedio.get(st.medio_id))) pendingIds.push(row.medio_id);
   }
   const claimedSources = await deps.store.claimSourceBatch({
     workerId: opts.workerId,
@@ -190,7 +211,13 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
     limit: opts.maxSourcesThisRun,
     nowIso: opts.nowIso,
     staleBeforeIso: staleBefore,
+    resumeIncomplete: true,
   });
+  for (const src of claimedSources) {
+    if (debtByMedio.has(src.medio_id)) {
+      await incrementCoverageDebtAttempt(deps.store, src, opts.nowIso);
+    }
+  }
   const claimedIds = new Set(claimedSources.map((s) => s.medio_id));
   const work = shard.filter((row) => claimedIds.has(row.medio_id));
 
@@ -226,7 +253,7 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
         coverage_verdict: 'COVERAGE_PARTIAL',
         time_budget_hit: false,
       };
-      await deps.store.upsertSourceState(markSourceTerminal(state, 'INCOMPLETE', opts.nowIso));
+      await persistIncompleteSource(deps.store, state, opts.nowIso, row);
       continue;
     }
     rssFlags.push(discovery.rssSpanCovered);
@@ -240,7 +267,7 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
         cap_hit: discovery.capHit,
         coverage_verdict: 'COVERAGE_UNKNOWN',
       };
-      await deps.store.upsertSourceState(markSourceTerminal(state, 'INCOMPLETE', opts.nowIso));
+      await persistIncompleteSource(deps.store, state, opts.nowIso, row);
       continue;
     }
 
@@ -320,17 +347,24 @@ export async function runReconcileEngine(opts: EngineOpts, deps: EngineDeps): Pr
     state = { ...state, coverage_verdict: verdict };
 
     if (discovery.capHit) {
-      const status = verdict === 'COVERAGE_CONFIRMED' ? 'COMPLETE' : 'INCOMPLETE';
-      await deps.store.upsertSourceState(markSourceTerminal({ ...state, cap_hit: true }, status, opts.nowIso));
+      const next = { ...state, cap_hit: true };
+      if (verdict === 'COVERAGE_CONFIRMED') {
+        await deps.store.upsertSourceState(markSourceTerminal(next, 'COMPLETE', opts.nowIso));
+      } else {
+        await persistIncompleteSource(deps.store, next, opts.nowIso, row);
+      }
       continue;
     }
     if (capHit) {
-      await deps.store.upsertSourceState(markSourceTerminal({ ...state, cap_hit: true }, 'INCOMPLETE', opts.nowIso));
+      await persistIncompleteSource(deps.store, { ...state, cap_hit: true }, opts.nowIso, row);
       break;
     }
 
-    const status = verdict === 'COVERAGE_CONFIRMED' && unexplained === 0 ? 'COMPLETE' : 'INCOMPLETE';
-    await deps.store.upsertSourceState(markSourceTerminal(state, status, opts.nowIso));
+    if (verdict === 'COVERAGE_CONFIRMED' && unexplained === 0) {
+      await deps.store.upsertSourceState(markSourceTerminal(state, 'COMPLETE', opts.nowIso));
+    } else {
+      await persistIncompleteSource(deps.store, state, opts.nowIso, row);
+    }
   }
 
   if (opts.gapCandidates?.length) {

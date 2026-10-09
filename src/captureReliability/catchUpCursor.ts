@@ -4,6 +4,11 @@ import {
   contiguousCatchUpWindows,
 } from './cycle.js';
 import type { CaptureReliabilityStore } from './captureRecoveryRepository.js';
+import {
+  coverageDebtAccountsForIncomplete,
+  listCoverageDebt,
+  type CoverageDebtRecord,
+} from './coverageDebt.js';
 import type { ReconcileRun, RecoveryRecord, RecoveryStatus, SourceReconcileState } from './types.js';
 
 export const CATCH_UP_CURSOR_PREFIX = 'caprel-cursor-';
@@ -97,6 +102,7 @@ export function evaluateWindowSafety(opts: {
   coverageComplete?: boolean;
   expectedMedioIds?: string[];
   queueReadComplete?: boolean;
+  coverageDebts?: CoverageDebtRecord[];
 }): WindowSafety {
   const debt = tallyDebt(opts.recovery);
   if (opts.queueReadComplete === false) {
@@ -121,14 +127,21 @@ export function evaluateWindowSafety(opts: {
   }
   if (opts.expectedMedioIds?.length) {
     const byId = new Map(opts.sourceStates.map((s) => [s.medio_id, s]));
+    const debts = new Map((opts.coverageDebts ?? []).map((d) => [d.medio_id, d]));
     const missing = opts.expectedMedioIds.filter((id) => !byId.has(id));
-    const notComplete = opts.expectedMedioIds.filter((id) => byId.get(id)?.status !== 'COMPLETE');
-    if (missing.length > 0 || notComplete.length > 0) {
+    const unaccounted = opts.expectedMedioIds.filter((id) => {
+      const st = byId.get(id);
+      if (!st) return true;
+      if (st.status === 'COMPLETE') return false;
+      if (st.status === 'INCOMPLETE') return !coverageDebtAccountsForIncomplete(st, debts.get(id));
+      return true;
+    });
+    if (missing.length > 0 || unaccounted.length > 0) {
       return {
         safeComplete: false,
         canAdvance: false,
         blockingPending: 0,
-        sourcesOpen: missing.length + notComplete.filter((id) => !missing.includes(id)).length,
+        sourcesOpen: missing.length + unaccounted.filter((id) => !missing.includes(id)).length,
         debt,
         reason: 'CATALOG_INCOMPLETE',
       };
@@ -233,10 +246,12 @@ export async function resolveNextCatchUpWindow(opts: {
     const states = await opts.store.listSourceStates(cycle.window_start, cycle.window_end);
     const read = await loadCompleteRecovery(opts.store);
     const recovery = read.rows.filter((r) => recoveryBelongsToWindow(r, cycle.window_start, cycle.window_end));
+    const coverageDebts = await listCoverageDebt(opts.store, cycle.window_start, cycle.window_end);
     const safety = evaluateWindowSafety({
       sourceStates: states,
       recovery,
       queueReadComplete: read.complete,
+      coverageDebts,
     });
     if (!safety.safeComplete) {
       return {
@@ -270,12 +285,14 @@ export async function markWindowSafeComplete(
   const states = await store.listSourceStates(cycle.window_start, cycle.window_end);
   const read = await loadCompleteRecovery(store);
   const recovery = read.rows.filter((r) => recoveryBelongsToWindow(r, cycle.window_start, cycle.window_end));
+  const coverageDebts = await listCoverageDebt(store, cycle.window_start, cycle.window_end);
   const safety = evaluateWindowSafety({
     sourceStates: states,
     recovery,
     coverageComplete: opts?.coverageComplete,
     expectedMedioIds: opts?.expectedMedioIds,
     queueReadComplete: read.complete,
+    coverageDebts,
   });
   if (!safety.safeComplete) return safety;
   if (opts?.allowCursorAdvance === false) {

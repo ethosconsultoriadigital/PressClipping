@@ -407,7 +407,25 @@ export class SupabaseCaptureReliabilityStore implements CaptureReliabilityStore 
     limit: number;
     nowIso: string;
     staleBeforeIso: string;
+    resumeIncomplete?: boolean;
   }): Promise<SourceReconcileState[]> {
+    const resumed: SourceReconcileState[] = [];
+    if (opts.resumeIncomplete) {
+      for (const medioId of opts.medioIds) {
+        if (resumed.length >= opts.limit) break;
+        const existing = await this.getSourceState(medioId, opts.windowStart, opts.windowEnd);
+        if (existing?.status !== 'INCOMPLETE') continue;
+        const next = {
+          ...existing,
+          status: 'IN_PROGRESS' as const,
+          worker_id: opts.workerId,
+          started_at: opts.nowIso,
+        };
+        await this.upsertSourceState(next);
+        resumed.push(next);
+      }
+      if (resumed.length >= opts.limit) return resumed;
+    }
     for (const medioId of opts.medioIds) {
       const existing = await this.getSourceState(medioId, opts.windowStart, opts.windowEnd);
       if (existing) continue;
@@ -427,7 +445,8 @@ export class SupabaseCaptureReliabilityStore implements CaptureReliabilityStore 
     if (error) throw error;
     const claimed = ((data ?? []) as Record<string, unknown>[]).map((row) => stateFromRow(row));
     const wanted = new Set(opts.medioIds);
-    return claimed.filter((s) => wanted.has(s.medio_id)).slice(0, opts.limit);
+    const fresh = claimed.filter((s) => wanted.has(s.medio_id) && !resumed.some((r) => r.medio_id === s.medio_id));
+    return [...resumed, ...fresh].slice(0, opts.limit);
   }
 }
 

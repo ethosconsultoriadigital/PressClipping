@@ -51,6 +51,7 @@ export interface CaptureReliabilityStore {
     limit: number;
     nowIso: string;
     staleBeforeIso: string;
+    resumeIncomplete?: boolean;
   }): Promise<SourceReconcileState[]>;
   persist?(): void;
 }
@@ -329,6 +330,7 @@ export class MemoryCaptureReliabilityStore implements CaptureReliabilityStore {
     limit: number;
     nowIso: string;
     staleBeforeIso: string;
+    resumeIncomplete?: boolean;
   }): Promise<SourceReconcileState[]> {
     const run = this.claimTail.then(() => this.claimSourceUnlocked(opts));
     this.claimTail = run.then(
@@ -346,6 +348,7 @@ export class MemoryCaptureReliabilityStore implements CaptureReliabilityStore {
     limit: number;
     nowIso: string;
     staleBeforeIso: string;
+    resumeIncomplete?: boolean;
   }): Promise<SourceReconcileState[]> {
     const staleCut = Date.parse(opts.staleBeforeIso);
     const out: SourceReconcileState[] = [];
@@ -358,7 +361,8 @@ export class MemoryCaptureReliabilityStore implements CaptureReliabilityStore {
       const owned = prev.worker_id === opts.workerId && prev.status === 'IN_PROGRESS';
       const stale = prev.status === 'IN_PROGRESS' && prev.started_at != null && Date.parse(prev.started_at) <= staleCut;
       const free = prev.status === 'PENDING';
-      if (!owned && !stale && !free) continue;
+      const resume = opts.resumeIncomplete === true && prev.status === 'INCOMPLETE';
+      if (!owned && !stale && !free && !resume) continue;
       const next: SourceReconcileState = {
         ...prev,
         status: 'IN_PROGRESS',
