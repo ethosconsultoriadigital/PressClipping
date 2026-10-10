@@ -82,9 +82,12 @@ on:
         description: Canario — URLs. Vacío en schedule.
         required: false
         default: ''
-  schedule:
-    - cron: '25 * * * *'
-    - cron: '50 11 * * *'
+  # TEMPORARY RC1 RELEASE GATE:
+  # workflow_dispatch only until controlled default-branch canary,
+  # cursor seed and explicit production authorization.
+  # schedule:
+  #   - cron: '25 * * * *'
+  #   - cron: '50 11 * * *'
 
 concurrency:
   group: capture-reliability

@@ -3,8 +3,11 @@ name: google-news-gap-radar
 # Safety-net discovery only. No matching. No News Lake writes. No Source Registry writes.
 
 on:
-  schedule:
-    - cron: '37 * * * *'
+  # TEMPORARY RC1 RELEASE GATE:
+  # workflow_dispatch only until controlled default-branch canary,
+  # cursor seed and explicit production authorization.
+  # schedule:
+  #   - cron: '37 * * * *'
   workflow_dispatch:
     inputs:
       batch_size:

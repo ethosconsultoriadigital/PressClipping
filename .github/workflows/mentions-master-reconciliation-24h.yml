@@ -4,8 +4,11 @@ name: mentions-master-reconciliation-24h
 # Schedule prepared; writes fail-closed until secret + dispatch dry_run=false.
 
 on:
-  schedule:
-    - cron: '07 * * * *'
+  # TEMPORARY RC1 RELEASE GATE:
+  # workflow_dispatch only until controlled default-branch canary,
+  # cursor seed and explicit production authorization.
+  # schedule:
+  #   - cron: '07 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:

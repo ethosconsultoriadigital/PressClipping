@@ -4,8 +4,11 @@ name: mentions-master-deep-reconciliation
 # Write fail-closed: dry_run=false AND secret ALLOW_MENTIONS_RECOVERY_WRITES=true.
 
 on:
-  schedule:
-    - cron: '12 11 * * *'
+  # TEMPORARY RC1 RELEASE GATE:
+  # workflow_dispatch only until controlled default-branch canary,
+  # cursor seed and explicit production authorization.
+  # schedule:
+  #   - cron: '12 11 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
