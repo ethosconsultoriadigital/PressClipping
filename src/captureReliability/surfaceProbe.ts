@@ -30,6 +30,29 @@ export function extractListingHrefs(html: string, baseUrl: string): string[] {
   return out;
 }
 
+export function listingAttemptResult(
+  analyzed: number,
+  failed: number,
+  targetCount: number,
+): 'SUCCESS' | 'PARTIAL' | 'FAILED' | 'UNAVAILABLE' {
+  if (targetCount <= 0) return 'UNAVAILABLE';
+  if (analyzed === 0 && failed > 0) return 'FAILED';
+  if (analyzed > 0 && failed > 0) return 'PARTIAL';
+  if (analyzed > 0 && failed === 0) return 'SUCCESS';
+  return 'UNAVAILABLE';
+}
+
+export function encodeListingCursor(pendingTargets: string[]): string {
+  return `lst2|${pendingTargets.map((t) => encodeURIComponent(t)).join(',')}`;
+}
+
+export function parseListingCursor(raw: string | null | undefined): string[] | null {
+  if (!raw?.startsWith('lst2|')) return null;
+  const body = raw.slice(5);
+  if (!body) return [];
+  return body.split(',').map((p) => decodeURIComponent(p)).filter(Boolean);
+}
+
 export async function fetchAndParseListingTargets(
   targets: string[],
   fetchFn: (url: string) => Promise<string>,
@@ -37,17 +60,19 @@ export async function fetchAndParseListingTargets(
   urls: string[];
   analyzed: number;
   failed: number;
+  failedTargets: string[];
+  analyzedTargets: string[];
   foundKind: 'listing' | 'home' | 'section' | null;
 }> {
   const urls: string[] = [];
   const seen = new Set<string>();
-  let analyzed = 0;
-  let failed = 0;
+  const failedTargets: string[] = [];
+  const analyzedTargets: string[] = [];
   let foundKind: 'listing' | 'home' | 'section' | null = null;
   for (const target of targets) {
     try {
       const html = await fetchFn(target);
-      analyzed += 1;
+      analyzedTargets.push(target);
       const hrefs = extractListingHrefs(html, target);
       foundKind = foundKind ?? classifyProbedSurface(target);
       for (const href of hrefs) {
@@ -56,10 +81,17 @@ export async function fetchAndParseListingTargets(
         urls.push(href);
       }
     } catch {
-      failed += 1;
+      failedTargets.push(target);
     }
   }
-  return { urls, analyzed, failed, foundKind };
+  return {
+    urls,
+    analyzed: analyzedTargets.length,
+    failed: failedTargets.length,
+    failedTargets,
+    analyzedTargets,
+    foundKind,
+  };
 }
 
 export function listingTargetsFromCatalog(row: { url_base: string | null; secciones_urls?: string | null }): string[] {

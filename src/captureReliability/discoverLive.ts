@@ -4,7 +4,14 @@ import { rssWindowCompleteness } from './rssWindow.js';
 import { applySitemapWindow } from './sitemapWindow.js';
 import { SITEMAP_CURSOR_PAGE_SIZE } from './sitemapCursor.js';
 import { paginateSitemap } from './sitemapPager.js';
-import { classifyProbedSurface, fetchAndParseListingTargets, listingTargetsFromCatalog } from './surfaceProbe.js';
+import {
+  classifyProbedSurface,
+  encodeListingCursor,
+  fetchAndParseListingTargets,
+  listingAttemptResult,
+  listingTargetsFromCatalog,
+  parseListingCursor,
+} from './surfaceProbe.js';
 import { followUpForProbedSurface } from './surfaceResult.js';
 import type { SurfaceAttemptResult } from './surfaceResult.js';
 import { captureCanonicalUrl, hostOf, primaryHash } from './urlIndex.js';
@@ -62,6 +69,8 @@ export async function discoverLiveSource(
   let probeEvaluated = false;
   let surfaceResult: SurfaceAttemptResult | undefined;
   let cursorNotFound = false;
+  let cursorRootMismatch = false;
+  let pendingListingTargets: string[] = [];
   let pendingSubs = 0;
   let subsFallidos = 0;
   let truncated = false;
@@ -96,7 +105,7 @@ export async function discoverLiveSource(
       const page = await paginateSitemap({
         rootUrl: row.sitemap_url,
         fetcher: fetchFn,
-        cursor: opts?.resumeCursor,
+        cursor: opts?.resumeCursor?.startsWith('lst2|') ? null : opts?.resumeCursor,
         pageSize: opts?.sitemapPageSize ?? SITEMAP_CURSOR_PAGE_SIZE,
         maxSubsPerRun: 15,
       });
@@ -106,12 +115,18 @@ export async function discoverLiveSource(
       pageExhausted = page.exhausted;
       resumedFromCursor = page.resumedFrom;
       cursorNotFound = page.cursorNotFound;
+      cursorRootMismatch = page.cursorRootMismatch;
       pendingSubs = page.pendingSubs;
       subsFallidos = page.subsFallidos;
       truncated = page.truncated;
       capHit = page.truncated || page.subsFallidos > 0 || page.surfaceResult === 'PARTIAL';
       surfaceResult = page.surfaceResult;
-      if (page.failed || page.cursorNotFound) {
+      if (page.cursorRootMismatch) {
+        sitemapSpanCovered = 'NO';
+        pageExhausted = false;
+        surfaceResult = 'FAILED';
+        cursor = opts?.resumeCursor ?? null;
+      } else if (page.failed || page.cursorNotFound) {
         sitemapSpanCovered = 'NO';
         pageExhausted = false;
         surfaceResult = 'FAILED';
@@ -197,20 +212,27 @@ export async function discoverLiveSource(
 
   const wantListing = allowSurface('listing', opts) && Boolean(opts?.onlySurfaces?.includes('listing') || opts?.probeListing);
   if (wantListing && !opts?.probeListing) {
-    const targets = listingTargetsFromCatalog(row);
+    const pending = parseListingCursor(opts?.resumeCursor);
+    const targets = pending?.length ? pending : listingTargetsFromCatalog(row);
     if (targets.length === 0) {
       surfaceResult = surfaceResult ?? 'UNAVAILABLE';
     } else {
       const listing = await fetchAndParseListingTargets(targets, fetchFn);
-      if (listing.analyzed === 0) {
-        surfaceResult = 'FAILED';
-      } else {
+      surfaceResult = listingAttemptResult(listing.analyzed, listing.failed, targets.length);
+      pendingListingTargets = listing.failedTargets;
+      if (listing.analyzed > 0) {
         surfaces.push('listing');
         listingSpanCovered = 'UNKNOWN';
-        surfaceResult = 'SUCCESS';
         urls.push(
           ...listing.urls.slice(0, 80).map((href) => toDiscovered(row, href, 'listing', null, null, null)),
         );
+      }
+      if (surfaceResult === 'PARTIAL' || surfaceResult === 'FAILED') {
+        cursor = encodeListingCursor(listing.failedTargets.length ? listing.failedTargets : targets);
+        pageExhausted = false;
+        pendingSubs = listing.failedTargets.length;
+      } else if (surfaceResult === 'SUCCESS') {
+        cursor = null;
       }
     }
   }
@@ -218,21 +240,24 @@ export async function discoverLiveSource(
   if (opts?.probeListing) {
     const targets = listingTargetsFromCatalog(row);
     const listing = await fetchAndParseListingTargets(targets, fetchFn);
+    surfaceResult = listingAttemptResult(listing.analyzed, listing.failed, targets.length);
     probeEvaluated = listing.analyzed > 0;
+    pendingListingTargets = listing.failedTargets;
     if (listing.analyzed === 0) {
-      surfaceResult = 'FAILED';
       probeEvaluated = false;
     } else {
       probedSurface = listing.foundKind ?? classifyProbedSurface(targets[0] ?? row.url_base ?? '');
       surfaces.push(probedSurface);
       listingSpanCovered = 'UNKNOWN';
-      surfaceResult = 'SUCCESS';
       nextFollowUp = followUpForProbedSurface(probedSurface);
       urls.push(
         ...listing.urls.slice(0, 80).map((href) =>
           toDiscovered(row, href, `surface_probe:${probedSurface}`, null, null, null),
         ),
       );
+      if (surfaceResult === 'PARTIAL') {
+        cursor = encodeListingCursor(listing.failedTargets);
+      }
     }
   }
 
@@ -258,6 +283,8 @@ export async function discoverLiveSource(
     resumedFromCursor,
     surfaceResult,
     cursorNotFound,
+    cursorRootMismatch,
+    pendingListingTargets,
     pendingSubs,
     subsFallidos,
     truncated,

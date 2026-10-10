@@ -61,6 +61,13 @@ export function buildFollowUpDiscoverOpts(
     return { resumeCursor: debt.cursor, onlySurfaces: ['sitemap'] };
   }
   if (debt.follow_up === 'SECOND_SURFACE') {
+    if (debt.cursor?.startsWith('lst2|')) {
+      return {
+        skipSurfaces: used.filter((s) => s !== 'listing'),
+        onlySurfaces: ['listing'],
+        resumeCursor: debt.cursor,
+      };
+    }
     const next = nextUnusedSurface(used, configuredSurfaceKinds(catalog));
     return { skipSurfaces: used, onlySurfaces: next ? [next] : [] };
   }
@@ -140,13 +147,22 @@ export async function executeCoverageDebtFollowUp(opts: {
   }
 
   const surfaceResult = discovery.surfaceResult ?? null;
-  const nextCursor = discovery.pageExhausted && surfaceResult === 'EXHAUSTED'
-    ? null
-    : (discovery.cursor ?? state.cursor);
+  const pendingWork = Boolean(
+    discovery.pendingSubs ||
+      discovery.truncated ||
+      (discovery.subsFallidos ?? 0) > 0 ||
+      (discovery.pendingListingTargets?.length ?? 0) > 0,
+  );
+  const nextCursor = discovery.cursorRootMismatch
+    ? prevCursor
+    : discovery.pageExhausted && surfaceResult === 'EXHAUSTED'
+      ? null
+      : surfaceResult === 'SUCCESS' && !pendingWork
+        ? (discovery.cursor ?? null)
+        : (discovery.cursor ?? state.cursor);
   const surfaceFound = discovery.probedSurface ?? (discovery.surfaces.find((s) => s !== 'NO_DISCOVERY_SURFACE') ?? null);
   const cursorMoved = Boolean(nextCursor && nextCursor !== prevCursor);
   const pageExhausted = discovery.pageExhausted === true && surfaceResult === 'EXHAUSTED';
-  const pendingWork = Boolean(discovery.pendingSubs || discovery.truncated || (discovery.subsFallidos ?? 0) > 0);
   const coverageEvaluated =
     discovery.rssSpanCovered === 'YES' ||
     discovery.sitemapSpanCovered === 'YES' ||
@@ -165,26 +181,35 @@ export async function executeCoverageDebtFollowUp(opts: {
   if (opts.debt.follow_up === 'PAGINATE_FROM_CURSOR') {
     progressed = cursorMoved || pageExhausted || newUrls > 0;
     evaluated = pageExhausted && !pendingWork && !discovery.cursorNotFound && surfaceResult === 'EXHAUSTED';
-    result = discovery.cursorNotFound
-      ? 'CURSOR_NOT_FOUND'
-      : surfaceResult === 'FAILED'
-        ? 'SITEMAP_FETCH_FAILED'
-        : evaluated
-          ? 'PAGINATION_EXHAUSTED'
-          : surfaceResult === 'PARTIAL'
-            ? 'PAGINATION_PARTIAL'
-            : 'PAGINATION_NO_PROGRESS';
+    result = discovery.cursorRootMismatch
+      ? 'CURSOR_ROOT_MISMATCH'
+      : discovery.cursorNotFound
+        ? 'CURSOR_NOT_FOUND'
+        : surfaceResult === 'FAILED'
+          ? 'SITEMAP_FETCH_FAILED'
+          : evaluated
+            ? 'PAGINATION_EXHAUSTED'
+            : surfaceResult === 'PARTIAL'
+              ? 'PAGINATION_PARTIAL'
+              : 'PAGINATION_NO_PROGRESS';
   } else if (opts.debt.follow_up === 'SECOND_SURFACE') {
     const fetched = canResolveFromSurface(surfaceResult);
     progressed = fetched;
-    evaluated = fetched && !pendingWork && surfaceResult === 'SUCCESS';
+    evaluated =
+      fetched &&
+      !pendingWork &&
+      !discovery.cursorNotFound &&
+      !discovery.cursorRootMismatch &&
+      (surfaceResult === 'SUCCESS' || (surfaceResult === 'EXHAUSTED' && coverageEvaluated));
     result = surfaceResult === 'FAILED'
       ? 'SECOND_SURFACE_FAILED'
       : surfaceResult === 'UNAVAILABLE' || discoverOpts.onlySurfaces?.length === 0
         ? 'SECOND_SURFACE_UNAVAILABLE'
-        : evaluated
-          ? 'SECOND_SURFACE_EVALUATED'
-          : 'SECOND_SURFACE_PARTIAL';
+        : surfaceResult === 'PARTIAL'
+          ? 'SECOND_SURFACE_PARTIAL'
+          : evaluated
+            ? 'SECOND_SURFACE_EVALUATED'
+            : 'SECOND_SURFACE_PARTIAL';
   } else if (opts.debt.follow_up === 'SURFACE_PROBE') {
     progressed = Boolean(discovery.probeEvaluated && surfaceFound);
     evaluated = false;

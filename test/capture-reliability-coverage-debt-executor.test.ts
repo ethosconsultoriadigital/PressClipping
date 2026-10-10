@@ -14,7 +14,11 @@ import {
 import { executeCoverageDebtFollowUp } from '../src/captureReliability/coverageDebtExecutor.js';
 import { discoverLiveSource } from '../src/captureReliability/discoverLive.js';
 import { encodeSitemapAfterCursor, encodeSitemapPageCursor, sliceSitemapFromCursor } from '../src/captureReliability/sitemapCursor.js';
-import { paginateSitemap } from '../src/captureReliability/sitemapPager.js';
+import {
+  encodeDurableSitemapCursor,
+  paginateSitemap,
+  parseDurableSitemapCursor,
+} from '../src/captureReliability/sitemapPager.js';
 import { extractListingHrefs } from '../src/captureReliability/surfaceProbe.js';
 import { drainRecoveryQueue, assertCanaryWriteBudget } from '../src/captureReliability/recoveryDrain.js';
 import { baseRecoveryRecord } from '../src/captureReliability/reconcile.js';
@@ -764,6 +768,335 @@ describe('coverage debt executor + observability', () => {
     expect(failedProbe.resolved).toBe(false);
     expect(failedProbe.result).toBe('SURFACE_PROBE_FAILED');
     expect((await getCoverageDebt(store, 'MED-PRB', WS, WE))?.lifecycle).toBe('OPEN_AUTOMATIC');
+  });
+
+  it('A/B/C failed sub-sitemap stays pending, never EXHAUSTED, then recovers once', async () => {
+    const index = `<?xml version="1.0"?><sitemapindex>
+      <sitemap><loc>https://example.com/sub-1.xml</loc></sitemap>
+      <sitemap><loc>https://example.com/sub-2.xml</loc></sitemap>
+    </sitemapindex>`;
+    let sub1Fails = 2;
+    const fetcher = async (url: string) => {
+      if (url.endsWith('sitemap.xml')) return index;
+      if (url.endsWith('sub-1.xml')) {
+        if (sub1Fails > 0) {
+          sub1Fails -= 1;
+          throw new Error('sub-1 down');
+        }
+        return '<?xml version="1.0"?><urlset><url><loc>https://example.com/from-sub-1</loc><lastmod>2026-10-02T12:00:00.000Z</lastmod></url></urlset>';
+      }
+      return '<?xml version="1.0"?><urlset><url><loc>https://example.com/from-sub-2</loc><lastmod>2026-10-02T12:00:00.000Z</lastmod></url></urlset>';
+    };
+    const first = await paginateSitemap({ rootUrl: 'https://example.com/sitemap.xml', fetcher, maxSubsPerRun: 15 });
+    expect(first.surfaceResult).toBe('PARTIAL');
+    expect(first.exhausted).toBe(false);
+    expect(first.subsFallidos).toBeGreaterThan(0);
+    expect(first.items.map((i) => i.url)).toEqual(['https://example.com/from-sub-2']);
+    const parsed = parseDurableSitemapCursor(first.nextCursor);
+    expect(parsed === 'INVALID' || parsed === null ? [] : parsed.failedSubs).toContain('https://example.com/sub-1.xml');
+
+    const second = await paginateSitemap({
+      rootUrl: 'https://example.com/sitemap.xml',
+      fetcher,
+      cursor: first.nextCursor,
+      maxSubsPerRun: 15,
+    });
+    expect(second.exhausted).toBe(false);
+    expect(second.surfaceResult).toBe('PARTIAL');
+    expect(second.surfaceResult).not.toBe('EXHAUSTED');
+    expect(second.items.map((i) => i.url)).toEqual([]);
+
+    const third = await paginateSitemap({
+      rootUrl: 'https://example.com/sitemap.xml',
+      fetcher,
+      cursor: second.nextCursor,
+      maxSubsPerRun: 15,
+    });
+    expect(third.exhausted).toBe(true);
+    expect(third.surfaceResult).toBe('EXHAUSTED');
+    expect(third.items.map((i) => i.url)).toEqual(['https://example.com/from-sub-1']);
+    const all = [...first.items, ...second.items, ...third.items].map((i) => i.url);
+    expect(all.sort()).toEqual(['https://example.com/from-sub-1', 'https://example.com/from-sub-2']);
+    expect(new Set(all).size).toBe(2);
+  });
+
+  it('D/E nested sitemap index depth 2 discovers both urls and resumes after crash', async () => {
+    const root = `<?xml version="1.0"?><sitemapindex><sitemap><loc>https://example.com/nested.xml</loc></sitemap></sitemapindex>`;
+    const nested = `<?xml version="1.0"?><sitemapindex>
+      <sitemap><loc>https://example.com/leaf-1.xml</loc></sitemap>
+      <sitemap><loc>https://example.com/leaf-2.xml</loc></sitemap>
+    </sitemapindex>`;
+    const fetcher = async (url: string) => {
+      if (url.endsWith('sitemap.xml')) return root;
+      if (url.endsWith('nested.xml')) return nested;
+      const n = url.match(/leaf-(\d+)/)?.[1];
+      return `<?xml version="1.0"?><urlset><url><loc>https://example.com/from-leaf-${n}</loc><lastmod>2026-10-02T12:00:00.000Z</lastmod></url></urlset>`;
+    };
+    const full = await paginateSitemap({
+      rootUrl: 'https://example.com/sitemap.xml',
+      fetcher,
+      maxSubsPerRun: 15,
+      maxDepth: 2,
+    });
+    expect(full.exhausted).toBe(true);
+    expect(full.items.map((i) => i.url).sort()).toEqual([
+      'https://example.com/from-leaf-1',
+      'https://example.com/from-leaf-2',
+    ]);
+
+    const crash = await paginateSitemap({
+      rootUrl: 'https://example.com/sitemap.xml',
+      fetcher,
+      maxSubsPerRun: 1,
+      maxDepth: 2,
+    });
+    expect(crash.exhausted).toBe(false);
+    expect(crash.surfaceResult).toBe('PARTIAL');
+    const resumed = parseDurableSitemapCursor(crash.nextCursor);
+    expect(resumed === 'INVALID' || resumed === null ? null : resumed.nestedUrl).toBe('https://example.com/nested.xml');
+    const cont = await paginateSitemap({
+      rootUrl: 'https://example.com/sitemap.xml',
+      fetcher,
+      cursor: crash.nextCursor,
+      maxSubsPerRun: 15,
+      maxDepth: 2,
+    });
+    const combined = [...crash.items, ...cont.items].map((i) => i.url);
+    expect(new Set(combined).size).toBe(2);
+    expect(combined.sort()).toEqual(['https://example.com/from-leaf-1', 'https://example.com/from-leaf-2']);
+    expect(cont.exhausted).toBe(true);
+  });
+
+  it('F depth cap produces visible PARTIAL debt, never false COMPLETE', async () => {
+    const root = `<?xml version="1.0"?><sitemapindex><sitemap><loc>https://example.com/nested.xml</loc></sitemap></sitemapindex>`;
+    const nested = `<?xml version="1.0"?><sitemapindex><sitemap><loc>https://example.com/leaf.xml</loc></sitemap></sitemapindex>`;
+    const fetcher = async (url: string) => {
+      if (url.endsWith('sitemap.xml')) return root;
+      if (url.endsWith('nested.xml')) return nested;
+      return '<?xml version="1.0"?><urlset><url><loc>https://example.com/hidden</loc></url></urlset>';
+    };
+    const page = await paginateSitemap({
+      rootUrl: 'https://example.com/sitemap.xml',
+      fetcher,
+      maxDepth: 1,
+    });
+    expect(page.exhausted).toBe(false);
+    expect(page.depthCapHit).toBe(true);
+    expect(page.surfaceResult).toBe('PARTIAL');
+    expect(page.surfaceResult).not.toBe('EXHAUSTED');
+    const again = await paginateSitemap({
+      rootUrl: 'https://example.com/sitemap.xml',
+      fetcher,
+      cursor: page.nextCursor,
+      maxDepth: 1,
+    });
+    expect(again.exhausted).toBe(false);
+    expect(again.depthCapHit).toBe(true);
+  });
+
+  it('G SECOND_SURFACE accepts valid EXHAUSTED from real discoverLiveSource once', async () => {
+    const store = new MemoryCaptureReliabilityStore();
+    const { st, debt } = await seedDebt(store, 'MED-RSS', { discovery_surfaces: ['rss'] });
+    const xml = `<?xml version="1.0"?><urlset>
+      <url><loc>https://example.com/from-sm-1</loc><lastmod>2026-10-02T12:00:00.000Z</lastmod></url>
+      <url><loc>https://example.com/from-sm-2</loc><lastmod>2026-10-02T13:00:00.000Z</lastmod></url>
+    </urlset>`;
+    const row = catalog({
+      medio_id: 'MED-RSS',
+      rss_url: 'https://example.com/rss',
+      sitemap_url: 'https://example.com/sitemap.xml',
+    });
+    const exec = await executeCoverageDebtFollowUp({
+      store,
+      catalog: row,
+      state: st,
+      debt: { ...debt, follow_up: 'SECOND_SURFACE', reason: 'RSS_ONLY' },
+      nowIso: NOW,
+      runId: '2nd-exh',
+      queryLakeHashes: async () => [],
+      discover: (r, w, opts) =>
+        discoverLiveSource(r, w, {
+          ...opts,
+          fetchTextFn: async () => xml,
+        }),
+    });
+    expect(exec.surface_result).toBe('EXHAUSTED');
+    expect(exec.resolved).toBe(true);
+    expect(exec.lifecycle).toBe('RESOLVED');
+    expect(exec.result).toBe('SECOND_SURFACE_EVALUATED');
+    expect((await store.snapshot()).map((r) => r.discovered_url).sort()).toEqual([
+      'https://example.com/from-sm-1',
+      'https://example.com/from-sm-2',
+    ]);
+    const again = await executeCoverageDebtFollowUp({
+      store,
+      catalog: row,
+      state: (await store.getSourceState('MED-RSS', WS, WE))!,
+      debt: (await getCoverageDebt(store, 'MED-RSS', WS, WE))!,
+      nowIso: NOW,
+      runId: '2nd-exh-2',
+      queryLakeHashes: async () => [],
+      discover: (r, w, opts) =>
+        discoverLiveSource(r, w, {
+          ...opts,
+          fetchTextFn: async () => xml,
+        }),
+    });
+    expect((await store.snapshot()).map((r) => r.hash_url)).toHaveLength(2);
+    expect(again.duplicate_urls).toBeGreaterThanOrEqual(0);
+  });
+
+  it('H SECOND_SURFACE PARTIAL does not resolve', async () => {
+    const store = new MemoryCaptureReliabilityStore();
+    const { st, debt } = await seedDebt(store, 'MED-RSS', { discovery_surfaces: ['rss'] });
+    const exec = await executeCoverageDebtFollowUp({
+      store,
+      catalog: catalog({
+        medio_id: 'MED-RSS',
+        rss_url: 'https://example.com/rss',
+        sitemap_url: 'https://example.com/sitemap.xml',
+      }),
+      state: st,
+      debt: { ...debt, follow_up: 'SECOND_SURFACE', reason: 'RSS_ONLY' },
+      nowIso: NOW,
+      runId: '2nd-partial',
+      queryLakeHashes: async () => [],
+      discover: async () =>
+        discoveryFor([disc('https://example.com/partial-only')], {
+          surfaces: ['sitemap'],
+          surfaceResult: 'PARTIAL',
+          pageExhausted: false,
+          pendingSubs: 1,
+          truncated: true,
+        }),
+    });
+    expect(exec.resolved).toBe(false);
+    expect(exec.result).toBe('SECOND_SURFACE_PARTIAL');
+    expect((await getCoverageDebt(store, 'MED-RSS', WS, WE))?.lifecycle).toBe('OPEN_AUTOMATIC');
+    expect((await store.getSourceState('MED-RSS', WS, WE))?.status).toBe('INCOMPLETE');
+  });
+
+  it('I/J listing partial stays open and retry does not duplicate URLs', async () => {
+    const store = new MemoryCaptureReliabilityStore();
+    const { st, debt } = await seedDebt(store, 'MED-LST', { discovery_surfaces: ['rss'] });
+    const row = catalog({
+      medio_id: 'MED-LST',
+      rss_url: 'https://example.com/rss',
+      sitemap_url: null,
+      url_base: 'https://example.com',
+      secciones_urls: 'https://example.com/seccion',
+    });
+    let sectionOk = false;
+    const fetchTextFn = async (url: string) => {
+      if (url.includes('/seccion')) {
+        if (!sectionOk) throw new Error('section down');
+        return '<html><a href="/nota-seccion">s</a></html>';
+      }
+      return '<html><a href="/nota-home">h</a></html>';
+    };
+    const first = await executeCoverageDebtFollowUp({
+      store,
+      catalog: row,
+      state: st,
+      debt: { ...debt, follow_up: 'SECOND_SURFACE', reason: 'RSS_ONLY' },
+      nowIso: NOW,
+      runId: 'lst-1',
+      queryLakeHashes: async () => [],
+      discover: (r, w, opts) => discoverLiveSource(r, w, { ...opts, fetchTextFn }),
+    });
+    expect(first.surface_result).toBe('PARTIAL');
+    expect(first.resolved).toBe(false);
+    expect(first.lifecycle).toBe('OPEN_AUTOMATIC');
+    expect((await store.snapshot()).map((r) => r.discovered_url)).toContain('https://example.com/nota-home');
+    expect(first.cursor?.startsWith('lst2|')).toBe(true);
+
+    const mid = await getCoverageDebt(store, 'MED-LST', WS, WE);
+    expect(mid?.lifecycle).toBe('OPEN_AUTOMATIC');
+    expect(mid?.cursor?.startsWith('lst2|')).toBe(true);
+    expect(mid?.cursor).toContain('seccion');
+    const retry = await executeCoverageDebtFollowUp({
+      store,
+      catalog: row,
+      state: (await store.getSourceState('MED-LST', WS, WE))!,
+      debt: mid!,
+      nowIso: NOW,
+      runId: 'lst-2',
+      queryLakeHashes: async () => [],
+      discover: (r, w, opts) => {
+        expect(opts?.onlySurfaces).toEqual(['listing']);
+        expect(opts?.resumeCursor?.startsWith('lst2|')).toBe(true);
+        return discoverLiveSource(r, w, { ...opts, fetchTextFn });
+      },
+    });
+    expect(retry.resolved).toBe(false);
+    expect(retry.surface_result).toBe('FAILED');
+    expect((await store.snapshot()).filter((r) => r.discovered_url === 'https://example.com/nota-home')).toHaveLength(1);
+
+    sectionOk = true;
+    const done = await executeCoverageDebtFollowUp({
+      store,
+      catalog: row,
+      state: (await store.getSourceState('MED-LST', WS, WE))!,
+      debt: (await getCoverageDebt(store, 'MED-LST', WS, WE))!,
+      nowIso: NOW,
+      runId: 'lst-3',
+      queryLakeHashes: async () => [],
+      discover: (r, w, opts) => discoverLiveSource(r, w, { ...opts, fetchTextFn }),
+    });
+    expect(done.resolved).toBe(true);
+    expect(done.surface_result).toBe('SUCCESS');
+    const urls = (await store.snapshot()).map((r) => r.discovered_url).sort();
+    expect(urls).toEqual(['https://example.com/nota-home', 'https://example.com/nota-seccion']);
+    expect(urls).toHaveLength(2);
+  });
+
+  it('K cursor root mismatch fails closed without page-1 replay', async () => {
+    const xml = '<?xml version="1.0"?><urlset><url><loc>https://example.com/a</loc></url></urlset>';
+    const alien = encodeDurableSitemapCursor({
+      v: 2,
+      root: 'https://other.com/sitemap.xml',
+      kind: 'urlset',
+      afterUrl: null,
+      offset: 2,
+      nextSubIndex: 0,
+      failedSubs: [],
+      nestedUrl: null,
+      nestedNextSubIndex: 0,
+      nestedFailed: [],
+    });
+    const page = await paginateSitemap({
+      rootUrl: 'https://example.com/sitemap.xml',
+      fetcher: async () => xml,
+      cursor: alien,
+    });
+    expect(page.cursorRootMismatch).toBe(true);
+    expect(page.failed).toBe(true);
+    expect(page.exhausted).toBe(false);
+    expect(page.surfaceResult).toBe('FAILED');
+    expect(page.items).toEqual([]);
+    expect(page.nextCursor).toBe(alien);
+
+    const store = new MemoryCaptureReliabilityStore();
+    const { st, debt } = await seedDebt(store, 'MED-PAGE', { cap_hit: true, cursor: alien });
+    const exec = await executeCoverageDebtFollowUp({
+      store,
+      catalog: catalog(),
+      state: st,
+      debt: { ...debt, follow_up: 'PAGINATE_FROM_CURSOR', cursor: alien },
+      nowIso: NOW,
+      runId: 'root-mismatch',
+      queryLakeHashes: async () => [],
+      discover: (r, w, opts) =>
+        discoverLiveSource(r, w, {
+          ...opts,
+          fetchTextFn: async () => xml,
+        }),
+    });
+    expect(exec.result).toBe('CURSOR_ROOT_MISMATCH');
+    expect(exec.resolved).toBe(false);
+    expect(exec.cursor).toBe(alien);
+    expect((await store.snapshot()).map((r) => r.discovered_url)).toEqual([]);
+    expect((await getCoverageDebt(store, 'MED-PAGE', WS, WE))?.lifecycle).toBe('OPEN_AUTOMATIC');
   });
 });
 

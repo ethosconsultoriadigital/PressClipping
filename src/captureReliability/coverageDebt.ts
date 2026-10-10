@@ -243,7 +243,7 @@ export async function registerCoverageDebt(
 
 export async function incrementCoverageDebtAttempt(
   store: CaptureReliabilityStore,
-  state: Pick<SourceReconcileState, 'medio_id' | 'window_start' | 'window_end'>,
+  state: Pick<SourceReconcileState, 'medio_id' | 'window_start' | 'window_end' | 'cursor'>,
   nowIso: string,
 ): Promise<CoverageDebtRecord | null> {
   const prev = await getCoverageDebt(store, state.medio_id, state.window_start, state.window_end);
@@ -257,6 +257,7 @@ export async function incrementCoverageDebtAttempt(
     lifecycle,
     status: lifecycle,
     automatic: lifecycle === 'ESCALATED_MANUAL' ? false : prev.automatic,
+    cursor: state.cursor ?? prev.cursor,
     last_result: exhausted ? 'ESCALATED_AFTER_MAX_ATTEMPTS' : prev.last_result ?? 'ATTEMPT_STARTED',
     updated_at: nowIso,
   };

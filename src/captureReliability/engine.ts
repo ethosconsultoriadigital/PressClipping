@@ -38,6 +38,8 @@ export interface SourceDiscovery {
   resumedFromCursor?: string | null;
   surfaceResult?: import('./surfaceResult.js').SurfaceAttemptResult;
   cursorNotFound?: boolean;
+  cursorRootMismatch?: boolean;
+  pendingListingTargets?: string[];
   pendingSubs?: number;
   subsFallidos?: number;
   truncated?: boolean;
