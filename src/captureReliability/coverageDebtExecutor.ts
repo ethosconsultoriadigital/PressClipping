@@ -194,22 +194,27 @@ export async function executeCoverageDebtFollowUp(opts: {
               : 'PAGINATION_NO_PROGRESS';
   } else if (opts.debt.follow_up === 'SECOND_SURFACE') {
     const fetched = canResolveFromSurface(surfaceResult);
-    progressed = fetched;
+    const usedListing = discovery.surfaces.includes('listing');
+    const listingHonest = !usedListing || discovery.listingSpanCovered === 'YES';
+    progressed = fetched || newUrls > 0;
     evaluated =
       fetched &&
       !pendingWork &&
       !discovery.cursorNotFound &&
       !discovery.cursorRootMismatch &&
+      listingHonest &&
       (surfaceResult === 'SUCCESS' || (surfaceResult === 'EXHAUSTED' && coverageEvaluated));
     result = surfaceResult === 'FAILED'
       ? 'SECOND_SURFACE_FAILED'
       : surfaceResult === 'UNAVAILABLE' || discoverOpts.onlySurfaces?.length === 0
         ? 'SECOND_SURFACE_UNAVAILABLE'
-        : surfaceResult === 'PARTIAL'
-          ? 'SECOND_SURFACE_PARTIAL'
-          : evaluated
-            ? 'SECOND_SURFACE_EVALUATED'
-            : 'SECOND_SURFACE_PARTIAL';
+        : usedListing && surfaceResult === 'SUCCESS' && discovery.listingSpanCovered !== 'YES'
+          ? 'SECOND_SURFACE_COVERAGE_UNKNOWN'
+          : surfaceResult === 'PARTIAL'
+            ? 'SECOND_SURFACE_PARTIAL'
+            : evaluated
+              ? 'SECOND_SURFACE_EVALUATED'
+              : 'SECOND_SURFACE_PARTIAL';
   } else if (opts.debt.follow_up === 'SURFACE_PROBE') {
     progressed = Boolean(discovery.probeEvaluated && surfaceFound);
     evaluated = false;

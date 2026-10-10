@@ -1043,8 +1043,13 @@ describe('coverage debt executor + observability', () => {
       queryLakeHashes: async () => [],
       discover: (r, w, opts) => discoverLiveSource(r, w, { ...opts, fetchTextFn }),
     });
-    expect(done.resolved).toBe(true);
+    expect(done.resolved).toBe(false);
     expect(done.surface_result).toBe('SUCCESS');
+    expect(done.result).toBe('SECOND_SURFACE_COVERAGE_UNKNOWN');
+    expect((await store.getSourceState('MED-LST', WS, WE))?.status).toBe('INCOMPLETE');
+    expect(['OPEN_AUTOMATIC', 'ESCALATED_MANUAL']).toContain(
+      (await getCoverageDebt(store, 'MED-LST', WS, WE))?.lifecycle,
+    );
     const urls = (await store.snapshot()).map((r) => r.discovered_url).sort();
     expect(urls).toEqual(['https://example.com/nota-home', 'https://example.com/nota-seccion']);
     expect(urls).toHaveLength(2);
@@ -1063,6 +1068,7 @@ describe('coverage debt executor + observability', () => {
       nestedUrl: null,
       nestedNextSubIndex: 0,
       nestedFailed: [],
+      drainSubs: [],
     });
     const page = await paginateSitemap({
       rootUrl: 'https://example.com/sitemap.xml',
@@ -1097,6 +1103,227 @@ describe('coverage debt executor + observability', () => {
     expect(exec.cursor).toBe(alien);
     expect((await store.snapshot()).map((r) => r.discovered_url)).toEqual([]);
     expect((await getCoverageDebt(store, 'MED-PAGE', WS, WE))?.lifecycle).toBe('OPEN_AUTOMATIC');
+  });
+
+  function urlset(urls: string[]): string {
+    return `<?xml version="1.0"?><urlset>${urls.map((u) => `<url><loc>${u}</loc><lastmod>2026-10-02T12:00:00.000Z</lastmod></url>`).join('')}</urlset>`;
+  }
+
+  function indexOf(subs: string[]): string {
+    return `<?xml version="1.0"?><sitemapindex>${subs.map((u) => `<sitemap><loc>${u}</loc></sitemap>`).join('')}</sitemapindex>`;
+  }
+
+  it('1/2 index spillover 450+10 and crash/resume drain all unique URLs', async () => {
+    const sub1 = Array.from({ length: 450 }, (_, i) => `https://example.com/s1-${String(i + 1).padStart(3, '0')}`);
+    const sub2 = Array.from({ length: 10 }, (_, i) => `https://example.com/s2-${String(i + 1).padStart(2, '0')}`);
+    const fetcher = async (url: string) => {
+      if (url.endsWith('sitemap.xml')) return indexOf(['https://example.com/sub-1.xml', 'https://example.com/sub-2.xml']);
+      if (url.endsWith('sub-1.xml')) return urlset(sub1);
+      return urlset(sub2);
+    };
+    const page1 = await paginateSitemap({
+      rootUrl: 'https://example.com/sitemap.xml',
+      fetcher,
+      pageSize: 400,
+      maxSubsPerRun: 15,
+    });
+    expect(page1.items).toHaveLength(400);
+    expect(page1.nextCursor).not.toBeNull();
+    expect(page1.cursorNotFound).toBe(false);
+    expect(page1.exhausted).toBe(false);
+
+    const page2 = await paginateSitemap({
+      rootUrl: 'https://example.com/sitemap.xml',
+      fetcher,
+      cursor: page1.nextCursor,
+      pageSize: 400,
+      maxSubsPerRun: 15,
+    });
+    expect(page2.cursorNotFound).toBe(false);
+    expect(page2.items).toHaveLength(60);
+    expect(page2.exhausted).toBe(true);
+    const all = [...page1.items, ...page2.items].map((i) => i.url);
+    expect(new Set(all).size).toBe(460);
+    expect(all).toHaveLength(460);
+    expect(all).toContain('https://example.com/s1-450');
+    expect(all).toContain('https://example.com/s2-10');
+  });
+
+  it('3 multipage spillover drains a urlset larger than 2x pageSize', async () => {
+    const urls = Array.from({ length: 850 }, (_, i) => `https://example.com/big-${String(i + 1).padStart(3, '0')}`);
+    const fetcher = async (url: string) => {
+      if (url.endsWith('sitemap.xml')) return indexOf(['https://example.com/big.xml']);
+      return urlset(urls);
+    };
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let last = { exhausted: false, cursorNotFound: false };
+    for (let i = 0; i < 4; i += 1) {
+      const page = await paginateSitemap({
+        rootUrl: 'https://example.com/sitemap.xml',
+        fetcher,
+        cursor,
+        pageSize: 400,
+        maxSubsPerRun: 15,
+      });
+      expect(page.cursorNotFound).toBe(false);
+      seen.push(...page.items.map((it) => it.url));
+      cursor = page.nextCursor;
+      last = { exhausted: page.exhausted, cursorNotFound: page.cursorNotFound };
+      if (page.exhausted) break;
+    }
+    expect(last.exhausted).toBe(true);
+    expect(last.cursorNotFound).toBe(false);
+    expect(new Set(seen).size).toBe(850);
+    expect(seen).toHaveLength(850);
+  });
+
+  it('4 failed sub recovers with spillover and drains later pages', async () => {
+    const recovered = Array.from({ length: 450 }, (_, i) => `https://example.com/rec-${String(i + 1).padStart(3, '0')}`);
+    let failOnce = true;
+    const fetcher = async (url: string) => {
+      if (url.endsWith('sitemap.xml')) return indexOf(['https://example.com/bad.xml', 'https://example.com/ok.xml']);
+      if (url.endsWith('bad.xml')) {
+        if (failOnce) {
+          failOnce = false;
+          throw new Error('down');
+        }
+        return urlset(recovered);
+      }
+      return urlset(['https://example.com/ok-1']);
+    };
+    const first = await paginateSitemap({
+      rootUrl: 'https://example.com/sitemap.xml',
+      fetcher,
+      pageSize: 400,
+      maxSubsPerRun: 15,
+    });
+    expect(first.exhausted).toBe(false);
+    expect(first.subsFallidos).toBeGreaterThan(0);
+    const second = await paginateSitemap({
+      rootUrl: 'https://example.com/sitemap.xml',
+      fetcher,
+      cursor: first.nextCursor,
+      pageSize: 400,
+      maxSubsPerRun: 15,
+    });
+    expect(second.cursorNotFound).toBe(false);
+    expect(second.exhausted).toBe(false);
+    const third = await paginateSitemap({
+      rootUrl: 'https://example.com/sitemap.xml',
+      fetcher,
+      cursor: second.nextCursor,
+      pageSize: 400,
+      maxSubsPerRun: 15,
+    });
+    const all = [...first.items, ...second.items, ...third.items].map((i) => i.url);
+    expect(third.cursorNotFound).toBe(false);
+    expect(third.exhausted).toBe(true);
+    expect(new Set(all).size).toBe(451);
+    expect(all).toContain('https://example.com/ok-1');
+    expect(all).toContain('https://example.com/rec-450');
+  });
+
+  it('5 nested index spillover crash/resume keeps level and uniqueness', async () => {
+    const leaf = Array.from({ length: 450 }, (_, i) => `https://example.com/n-${String(i + 1).padStart(3, '0')}`);
+    const fetcher = async (url: string) => {
+      if (url.endsWith('sitemap.xml')) return indexOf(['https://example.com/nested.xml']);
+      if (url.endsWith('nested.xml')) return indexOf(['https://example.com/leaf.xml']);
+      return urlset(leaf);
+    };
+    const crash = await paginateSitemap({
+      rootUrl: 'https://example.com/sitemap.xml',
+      fetcher,
+      pageSize: 400,
+      maxSubsPerRun: 15,
+      maxDepth: 2,
+    });
+    expect(crash.exhausted).toBe(false);
+    expect(crash.cursorNotFound).toBe(false);
+    const resume = await paginateSitemap({
+      rootUrl: 'https://example.com/sitemap.xml',
+      fetcher,
+      cursor: crash.nextCursor,
+      pageSize: 400,
+      maxSubsPerRun: 15,
+      maxDepth: 2,
+    });
+    const all = [...crash.items, ...resume.items].map((i) => i.url);
+    expect(resume.cursorNotFound).toBe(false);
+    expect(resume.exhausted).toBe(true);
+    expect(new Set(all).size).toBe(450);
+    expect(all).toHaveLength(450);
+  });
+
+  it('7 listing SUCCESS + UNKNOWN coverage stays incomplete', async () => {
+    const store = new MemoryCaptureReliabilityStore();
+    const { st, debt } = await seedDebt(store, 'MED-UNK', { discovery_surfaces: ['rss'] });
+    const row = catalog({
+      medio_id: 'MED-UNK',
+      rss_url: 'https://example.com/rss',
+      sitemap_url: null,
+      url_base: 'https://example.com',
+      secciones_urls: 'https://example.com/seccion',
+    });
+    const exec = await executeCoverageDebtFollowUp({
+      store,
+      catalog: row,
+      state: st,
+      debt: { ...debt, follow_up: 'SECOND_SURFACE', reason: 'RSS_ONLY' },
+      nowIso: NOW,
+      runId: 'lst-unknown',
+      queryLakeHashes: async () => [],
+      discover: (r, w, opts) =>
+        discoverLiveSource(r, w, {
+          ...opts,
+          fetchTextFn: async () => '<html><a href="/nota-ok">n</a></html>',
+        }),
+    });
+    expect(exec.surface_result).toBe('SUCCESS');
+    expect(exec.resolved).toBe(false);
+    expect(exec.result).toBe('SECOND_SURFACE_COVERAGE_UNKNOWN');
+    expect((await store.getSourceState('MED-UNK', WS, WE))?.status).toBe('INCOMPLETE');
+    expect((await getCoverageDebt(store, 'MED-UNK', WS, WE))?.lifecycle).toBe('OPEN_AUTOMATIC');
+    expect((await store.snapshot()).some((r) => r.discovered_url.includes('nota-ok'))).toBe(true);
+    expect(isSilentExhaustedDebt(await getCoverageDebt(store, 'MED-UNK', WS, WE))).toBe(false);
+  });
+
+  it('9 listing resolves only when listingSpanCovered is YES', async () => {
+    const store = new MemoryCaptureReliabilityStore();
+    const { st, debt } = await seedDebt(store, 'MED-YES', { discovery_surfaces: ['rss'] });
+    const denied = await executeCoverageDebtFollowUp({
+      store,
+      catalog: catalog({ medio_id: 'MED-YES', rss_url: 'https://example.com/rss', sitemap_url: null, secciones_urls: 'https://example.com/seccion' }),
+      state: st,
+      debt: { ...debt, follow_up: 'SECOND_SURFACE', reason: 'RSS_ONLY' },
+      nowIso: NOW,
+      runId: 'lst-no',
+      queryLakeHashes: async () => [],
+      discover: async () =>
+        discoveryFor([disc('https://example.com/l1', 'listing')], {
+          surfaces: ['listing'],
+          surfaceResult: 'SUCCESS',
+          listingSpanCovered: 'UNKNOWN',
+        }),
+    });
+    expect(denied.resolved).toBe(false);
+    const allowed = await executeCoverageDebtFollowUp({
+      store,
+      catalog: catalog({ medio_id: 'MED-YES', rss_url: 'https://example.com/rss', sitemap_url: null, secciones_urls: 'https://example.com/seccion' }),
+      state: (await store.getSourceState('MED-YES', WS, WE))!,
+      debt: (await getCoverageDebt(store, 'MED-YES', WS, WE))!,
+      nowIso: NOW,
+      runId: 'lst-yes',
+      queryLakeHashes: async () => [],
+      discover: async () =>
+        discoveryFor([disc('https://example.com/l2', 'listing')], {
+          surfaces: ['listing'],
+          surfaceResult: 'SUCCESS',
+          listingSpanCovered: 'YES',
+        }),
+    });
+    expect(allowed.resolved).toBe(true);
+    expect(allowed.lifecycle).toBe('RESOLVED');
   });
 });
 

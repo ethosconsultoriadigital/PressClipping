@@ -14,6 +14,7 @@ export interface DurableSitemapCursor {
   nestedUrl: string | null;
   nestedNextSubIndex: number;
   nestedFailed: string[];
+  drainSubs: string[];
   depthCapHit?: boolean;
 }
 
@@ -37,6 +38,7 @@ interface CursorExtra {
   nestedUrl: string | null;
   nestedIdx: number;
   nestedFailed: string[];
+  drain?: string[];
   depthCap?: boolean;
 }
 
@@ -45,6 +47,7 @@ const emptyExtra = (): CursorExtra => ({
   nestedUrl: null,
   nestedIdx: 0,
   nestedFailed: [],
+  drain: [],
   depthCap: false,
 });
 
@@ -54,6 +57,7 @@ export function encodeDurableSitemapCursor(c: DurableSitemapCursor): string {
     nestedUrl: c.nestedUrl,
     nestedIdx: c.nestedNextSubIndex,
     nestedFailed: c.nestedFailed,
+    drain: c.drainSubs ?? [],
     depthCap: c.depthCapHit === true,
   };
   return [
@@ -76,6 +80,7 @@ function readExtra(raw: string | undefined): CursorExtra {
       nestedUrl: parsed.nestedUrl ?? null,
       nestedIdx: Number.isFinite(parsed.nestedIdx) ? parsed.nestedIdx : 0,
       nestedFailed: Array.isArray(parsed.nestedFailed) ? parsed.nestedFailed : [],
+      drain: Array.isArray(parsed.drain) ? parsed.drain : [],
       depthCap: parsed.depthCap === true,
     };
   } catch {
@@ -106,6 +111,7 @@ export function parseDurableSitemapCursor(raw: string | null | undefined): Durab
       nestedUrl: extra.nestedUrl,
       nestedNextSubIndex: extra.nestedIdx,
       nestedFailed: extra.nestedFailed,
+      drainSubs: extra.drain ?? [],
       depthCapHit: extra.depthCap === true,
     };
   }
@@ -122,6 +128,7 @@ export function parseDurableSitemapCursor(raw: string | null | undefined): Durab
       nestedUrl: null,
       nestedNextSubIndex: 0,
       nestedFailed: [],
+      drainSubs: [],
       depthCapHit: false,
     };
   }
@@ -237,7 +244,9 @@ export async function paginateSitemap(opts: {
   let nestedIdx = parsedCursor?.nestedNextSubIndex ?? 0;
   let nestedFailed = [...(parsedCursor?.nestedFailed ?? [])];
   let nextSubIndex = parsedCursor?.nextSubIndex ?? 0;
+  let drainSubs = [...(parsedCursor?.drainSubs ?? [])];
   let depthCapHit = parsedCursor?.depthCapHit === true;
+  let drainFetchFailed = false;
 
   const fetchParsed = async (url: string): Promise<{ items: RawItem[]; subs: string[] } | 'FAILED'> => {
     try {
@@ -248,25 +257,48 @@ export async function paginateSitemap(opts: {
     }
   };
 
+  type LevelResult = {
+    items: RawItem[];
+    failed: string[];
+    nextIdx: number;
+    complete: boolean;
+    depthCap: boolean;
+    drained: string[];
+  };
+
   const processLevel = async (
     indexUrl: string,
     startIdx: number,
     priorFailed: string[],
     depth: number,
-  ): Promise<{ items: RawItem[]; failed: string[]; nextIdx: number; complete: boolean; depthCap: boolean }> => {
+    chargeBudget: boolean,
+  ): Promise<LevelResult> => {
     if (depth >= maxDepth) {
-      return { items: [], failed: [indexUrl], nextIdx: startIdx, complete: false, depthCap: true };
+      return { items: [], failed: [indexUrl], nextIdx: startIdx, complete: false, depthCap: true, drained: [] };
     }
     const parsed = await fetchParsed(indexUrl);
     if (parsed === 'FAILED') {
-      return { items: [], failed: [indexUrl], nextIdx: startIdx, complete: false, depthCap: false };
+      return { items: [], failed: [indexUrl], nextIdx: startIdx, complete: false, depthCap: false, drained: [] };
+    }
+    if (parsed.subs.length === 0) {
+      return {
+        items: parsed.items,
+        failed: [],
+        nextIdx: startIdx,
+        complete: true,
+        depthCap: false,
+        drained: parsed.items.length ? [indexUrl] : [],
+      };
     }
     const items: RawItem[] = [...parsed.items];
     const failed: string[] = [];
+    const drained: string[] = [];
     let depthCap = false;
     const take = async (url: string): Promise<'ok' | 'fail' | 'cap'> => {
-      if (budget <= 0) return 'fail';
-      budget -= 1;
+      if (chargeBudget) {
+        if (budget <= 0) return 'fail';
+        budget -= 1;
+      }
       const got = await fetchParsed(url);
       if (got === 'FAILED') return 'fail';
       if (got.subs.length > 0 && got.items.length === 0) {
@@ -274,8 +306,9 @@ export async function paginateSitemap(opts: {
           depthCap = true;
           return 'cap';
         }
-        const nested = await processLevel(url, 0, [], depth + 1);
+        const nested = await processLevel(url, 0, [], depth + 1, chargeBudget);
         items.push(...nested.items);
+        drained.push(...nested.drained);
         if (nested.failed.length || !nested.complete) {
           failed.push(...nested.failed);
           if (!nested.complete && nested.failed.length === 0 && nested.depthCap) depthCap = true;
@@ -283,10 +316,11 @@ export async function paginateSitemap(opts: {
         return nested.complete && nested.failed.length === 0 ? 'ok' : 'fail';
       }
       items.push(...got.items);
+      drained.push(url);
       return 'ok';
     };
     for (const f of priorFailed) {
-      if (budget <= 0) {
+      if (chargeBudget && budget <= 0) {
         failed.push(f);
         continue;
       }
@@ -294,7 +328,7 @@ export async function paginateSitemap(opts: {
       if (status !== 'ok') failed.push(f);
     }
     let i = startIdx;
-    while (i < parsed.subs.length && budget > 0) {
+    while (i < parsed.subs.length && (!chargeBudget || budget > 0)) {
       const status = await take(parsed.subs[i]!);
       if (status === 'fail') failed.push(parsed.subs[i]!);
       i += 1;
@@ -305,12 +339,47 @@ export async function paginateSitemap(opts: {
       nextIdx: i,
       complete: i >= parsed.subs.length && failed.length === 0 && !depthCap,
       depthCap,
+      drained,
     };
   };
 
-  if (nestedUrl) {
-    const nested = await processLevel(nestedUrl, nestedIdx, nestedFailed, 1);
+  const remainingAfterCursor = (): number => {
+    if (!parsedCursor?.afterUrl) return collected.length;
+    const idx = collected.findIndex((it) => it.url === parsedCursor.afterUrl);
+    if (idx < 0) return collected.length;
+    return Math.max(0, collected.length - (idx + 1));
+  };
+
+  const reconstructDrain = async (): Promise<void> => {
+    const rebuilt: string[] = [];
+    for (const url of drainSubs) {
+      const got = await fetchParsed(url);
+      if (got === 'FAILED') {
+        drainFetchFailed = true;
+        if (!failedSubs.includes(url)) failedSubs.push(url);
+        continue;
+      }
+      if (got.subs.length > 0 && got.items.length === 0) {
+        const nested = await processLevel(url, 0, [], 1, false);
+        collected.push(...nested.items);
+        rebuilt.push(...(nested.drained.length ? nested.drained : [url]));
+        depthCapHit = depthCapHit || nested.depthCap;
+        continue;
+      }
+      collected.push(...got.items);
+      rebuilt.push(url);
+    }
+    drainSubs = rebuilt;
+  };
+
+  await reconstructDrain();
+
+  const canFetchMore = (): boolean => remainingAfterCursor() < pageSize && budget > 0;
+
+  if (nestedUrl && canFetchMore()) {
+    const nested = await processLevel(nestedUrl, nestedIdx, nestedFailed, 1, true);
     collected.push(...nested.items);
+    drainSubs.push(...nested.drained);
     nestedFailed = nested.failed;
     nestedIdx = nested.nextIdx;
     depthCapHit = nested.depthCap;
@@ -323,16 +392,17 @@ export async function paginateSitemap(opts: {
 
   const stillFailed: string[] = [];
   for (const f of failedSubs) {
-    if (budget <= 0) {
+    if (!canFetchMore()) {
       stillFailed.push(f);
       continue;
     }
-    const nested = await processLevel(f, 0, [], 1);
+    const nested = await processLevel(f, 0, [], 1, true);
     if (nested.failed.includes(f) && nested.items.length === 0 && nested.nextIdx === 0 && !nested.complete) {
       stillFailed.push(f);
       continue;
     }
     collected.push(...nested.items);
+    drainSubs.push(...nested.drained);
     if (!nested.complete) {
       if (nested.failed.length === 1 && nested.failed[0] === f && nested.items.length === 0) {
         stillFailed.push(f);
@@ -346,7 +416,7 @@ export async function paginateSitemap(opts: {
   }
   failedSubs = stillFailed;
 
-  while (nextSubIndex < root.subSitemaps.length && budget > 0 && !nestedUrl) {
+  while (nextSubIndex < root.subSitemaps.length && canFetchMore() && !nestedUrl) {
     const sub = root.subSitemaps[nextSubIndex]!;
     budget -= 1;
     const got = await fetchParsed(sub);
@@ -362,8 +432,9 @@ export async function paginateSitemap(opts: {
         nextSubIndex += 1;
         continue;
       }
-      const nested = await processLevel(sub, 0, [], 1);
+      const nested = await processLevel(sub, 0, [], 1, true);
       collected.push(...nested.items);
+      drainSubs.push(...nested.drained);
       nextSubIndex += 1;
       depthCapHit = depthCapHit || nested.depthCap;
       if (!nested.complete) {
@@ -378,29 +449,39 @@ export async function paginateSitemap(opts: {
       continue;
     }
     collected.push(...got.items);
+    drainSubs.push(sub);
     nextSubIndex += 1;
   }
 
   const unvisited = Math.max(0, root.subSitemaps.length - nextSubIndex);
   const pending = unvisited + failedSubs.length + (nestedUrl ? 1 : 0);
-  const exhausted = pending === 0 && !depthCapHit;
   const pageCursor = withDefaults(parsedCursor, {
     root: opts.rootUrl,
     kind: 'index',
     afterUrl: parsedCursor?.afterUrl ?? null,
-    offset: parsedCursor?.kind === 'index' ? parsedCursor.offset : 0,
+    offset: 0,
     nextSubIndex,
     failedSubs,
     nestedUrl,
     nestedNextSubIndex: nestedIdx,
     nestedFailed,
+    drainSubs,
     depthCapHit,
   });
+  const resumePage = Boolean(parsedCursor?.afterUrl || (parsedCursor?.drainSubs?.length ?? 0) > 0);
   const paged = pageFromItems(
     collected,
-    parsedCursor?.kind === 'index' && parsedCursor.afterUrl ? parsedCursor : { ...pageCursor, afterUrl: null, offset: 0 },
+    resumePage ? parsedCursor : { ...pageCursor, afterUrl: null, offset: 0 },
     pageSize,
   );
+  if (paged.notFound && drainFetchFailed) {
+    return failResult({
+      resumedFrom: opts.cursor ?? null,
+      nextCursor: opts.cursor ?? null,
+      pendingSubs: pending,
+      subsFallidos: failedSubs.length,
+    });
+  }
   if (paged.notFound) {
     return failResult({
       resumedFrom: opts.cursor ?? null,
@@ -411,15 +492,13 @@ export async function paginateSitemap(opts: {
   }
   const moreInBatch = paged.start + paged.items.length < collected.length;
   const last = paged.items[paged.items.length - 1];
-  const reallyExhausted = exhausted && !moreInBatch;
+  const reallyExhausted = pending === 0 && !depthCapHit && !moreInBatch;
   const next: DurableSitemapCursor = {
     ...pageCursor,
     afterUrl: moreInBatch ? last?.url ?? null : null,
     offset: moreInBatch ? paged.start + paged.items.length : 0,
+    drainSubs: moreInBatch ? drainSubs : [],
   };
-  const surfaceResult: SurfaceAttemptResult = reallyExhausted
-    ? 'EXHAUSTED'
-    : 'PARTIAL';
   return {
     items: paged.items,
     nextCursor: reallyExhausted ? null : encodeDurableSitemapCursor(next),
@@ -430,7 +509,7 @@ export async function paginateSitemap(opts: {
     pendingSubs: pending + (moreInBatch ? 1 : 0),
     subsFallidos: failedSubs.length + nestedFailed.length,
     truncated: unvisited > 0 || moreInBatch || depthCapHit,
-    surfaceResult,
+    surfaceResult: reallyExhausted ? 'EXHAUSTED' : 'PARTIAL',
     resumedFrom: opts.cursor ?? null,
     depthCapHit,
   };
@@ -451,6 +530,7 @@ function withDefaults(
     nestedUrl: over.nestedUrl ?? cursor?.nestedUrl ?? null,
     nestedNextSubIndex: over.nestedNextSubIndex ?? cursor?.nestedNextSubIndex ?? 0,
     nestedFailed: over.nestedFailed ?? cursor?.nestedFailed ?? [],
+    drainSubs: over.drainSubs ?? cursor?.drainSubs ?? [],
     depthCapHit: over.depthCapHit ?? cursor?.depthCapHit ?? false,
   };
 }
